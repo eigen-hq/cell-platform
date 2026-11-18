@@ -1,0 +1,29 @@
+# Build
+/bin/
+/dist/
+*.test
+*.out
+coverage.*
+
+# Go
+/vendor/
+
+# Secrets und lokale Konfiguration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+kubeconfig
+*.kubeconfig
+secrets/
+
+# Lokale Zelle
+.cell/
+tmp/
+
+# Editor und Betriebssystem
+.DS_Store
+.idea/
+.vscode/
+*.swp
