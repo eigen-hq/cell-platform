@@ -4,8 +4,8 @@ Erste Ausbaustufe der Plattform. Jeder Meilenstein endet mit etwas Vorführbarem
 
 ## Stand
 
-- Aktueller Meilenstein: **M4**
-- Abgeschlossen: M0, M1, M2, M3 (19.11.2026)
+- Aktueller Meilenstein: **M5**
+- Abgeschlossen: M0, M1, M2, M3, M4 (19.11.2026)
 
 ## Ziel-Demo
 
@@ -139,6 +139,18 @@ Akzeptanz:
 - Jeder Agenten-Schritt steht im Änderungsprotokoll
 
 Zu klären vor M4: Agenten-Laufzeit (O-01).
+
+Ergebnis (19.11.2026): Agenten-Dienst `cell-agent` mit eigenem Konto (E-32), Modell und Schlüssel des Kunden (E-33), Aufgaben als Ressource `Task` mit Schritten (E-34), Installieren aus einem Manifest mit Prüfung durch einen Probelauf (E-35). Paketiert werden Compose-Dateien; Helm-Charts sind O-15.
+
+| Prüfung | Wie | Ergebnis |
+|---|---|---|
+| Szenario A | `make e2e`, `TestAgentRepairsApp`: falscher Wert (`WHOAMI_PORT_NUMBER=8080`) an der Plattform vorbei gesetzt, der Operator legt eine Diagnose-Aufgabe an, der Agent liest App, Pods und Logs über die API, findet die Ursache im Log und schlägt die Reparatur vor; nach Freigabe ist die App gesund | bestanden |
+| Szenario B | `make e2e`, `TestAgentPackagesApp`: Memos aus seiner Compose-Datei; der erste Vorschlag mit einer Subdomain der Zelle wird vom Probelauf abgewiesen, der korrigierte nach Freigabe ohne Nacharbeit installiert | bestanden |
+| Jeder Schritt im Protokoll | `make e2e` und `make test`: jeder Aufruf des Agenten steht als Schritt in seiner Aufgabe, auch bei parallelen Aufrufen; ohne Aufgabe oder in fremden Aufgaben weist die API ab; Vorschläge tragen ihre Aufgabe | bestanden |
+| API legt keine Apps an | `make e2e`, `TestAPICannotCreateApps`: das Konto der API darf Apps nur im Probelauf anlegen (ValidatingAdmissionPolicy) | bestanden |
+| Agent | `make test`: Diagnose und Paketierung mit einem geskripteten Modell (Fake der Messages-API), verlorene Aufgaben (Neustart, verlorene Antwort beim Übernehmen oder Beenden), Modell nicht erreichbar; eine Diagnose je Ursache, auch nach gescheiterter Wiederherstellung | bestanden |
+
+Das Modell ist in den Tests geskriptet: geprüft ist alles um das Modell herum (Werkzeuge, Rechte, Protokoll, Probelauf, Installation), nicht die Qualität der Diagnose. Ein Lauf mit echtem Modell braucht einen Schlüssel (O-16).
 
 ### M5 – MCP-Gateway v0
 

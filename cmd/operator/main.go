@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	cellv1 "github.com/marcelheidebrecht/cell-platform/api/v1alpha1"
@@ -51,17 +53,35 @@ func run() error {
 	if token == "" {
 		return fmt.Errorf("AUTHENTIK_TOKEN is not set")
 	}
+	identity := &authentik.Client{
+		BaseURL: env("AUTHENTIK_URL", "http://authentik-server.cell-system.svc.cluster.local"),
+		Token:   token,
+		HTTP:    &http.Client{Timeout: 20 * time.Second},
+	}
 	r := &controller.AppReconciler{
-		Client: mgr.GetClient(),
-		Identity: &authentik.Client{
-			BaseURL: env("AUTHENTIK_URL", "http://authentik-server.cell-system.svc.cluster.local"),
-			Token:   token,
-			HTTP:    &http.Client{Timeout: 20 * time.Second},
-		},
+		Client:      mgr.GetClient(),
+		Identity:    identity,
 		SystemCAs:   systemCAs,
 		BridgeImage: os.Getenv("BRIDGE_IMAGE"),
 	}
 	if err := r.SetupWithManager(mgr); err != nil {
+		return err
+	}
+	// The ops agent's account; the identity may still be starting.
+	if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		for {
+			err := controller.EnsureAgentAccount(ctx, mgr.GetClient(), identity)
+			if err == nil {
+				return nil
+			}
+			ctrl.Log.Info("waiting to set up the agent's account", "error", err.Error())
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(10 * time.Second):
+			}
+		}
+	})); err != nil {
 		return err
 	}
 	restic := os.Getenv("RESTIC_IMAGE")

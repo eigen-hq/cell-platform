@@ -18,6 +18,10 @@
 #                      password encrypts the backups; keep it outside the cell,
 #                      a restore into a new cell needs it.
 #   CELL_BACKUP_S3_PREFIX  path in the bucket (default: CELL_DOMAIN)
+#   CELL_LLM_API_KEY   the customer's model key for the ops agent (optional;
+#                      without it, agent tasks wait). Kept as Secret
+#                      cell-agent-llm; unsetting it later leaves the Secret.
+#   CELL_AGENT_MODEL   model of the ops agent (default: claude-opus-5-5)
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=versions.env
@@ -171,4 +175,17 @@ log "platform API https://api.$CELL_DOMAIN"
 apply change-approval.yaml
 apply api.yaml
 kubectl -n cell-system rollout status deploy/cell-api --timeout=5m >/dev/null
+
+log "ops agent"
+llm=unchanged
+if [ -n "${CELL_LLM_API_KEY:-}" ]; then
+  llm_args=(apiKey="$CELL_LLM_API_KEY")
+  [ -n "${CELL_AGENT_MODEL:-}" ] && llm_args+=(model="$CELL_AGENT_MODEL")
+  llm=$(secret_manifest cell-system cell-agent-llm Opaque "${llm_args[@]}" | kubectl apply -f -)
+fi
+apply agent.yaml
+# The key is read at start: a new one needs a restart.
+case $llm in *unchanged*) ;; *) kubectl -n cell-system rollout restart deploy/cell-agent >/dev/null ;; esac
+# Up only once the operator created the agent's account (Secret cell-agent).
+kubectl -n cell-system rollout status deploy/cell-agent --timeout=5m >/dev/null
 log "cell ready"

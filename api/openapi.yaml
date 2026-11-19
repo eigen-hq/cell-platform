@@ -19,6 +19,13 @@ info:
     everything, members of `cell-agents` read everything and propose
     changes, every other user reads the catalog, the apps and the change
     log.
+
+    Agents work in tasks (`/v0/tasks`). Except for finding, claiming and
+    finishing tasks, every call of an agent names the task it belongs to in
+    the header `X-Cell-Task`; the API records the call as a step of the
+    task before it serves it, and changes the agent proposes name the task.
+    A call outside a running task of the agent is refused (400, 404, 409);
+    that is why every operation can answer with an error.
 servers:
   - url: https://api.cell.localhost
 security:
@@ -40,12 +47,14 @@ paths:
     get:
       operationId: whoami
       responses:
+        default: {$ref: "#/components/responses/Error"}
         "200": {description: The caller., content: {application/json: {schema: {$ref: "#/components/schemas/Caller"}}}}
         "401": {$ref: "#/components/responses/Error"}
   /v0/catalog:
     get:
       operationId: listCatalog
       responses:
+        default: {$ref: "#/components/responses/Error"}
         "200":
           description: Apps that can be installed.
           content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/CatalogEntry"}}}}
@@ -55,6 +64,7 @@ paths:
     get:
       operationId: getCatalogEntry
       responses:
+        default: {$ref: "#/components/responses/Error"}
         "200":
           description: A catalog entry with its manifest.
           content: {application/json: {schema: {$ref: "#/components/schemas/CatalogEntry"}}}
@@ -64,17 +74,26 @@ paths:
     get:
       operationId: listApps
       responses:
+        default: {$ref: "#/components/responses/Error"}
         "200":
           description: Installed apps.
           content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/App"}}}}
         "401": {$ref: "#/components/responses/Error"}
     post:
       operationId: installApp
-      description: Proposes to install an app from the catalog. 409 if the name or the subdomain is taken. Data an earlier installation of the name left behind goes to the new app; such a change is high risk and says so.
+      description: |
+        Proposes to install an app from the catalog or from a manifest (an
+        agent packaged it). The cluster checks the app against its schema
+        and rules first (dry run), so a wrong manifest is refused with 400
+        now, not after approval. An install from a manifest is high risk. 409
+        if the name or the subdomain is taken. Data an earlier installation
+        of the name left behind goes to the new app; such a change is high
+        risk and says so.
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: "#/components/schemas/InstallRequest"}}}
       responses:
+        default: {$ref: "#/components/responses/Error"}
         "202": {$ref: "#/components/responses/Change"}
         "400": {$ref: "#/components/responses/Error"}
         "401": {$ref: "#/components/responses/Error"}
@@ -86,6 +105,7 @@ paths:
     get:
       operationId: getApp
       responses:
+        default: {$ref: "#/components/responses/Error"}
         "200": {description: The app., content: {application/json: {schema: {$ref: "#/components/schemas/App"}}}}
         "401": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
@@ -100,6 +120,7 @@ paths:
         required: true
         content: {application/json: {schema: {$ref: "#/components/schemas/UpdateRequest"}}}
       responses:
+        default: {$ref: "#/components/responses/Error"}
         "202": {$ref: "#/components/responses/Change"}
         "400": {$ref: "#/components/responses/Error"}
         "401": {$ref: "#/components/responses/Error"}
@@ -116,6 +137,7 @@ paths:
         - {name: deleteData, in: query, schema: {type: boolean, default: false}}
         - {name: reason, in: query, schema: {type: string}}
       responses:
+        default: {$ref: "#/components/responses/Error"}
         "202": {$ref: "#/components/responses/Change"}
         "400": {$ref: "#/components/responses/Error"}
         "401": {$ref: "#/components/responses/Error"}
@@ -126,6 +148,7 @@ paths:
     get:
       operationId: listBackups
       responses:
+        default: {$ref: "#/components/responses/Error"}
         "200":
           description: Backups of the app, newest first.
           content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/Backup"}}}}
@@ -135,6 +158,7 @@ paths:
       operationId: createBackup
       description: Starts a backup now (admins; it changes nothing, so it needs no approval).
       responses:
+        default: {$ref: "#/components/responses/Error"}
         "201": {description: Backup started., content: {application/json: {schema: {$ref: "#/components/schemas/Backup"}}}}
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
@@ -149,6 +173,7 @@ paths:
         required: true
         content: {application/json: {schema: {$ref: "#/components/schemas/RestoreRequest"}}}
       responses:
+        default: {$ref: "#/components/responses/Error"}
         "202": {$ref: "#/components/responses/Change"}
         "400": {$ref: "#/components/responses/Error"}
         "401": {$ref: "#/components/responses/Error"}
@@ -159,6 +184,7 @@ paths:
     get:
       operationId: getAccess
       responses:
+        default: {$ref: "#/components/responses/Error"}
         "200": {description: Who may use the app., content: {application/json: {schema: {$ref: "#/components/schemas/Access"}}}}
         "401": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
@@ -169,6 +195,7 @@ paths:
         required: true
         content: {application/json: {schema: {$ref: "#/components/schemas/Access"}}}
       responses:
+        default: {$ref: "#/components/responses/Error"}
         "202": {$ref: "#/components/responses/Change"}
         "400": {$ref: "#/components/responses/Error"}
         "401": {$ref: "#/components/responses/Error"}
@@ -178,6 +205,7 @@ paths:
     get:
       operationId: listUsers
       responses:
+        default: {$ref: "#/components/responses/Error"}
         "200":
           description: People and agent accounts.
           content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/User"}}}}
@@ -189,6 +217,7 @@ paths:
         required: true
         content: {application/json: {schema: {$ref: "#/components/schemas/UserRequest"}}}
       responses:
+        default: {$ref: "#/components/responses/Error"}
         "201": {description: Created., content: {application/json: {schema: {$ref: "#/components/schemas/User"}}}}
         "400": {$ref: "#/components/responses/Error"}
         "401": {$ref: "#/components/responses/Error"}
@@ -200,6 +229,7 @@ paths:
       operationId: createUserToken
       description: Creates an app password for API logins; it is shown only in this answer.
       responses:
+        default: {$ref: "#/components/responses/Error"}
         "201": {description: Created., content: {application/json: {schema: {$ref: "#/components/schemas/Token"}}}}
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
@@ -208,6 +238,7 @@ paths:
     get:
       operationId: listGroups
       responses:
+        default: {$ref: "#/components/responses/Error"}
         "200":
           description: Groups with their members.
           content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/Group"}}}}
@@ -219,6 +250,7 @@ paths:
         required: true
         content: {application/json: {schema: {$ref: "#/components/schemas/GroupRequest"}}}
       responses:
+        default: {$ref: "#/components/responses/Error"}
         "201": {description: Created., content: {application/json: {schema: {$ref: "#/components/schemas/Group"}}}}
         "400": {$ref: "#/components/responses/Error"}
         "401": {$ref: "#/components/responses/Error"}
@@ -232,17 +264,130 @@ paths:
         required: true
         content: {application/json: {schema: {$ref: "#/components/schemas/Members"}}}
       responses:
+        default: {$ref: "#/components/responses/Error"}
         "200": {description: The group., content: {application/json: {schema: {$ref: "#/components/schemas/Group"}}}}
         "400": {$ref: "#/components/responses/Error"}
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
+  /v0/apps/{name}/pods:
+    parameters: [{$ref: "#/components/parameters/name"}]
+    get:
+      operationId: listPods
+      description: The app's pods, newest first, with container states, restarts and last exit.
+      responses:
+        default: {$ref: "#/components/responses/Error"}
+        "200":
+          description: Pods.
+          content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/Pod"}}}}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+  /v0/apps/{name}/logs:
+    parameters: [{$ref: "#/components/parameters/name"}]
+    get:
+      operationId: appLogs
+      description: The end of a container's log, at most 512 KiB.
+      parameters:
+        - {name: pod, in: query, description: "Default: the app's newest pod.", schema: {type: string}}
+        - {name: container, in: query, description: "Default: the pod's first container.", schema: {type: string}}
+        - {name: tail, in: query, schema: {type: integer, minimum: 1, maximum: 5000, default: 200}}
+        - {name: previous, in: query, description: The container's previous run (after a crash)., schema: {type: boolean, default: false}}
+      responses:
+        default: {$ref: "#/components/responses/Error"}
+        "200":
+          description: Log lines; the header X-Cell-Pod names the pod.
+          content: {text/plain: {schema: {type: string}}}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+  /v0/apps/{name}/events:
+    parameters: [{$ref: "#/components/parameters/name"}]
+    get:
+      operationId: appEvents
+      description: The newest Kubernetes events (at most 100) in the app's namespace.
+      responses:
+        default: {$ref: "#/components/responses/Error"}
+        "200":
+          description: Events, newest first.
+          content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/AppEvent"}}}}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+  /v0/tasks:
+    get:
+      operationId: listTasks
+      parameters:
+        - {name: app, in: query, schema: {type: string}}
+        - {name: phase, in: query, schema: {type: string, enum: [Pending, Running, Succeeded, Failed]}}
+      responses:
+        default: {$ref: "#/components/responses/Error"}
+        "200":
+          description: Tasks, newest first.
+          content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/Task"}}}}
+        "401": {$ref: "#/components/responses/Error"}
+    post:
+      operationId: createTask
+      description: |
+        Asks an agent for work: diagnose an installed app, or package a
+        Compose file as a new app. The operator creates diagnose tasks by
+        itself when an app needs attention.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/TaskRequest"}}}
+      responses:
+        default: {$ref: "#/components/responses/Error"}
+        "201": {description: The task., content: {application/json: {schema: {$ref: "#/components/schemas/Task"}}}}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /v0/tasks/{name}:
+    parameters: [{$ref: "#/components/parameters/task"}]
+    get:
+      operationId: getTask
+      responses:
+        default: {$ref: "#/components/responses/Error"}
+        "200": {description: The task with the changes proposed in it., content: {application/json: {schema: {$ref: "#/components/schemas/Task"}}}}
+        "401": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+  /v0/tasks/{name}/claim:
+    parameters: [{$ref: "#/components/parameters/task"}]
+    post:
+      operationId: claimTask
+      description: An agent takes a pending task; 409 if it is not pending (any more).
+      responses:
+        default: {$ref: "#/components/responses/Error"}
+        "200": {description: The task., content: {application/json: {schema: {$ref: "#/components/schemas/Task"}}}}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /v0/tasks/{name}/finish:
+    parameters: [{$ref: "#/components/parameters/task"}]
+    post:
+      operationId: finishTask
+      description: The agent that works on the task ends it with its answer.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/TaskResult"}}}
+      responses:
+        default: {$ref: "#/components/responses/Error"}
+        "200": {description: The task., content: {application/json: {schema: {$ref: "#/components/schemas/Task"}}}}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
   /v0/changes:
     get:
       operationId: listChanges
       parameters:
         - {name: app, in: query, schema: {type: string}}
       responses:
+        default: {$ref: "#/components/responses/Error"}
         "200":
           description: The change log, newest first.
           content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/ChangeRequest"}}}}
@@ -252,6 +397,7 @@ paths:
     get:
       operationId: getChange
       responses:
+        default: {$ref: "#/components/responses/Error"}
         "200": {description: The change., content: {application/json: {schema: {$ref: "#/components/schemas/ChangeRequest"}}}}
         "401": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
@@ -260,6 +406,7 @@ paths:
     post:
       operationId: approveChange
       responses:
+        default: {$ref: "#/components/responses/Error"}
         "200": {description: The change., content: {application/json: {schema: {$ref: "#/components/schemas/ChangeRequest"}}}}
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
@@ -270,6 +417,7 @@ paths:
     post:
       operationId: rejectChange
       responses:
+        default: {$ref: "#/components/responses/Error"}
         "200": {description: The change., content: {application/json: {schema: {$ref: "#/components/schemas/ChangeRequest"}}}}
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
@@ -283,6 +431,7 @@ paths:
         restore or change request. The stream ends when a watch ends;
         reconnect and read the current state again.
       responses:
+        default: {$ref: "#/components/responses/Error"}
         "200": {description: Event stream., content: {text/event-stream: {schema: {type: string}}}}
         "401": {$ref: "#/components/responses/Error"}
 components:
@@ -295,6 +444,11 @@ components:
       required: true
       schema: {type: string, pattern: "^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$", maxLength: 63}
     change:
+      name: name
+      in: path
+      required: true
+      schema: {type: string, maxLength: 253}
+    task:
       name: name
       in: path
       required: true
@@ -370,10 +524,11 @@ components:
     InstallRequest:
       type: object
       additionalProperties: false
-      required: [catalog]
+      description: Exactly one of catalog and manifest.
       properties:
         catalog: {type: string, description: Catalog entry to install.}
-        name: {type: string, description: "Name of the app (default: the catalog name)."}
+        manifest: {type: object, additionalProperties: true, description: An app manifest (App spec) that is not in the catalog.}
+        name: {type: string, description: "Name of the app (default: the catalog name; required with a manifest)."}
         subdomain: {type: string}
         groups: {type: array, items: {type: string}, description: Groups who may use the app (empty means everyone).}
         reason: {type: string}
@@ -436,6 +591,7 @@ components:
         finishedAt: {type: string, format: date-time, nullable: true}
         backup: {type: string, description: "Backup taken before the change, or none."}
         restore: {type: string, description: Restore used for a rollback or restore.}
+        task: {type: string, description: Task an agent proposed the change in.}
     Backup:
       type: object
       additionalProperties: false
@@ -503,3 +659,96 @@ components:
         app: {type: string}
         phase: {type: string}
         message: {type: string}
+    Pod:
+      type: object
+      additionalProperties: false
+      required: [name, phase, createdAt, containers]
+      properties:
+        name: {type: string}
+        phase: {type: string}
+        reason: {type: string}
+        message: {type: string}
+        createdAt: {type: string, format: date-time}
+        containers:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, image, ready, restarts, state, lastExit]
+            properties:
+              name: {type: string}
+              image: {type: string}
+              ready: {type: boolean}
+              restarts: {type: integer}
+              state: {type: string, enum: ["", running, waiting, terminated]}
+              reason: {type: string}
+              message: {type: string}
+              lastExit:
+                type: object
+                nullable: true
+                additionalProperties: false
+                required: [reason, exitCode, at]
+                properties:
+                  reason: {type: string}
+                  exitCode: {type: integer}
+                  message: {type: string}
+                  at: {type: string, format: date-time}
+    AppEvent:
+      type: object
+      additionalProperties: false
+      required: [type, reason, object, message, count, last]
+      properties:
+        type: {type: string}
+        reason: {type: string}
+        object: {type: string, description: Kind/name of the object the event is about.}
+        message: {type: string}
+        count: {type: integer}
+        last: {type: string, format: date-time}
+    Task:
+      type: object
+      additionalProperties: false
+      required: [name, kind, app, input, requester, phase, assignee, createdAt, startedAt, finishedAt, result, steps]
+      properties:
+        name: {type: string}
+        kind: {type: string, enum: [diagnose, package]}
+        app: {type: string}
+        input: {type: string, description: "What the operator saw (diagnose) or the Compose file (package)."}
+        requester:
+          type: object
+          additionalProperties: false
+          required: [kind, name]
+          properties:
+            kind: {type: string, enum: [Human, Agent, Operator]}
+            name: {type: string}
+        phase: {type: string, enum: [Pending, Running, Succeeded, Failed]}
+        assignee: {type: string}
+        createdAt: {type: string, format: date-time}
+        startedAt: {type: string, format: date-time, nullable: true}
+        finishedAt: {type: string, format: date-time, nullable: true}
+        result: {type: string, description: "The agent's answer: the cause and what it proposed, or why it could not."}
+        steps:
+          type: array
+          description: The agent's API calls in the task, recorded before they were served.
+          items:
+            type: object
+            additionalProperties: false
+            required: [at, call]
+            properties:
+              at: {type: string, format: date-time}
+              call: {type: string}
+        changes: {type: array, items: {type: string}, description: Changes proposed in the task (single task only).}
+    TaskRequest:
+      type: object
+      additionalProperties: false
+      required: [kind, app]
+      properties:
+        kind: {type: string, enum: [diagnose, package]}
+        app: {type: string, description: "The app to diagnose, or the name of the app to package."}
+        input: {type: string, description: "package: the Compose file."}
+    TaskResult:
+      type: object
+      additionalProperties: false
+      required: [result]
+      properties:
+        result: {type: string}
+        failed: {type: boolean, default: false}

@@ -165,6 +165,7 @@ type ChangeRequest struct {
 // +kubebuilder:validation:XValidation:rule="self.action == 'restore' || !has(self.backup)",message="backup is only for action restore"
 // +kubebuilder:validation:XValidation:rule="self.action != 'restore' || (has(self.backup) && size(self.backup) > 0 && self.backup != 'latest')",message="restore needs the name of a backup"
 // +kubebuilder:validation:XValidation:rule="self.action == 'remove' || !has(self.deleteData) || !self.deleteData",message="deleteData is only for action remove"
+// +kubebuilder:validation:XValidation:rule="has(self.task) == has(oldSelf.task) && (!has(self.task) || self.task == oldSelf.task)",message="task is immutable"
 type ChangeRequestSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="app is immutable"
 	App string `json:"app"`
@@ -181,7 +182,9 @@ type ChangeRequestSpec struct {
 	// the cell: volumes, database and secrets. Its backups stay.
 	DeleteData bool      `json:"deleteData,omitempty"`
 	Requester  Requester `json:"requester"`
-	Reason     string    `json:"reason,omitempty"`
+	// Task an agent proposed the change in (its steps lead up to it).
+	Task   string `json:"task,omitempty"`
+	Reason string `json:"reason,omitempty"`
 	// +kubebuilder:validation:Enum=low;medium;high
 	// +kubebuilder:default=medium
 	Risk string `json:"risk,omitempty"`

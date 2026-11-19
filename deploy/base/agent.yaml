@@ -1,0 +1,42 @@
+# The ops agent. It has no rights in the cluster (no service account
+# token): it works only through the platform API with its own account,
+# which the operator creates (Secret cell-agent). The model key is the
+# customer's (E-07), optional: without it tasks wait.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cell-agent
+  namespace: cell-system
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cell-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cell-agent
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: agent
+          image: ${OPERATOR_IMAGE}
+          imagePullPolicy: IfNotPresent
+          command: [/agent]
+          env:
+            - name: CELL_AGENT_USERNAME
+              valueFrom: {secretKeyRef: {name: cell-agent, key: username}}
+            - name: CELL_AGENT_PASSWORD
+              valueFrom: {secretKeyRef: {name: cell-agent, key: password}}
+            - name: ANTHROPIC_API_KEY
+              valueFrom: {secretKeyRef: {name: cell-agent-llm, key: apiKey, optional: true}}
+            - name: CELL_AGENT_MODEL
+              valueFrom: {secretKeyRef: {name: cell-agent-llm, key: model, optional: true}}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 128Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}

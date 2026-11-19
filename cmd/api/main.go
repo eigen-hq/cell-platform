@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -54,6 +55,10 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	clientset, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return err
+	}
 	token := os.Getenv("AUTHENTIK_TOKEN")
 	if token == "" {
 		return fmt.Errorf("AUTHENTIK_TOKEN is not set")
@@ -79,7 +84,7 @@ func run(log *slog.Logger) error {
 	srv := &http.Server{
 		Addr: ":8080",
 		Handler: (&cellapi.Server{
-			Kube: kube, Identity: identity, Authenticate: tokens.Check,
+			Kube: kube, Pods: clientset.CoreV1(), Identity: identity, Authenticate: tokens.Check,
 			Catalog: catalog.FS, OpenAPI: api.OpenAPI, Log: log,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,

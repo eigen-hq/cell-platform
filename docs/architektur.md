@@ -64,7 +64,7 @@ Eine Zelle ist eine VM mit k3s und allem, was ein Kunde braucht. Sie ist in sich
 | Backup | Tägliche Sicherung außerhalb der Zelle, Restore | Volume-Backups und Datenbank-Archiv in einen S3-Bucket |
 | Plattform-API | Einzige Tür für UI, CLI und Agenten | Eigenentwicklung, dünne Schicht über den Ressourcen |
 | MCP-Gateway | Ein Endpunkt für die Tools aller Apps, mit Rechteprüfung | agentgateway (Annahme) |
-| Ops-Agenten | Diagnose, Upgrades mit Migrationen, Paketierung | Eigenentwicklung, Laufzeit offen |
+| Ops-Agenten | Diagnose, Upgrades mit Migrationen, Paketierung | Eigenentwicklung in Go, Sprachmodell über den Schlüssel des Kunden (E-32, E-33) |
 
 ## Eigene Ressourcen
 
@@ -73,6 +73,7 @@ Alle in der API-Gruppe `cell.internal`.
 - **`App`**: eine installierte App. Die Spec ist das Manifest plus die Angaben des Kunden; der Status zeigt Phase, Version, URL und letztes Backup. Aufbau siehe `app-manifest.md`.
 - **`ChangeRequest`**: eine vorgeschlagene oder ausgeführte Änderung. Enthält Urheber (Mensch, Agent, Operator), Diff auf die `App`-Spec, Begründung, Risikostufe, Snapshot-Verweis und Ergebnis. Die Summe aller `ChangeRequest`s ist das Änderungsprotokoll.
 - **`Backup`** und **`Restore`**: eine Sicherung bzw. Wiederherstellung einer App.
+- **`Task`**: eine Aufgabe für einen Agenten (Diagnose oder Paketierung) mit jedem API-Aufruf des Agenten als Schritt und seiner Antwort. Zusammen mit den `ChangeRequest`s, die sie nennen, gehört sie zum Änderungsprotokoll (E-34).
 
 Der Katalog ist im MVP ein Ordner im Repo (`catalog/<app>/manifest.yaml`), keine eigene Ressource.
 
@@ -86,7 +87,7 @@ Der Katalog ist im MVP ein Ordner im Repo (`catalog/<app>/manifest.yaml`), keine
 
 **Absturz**
 
-Kubernetes startet die App neu. Bleibt sie über eine Schwelle hinaus ungesund, setzt der Operator `NeedsAttention`; das ruft den Ops-Agenten.
+Kubernetes startet die App neu. Bleibt sie über eine Schwelle hinaus ungesund, setzt der Operator `NeedsAttention` und legt eine Diagnose-Aufgabe für den Ops-Agenten an.
 
 **Update**
 
@@ -96,11 +97,11 @@ Kubernetes startet die App neu. Bleibt sie über eine Schwelle hinaus ungesund, 
 
 **Agenten-Eingriff**
 
-1. Auslöser: `NeedsAttention`, eine Anfrage aus der Oberfläche oder eine neu zu paketierende App.
-2. Der Agent liest Status, Logs und Ereignisse über die API.
-3. Er legt einen `ChangeRequest` mit Diff, Begründung und Risikostufe an.
-4. Nach Freigabe führt der Operator die Änderung wie ein Update aus.
-5. Der Agent prüft das Ergebnis und schreibt den Abschluss ins Protokoll.
+1. Auslöser: eine `Task`, angelegt vom Operator bei `NeedsAttention` oder von einem Admin (Diagnose, neu zu paketierende App).
+2. Der Agent übernimmt sie und liest Status, Pods, Logs und Ereignisse über die API; jeder Aufruf steht als Schritt in der Aufgabe.
+3. Er schlägt einen `ChangeRequest` mit Diff und Begründung vor; die Risikostufe setzt die API.
+4. Er beendet die Aufgabe mit seiner Antwort: Ursache, Belege, vorgeschlagene Änderung.
+5. Nach Freigabe führt der Operator die Änderung wie ein Update aus, mit Backup und Rollback.
 
 **Zugriff vergeben**
 
@@ -138,6 +139,8 @@ REST mit OpenAPI-Beschreibung (`api/openapi.yaml`), Anmeldung über Tokens der I
 | `/apps/{name}/access` | Wer darf die App nutzen |
 | `/users`, `/groups` | Organisationsstruktur |
 | `/changes` | Änderungsprotokoll, Freigeben und Ablehnen |
+| `/apps/{name}/pods`, `/logs`, `/events` | Diagnose (Admins und Agenten) |
+| `/tasks` | Aufgaben für Agenten mit ihren Schritten |
 | `/events` | Live-Ereignisse als Stream |
 
 Dazu der eine MCP-Endpunkt des Gateways für die Agenten in der Oberfläche.

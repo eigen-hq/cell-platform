@@ -137,6 +137,27 @@ func (c *Client) CreateUser(ctx context.Context, u User, password string) (User,
 	return u, nil
 }
 
+// EnsureServiceAccount creates a machine account if it is missing (no
+// password login; it logs in with app passwords) and adds it to groups.
+func (c *Client) EnsureServiceAccount(ctx context.Context, username string, groups ...string) error {
+	switch _, err := c.userPK(ctx, username); {
+	case errors.Is(err, ErrNotFound):
+		if err := c.do(ctx, http.MethodPost, "core/users/", map[string]any{
+			"username": username, "name": username, "type": "service_account", "is_active": true,
+		}, nil); err != nil {
+			return err
+		}
+	case err != nil:
+		return err
+	}
+	for _, g := range groups {
+		if err := c.EnsureGroup(ctx, g, username); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // CreateAppPassword creates a non-expiring app password for API logins
 // (client credentials grant) and returns its key.
 func (c *Client) CreateAppPassword(ctx context.Context, username string) (string, error) {

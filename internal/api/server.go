@@ -17,9 +17,11 @@ import (
 	"strings"
 	"time"
 
+	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/marcelheidebrecht/cell-platform/internal/authentik"
+	"github.com/marcelheidebrecht/cell-platform/internal/cell"
 )
 
 // Roles, from identity groups.
@@ -29,7 +31,7 @@ const (
 	RoleMember = "member"
 
 	GroupAdmins = "cell-admins"
-	GroupAgents = "cell-agents"
+	GroupAgents = cell.AgentGroup
 )
 
 var rank = map[string]int{RoleMember: 1, RoleAgent: 2, RoleAdmin: 3}
@@ -64,7 +66,9 @@ type Identity interface {
 }
 
 type Server struct {
-	Kube     client.WithWatch
+	Kube client.WithWatch
+	// Pods reads container logs (the controller-runtime client cannot).
+	Pods     corev1client.PodsGetter
 	Identity Identity
 	// Authenticate turns a bearer token into a caller.
 	Authenticate func(ctx context.Context, token string) (*Caller, error)
@@ -111,6 +115,14 @@ func (s *Server) routes() []route {
 		{"POST", "/v0/changes/{name}/approve", RoleAdmin, s.approveChange},
 		{"POST", "/v0/changes/{name}/reject", RoleAdmin, s.rejectChange},
 		{"GET", "/v0/events", RoleMember, s.events},
+		{"GET", "/v0/apps/{name}/pods", RoleAgent, s.listPods},
+		{"GET", "/v0/apps/{name}/logs", RoleAgent, s.appLogs},
+		{"GET", "/v0/apps/{name}/events", RoleAgent, s.appEvents},
+		{"GET", "/v0/tasks", RoleMember, s.listTasks},
+		{"POST", "/v0/tasks", RoleAdmin, s.createTask},
+		{"GET", "/v0/tasks/{name}", RoleMember, s.getTask},
+		{"POST", "/v0/tasks/{name}/claim", RoleAgent, s.claimTask},
+		{"POST", "/v0/tasks/{name}/finish", RoleAgent, s.finishTask},
 	}
 }
 
@@ -144,16 +156,28 @@ func (s *Server) wrap(rt route) http.HandlerFunc {
 				writeError(w, errorf(http.StatusForbidden, "needs role %s, you are %s", rt.role, c.Role))
 				return
 			}
+			if c.Role == RoleAgent && !taskFree[rt.method+" "+rt.path] {
+				ctx, err := s.inTask(r, c)
+				if err != nil {
+					s.fail(w, r, err)
+					return
+				}
+				r = r.WithContext(ctx)
+			}
 		}
 		if err := rt.handle(w, r, c); err != nil {
-			var apiErr *Error
-			if !errors.As(err, &apiErr) {
-				s.log().Error("request failed", "method", r.Method, "path", r.URL.Path, "error", err)
-				apiErr = errorf(http.StatusInternalServerError, "%v", err)
-			}
-			writeError(w, apiErr)
+			s.fail(w, r, err)
 		}
 	}
+}
+
+func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
+	var apiErr *Error
+	if !errors.As(err, &apiErr) {
+		s.log().Error("request failed", "method", r.Method, "path", r.URL.Path, "error", err)
+		apiErr = errorf(http.StatusInternalServerError, "%v", err)
+	}
+	writeError(w, apiErr)
 }
 
 func (s *Server) log() *slog.Logger {

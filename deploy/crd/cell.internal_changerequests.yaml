@@ -136,6 +136,10 @@ spec:
                 - medium
                 - high
                 type: string
+              task:
+                description: Task an agent proposed the change in (its steps lead
+                  up to it).
+                type: string
             required:
             - app
             - requester
@@ -160,6 +164,9 @@ spec:
                 > 0 && self.backup != 'latest')
             - message: deleteData is only for action remove
               rule: self.action == 'remove' || !has(self.deleteData) || !self.deleteData
+            - message: task is immutable
+              rule: has(self.task) == has(oldSelf.task) && (!has(self.task) || self.task
+                == oldSelf.task)
           status:
             properties:
               appUID:

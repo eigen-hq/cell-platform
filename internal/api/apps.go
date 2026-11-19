@@ -211,6 +211,7 @@ func (s *Server) record(ctx context.Context, c *Caller, w http.ResponseWriter, s
 	spec.Requester = cellv1.Requester{Kind: "Human", Name: c.Username}
 	if c.Role == RoleAgent {
 		spec.Requester.Kind = "Agent"
+		spec.Task = taskOf(ctx)
 	}
 	spec.Approval = cellv1.Approval{Required: true}
 	if spec.Risk == "" {
@@ -235,11 +236,13 @@ func (s *Server) record(ctx context.Context, c *Caller, w http.ResponseWriter, s
 var appName = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,38}[a-z0-9])?$`)
 
 type installRequest struct {
-	Catalog   string   `json:"catalog"`
-	Name      string   `json:"name"`
-	Subdomain string   `json:"subdomain"`
-	Groups    []string `json:"groups"`
-	Reason    string   `json:"reason"`
+	Catalog string `json:"catalog"`
+	// Manifest is an app spec from elsewhere (an agent packaged it).
+	Manifest  json.RawMessage `json:"manifest"`
+	Name      string          `json:"name"`
+	Subdomain string          `json:"subdomain"`
+	Groups    []string        `json:"groups"`
+	Reason    string          `json:"reason"`
 }
 
 func (s *Server) installApp(w http.ResponseWriter, r *http.Request, c *Caller) error {
@@ -247,13 +250,39 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request, c *Caller) e
 	if err := readJSON(r, &req); err != nil {
 		return err
 	}
-	entry, err := s.catalogEntry(req.Catalog)
-	if err != nil {
-		return err
-	}
-	name := req.Name
-	if name == "" {
-		name = entry.Name
+	var spec cellv1.AppSpec
+	name, risk := req.Name, "low"
+	switch {
+	case req.Catalog != "" && len(req.Manifest) > 0:
+		return errorf(http.StatusBadRequest, "give catalog or manifest, not both")
+	case req.Catalog != "":
+		entry, err := s.catalogEntry(req.Catalog)
+		if err != nil {
+			return err
+		}
+		spec = entry.Spec
+		if name == "" {
+			name = entry.Name
+		}
+		if req.Reason == "" {
+			req.Reason = "install " + req.Catalog + " from the catalog"
+		}
+	case len(req.Manifest) > 0:
+		dec := json.NewDecoder(bytes.NewReader(req.Manifest))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&spec); err != nil {
+			return errorf(http.StatusBadRequest, "manifest: %v", err)
+		}
+		if name == "" {
+			return errorf(http.StatusBadRequest, "name is required with a manifest")
+		}
+		// Nobody maintains this manifest: approvers must read it.
+		risk = "high"
+		if req.Reason == "" {
+			req.Reason = "install " + name + " from a manifest that is not in the catalog"
+		}
+	default:
+		return errorf(http.StatusBadRequest, "give catalog (an entry of GET /v0/catalog) or manifest")
 	}
 	if !appName.MatchString(name) || strings.HasPrefix(name, "cell-") {
 		return errorf(http.StatusBadRequest, "app name %q: lowercase letters, digits and dashes, at most 40, starting with a letter, not with cell- (the platform's)", name)
@@ -261,24 +290,33 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request, c *Caller) e
 	if _, err := s.app(r.Context(), name); err == nil {
 		return errorf(http.StatusConflict, "app %q is already installed", name)
 	}
-	spec := entry.Spec
 	if req.Subdomain != "" {
 		spec.Access.Subdomain = req.Subdomain
 	}
-	spec.Access.Groups = req.Groups
+	if req.Groups != nil {
+		spec.Access.Groups = req.Groups
+	}
 	if err := s.subdomainFree(r.Context(), spec.Access.Subdomain, name); err != nil {
+		return err
+	}
+	// The cluster checks the app against its schema and rules without
+	// creating it (the API's account may only do dry runs on apps), so a
+	// wrong manifest is refused now, not after its approval.
+	if err := s.Kube.Create(r.Context(), &cellv1.App{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: spec}, client.DryRunAll); err != nil {
+		switch {
+		case apierrors.IsInvalid(err), apierrors.IsBadRequest(err):
+			return errorf(http.StatusBadRequest, "manifest: %v", err)
+		case apierrors.IsAlreadyExists(err):
+			return errorf(http.StatusConflict, "app %q is already installed", name)
+		}
 		return err
 	}
 	raw, err := json.Marshal(spec)
 	if err != nil {
 		return err
 	}
-	if req.Reason == "" {
-		req.Reason = "install " + req.Catalog + " from the catalog"
-	}
 	// Data an earlier installation of the name left behind goes to the new
 	// app, whatever it is: approvers must see that.
-	risk := "low"
 	var ns corev1.Namespace
 	switch err := s.Kube.Get(r.Context(), client.ObjectKey{Name: "app-" + name}, &ns); {
 	case err == nil:
@@ -572,6 +610,7 @@ type changeView struct {
 	FinishedAt *time.Time      `json:"finishedAt"`
 	Backup     string          `json:"backup,omitempty"`
 	Restore    string          `json:"restore,omitempty"`
+	Task       string          `json:"task,omitempty"`
 }
 
 type requesterView struct {
@@ -602,7 +641,7 @@ func viewChange(cr *cellv1.ChangeRequest) (changeView, error) {
 			By: cr.Spec.Approval.By, At: timePtr(cr.Spec.Approval.At)},
 		Phase: string(cr.Status.Phase), Message: cr.Status.Message, CreatedAt: cr.CreationTimestamp.Time,
 		StartedAt: timePtr(cr.Status.StartedAt), FinishedAt: timePtr(cr.Status.FinishedAt),
-		Backup: cr.Status.Backup, Restore: cr.Status.Restore,
+		Backup: cr.Status.Backup, Restore: cr.Status.Restore, Task: cr.Spec.Task,
 	}
 	if v.Action == "" {
 		v.Action = "update"

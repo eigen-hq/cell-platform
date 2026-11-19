@@ -1,5 +1,5 @@
 # The platform API. Its account writes only ChangeRequests (proposals and
-# an admin's decision) and Backups; the operator alone changes apps.
+# an admin's decision), Backups and Tasks; the operator alone changes apps.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -24,6 +24,26 @@ rules:
   - apiGroups: [""]
     resources: [namespaces]
     verbs: [get]
+  # Tasks for agents: created by admins, claimed, recorded and finished by
+  # agents through the API.
+  - apiGroups: [cell.internal]
+    resources: [tasks]
+    verbs: [get, list, watch, create]
+  - apiGroups: [cell.internal]
+    resources: [tasks/status]
+    verbs: [update]
+  # Checking a manifest before anyone approves it: dry runs only, see the
+  # policy cell-api-dry-run below.
+  - apiGroups: [cell.internal]
+    resources: [apps]
+    verbs: [create]
+  # What admins and agents read when an app is in trouble.
+  - apiGroups: [""]
+    resources: [pods, events]
+    verbs: [list]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -37,6 +57,36 @@ subjects:
   - kind: ServiceAccount
     name: cell-api
     namespace: cell-system
+---
+# The API checks apps against the cluster's schema and rules before an
+# admin approves them, with a dry run. It never creates one: the operator
+# installs apps after approval (E-30).
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: cell-api-dry-run
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [cell.internal]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE, DELETE]
+        resources: [apps]
+  matchConditions:
+    - name: api
+      expression: "request.userInfo.username == 'system:serviceaccount:cell-system:cell-api'"
+  validations:
+    - expression: "has(request.dryRun) && request.dryRun"
+      message: "the platform API only checks apps (dry run); the operator installs them after approval"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: cell-api-dry-run
+spec:
+  policyName: cell-api-dry-run
+  validationActions: [Deny]
 ---
 apiVersion: apps/v1
 kind: Deployment

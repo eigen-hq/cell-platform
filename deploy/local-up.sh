@@ -24,7 +24,7 @@ chmod 600 "$KUBECONFIG"
 # bridge (and with it every app pod).
 root=$(cd "$here/.." && pwd)
 source "$here/lib.sh"
-OPERATOR_IMAGE=$(build_image cell-operator operator "$root" "$CELL_NAME" api catalog cmd/operator cmd/api internal Dockerfile go.mod go.sum)
+OPERATOR_IMAGE=$(build_image cell-operator operator "$root" "$CELL_NAME" api catalog cmd/operator cmd/api cmd/agent internal Dockerfile go.mod go.sum)
 BRIDGE_IMAGE=$(build_image cell-bridge bridge "$root" "$CELL_NAME" cmd/bridge Dockerfile go.mod go.sum)
 export OPERATOR_IMAGE BRIDGE_IMAGE
 

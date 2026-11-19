@@ -1,0 +1,159 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.23.0
+  name: tasks.cell.internal
+spec:
+  group: cell.internal
+  names:
+    kind: Task
+    listKind: TaskList
+    plural: tasks
+    singular: task
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.kind
+      name: Kind
+      type: string
+    - jsonPath: .spec.app
+      name: App
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.assignee
+      name: Assignee
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Task is work for an agent that no rule covers: find out why an app needs
+          attention, or turn a Compose file into a manifest. An agent claims it,
+          works only through the platform API, and the API records every call it
+          makes as a step, so the task is the agent's part of the change log. What
+          the agent wants changed it proposes as ChangeRequests that name the task.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              app:
+                description: App to diagnose, or the name the packaged app gets.
+                pattern: ^[a-z]([a-z0-9-]{0,38}[a-z0-9])?$
+                type: string
+              input:
+                description: 'Input: what the operator saw (diagnose) or the Compose
+                  file (package).'
+                maxLength: 65536
+                type: string
+              kind:
+                description: |-
+                  Kind: diagnose (find the cause of an app's trouble and propose the
+                  repair) or package (make a manifest from Input and propose installing
+                  it as App).
+                enum:
+                - diagnose
+                - package
+                type: string
+              requester:
+                properties:
+                  kind:
+                    enum:
+                    - Human
+                    - Agent
+                    - Operator
+                    type: string
+                  name:
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+            required:
+            - app
+            - kind
+            - requester
+            type: object
+            x-kubernetes-validations:
+            - message: a task is immutable; create a new one
+              rule: self == oldSelf
+          status:
+            properties:
+              assignee:
+                type: string
+              finishedAt:
+                format: date-time
+                type: string
+              phase:
+                description: |-
+                  Pending until an agent claims it, Running while it works, then
+                  Succeeded or Failed.
+                enum:
+                - Pending
+                - WaitingForApproval
+                - Running
+                - Completed
+                - Failed
+                - Succeeded
+                - RolledBack
+                - Rejected
+                type: string
+              result:
+                description: |-
+                  Result is the agent's answer: the cause it found and what it
+                  proposed, or why it could not.
+                maxLength: 16384
+                type: string
+              startedAt:
+                format: date-time
+                type: string
+              steps:
+                description: |-
+                  Steps are the agent's API calls, recorded by the API before it
+                  serves them.
+                items:
+                  properties:
+                    at:
+                      format: date-time
+                      type: string
+                    call:
+                      description: Call is the method and path (with query) of the
+                        API call.
+                      maxLength: 1024
+                      type: string
+                  required:
+                  - at
+                  - call
+                  type: object
+                maxItems: 200
+                type: array
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

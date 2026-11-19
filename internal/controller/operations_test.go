@@ -377,6 +377,25 @@ func TestChangeRequests(t *testing.T) {
 	if attention.Status.Version != "1.1" {
 		t.Errorf("version after rollback %s", attention.Status.Version)
 	}
+	diagnosed(t, "ledger", "update-bad")
+}
+
+// diagnosed waits for the operator's diagnose task for app whose input
+// names cause.
+func diagnosed(t *testing.T, app, cause string) {
+	t.Helper()
+	eventually(t, func() error {
+		var tasks cellv1.TaskList
+		if err := k8s.List(context.Background(), &tasks); err != nil {
+			return err
+		}
+		for _, task := range tasks.Items {
+			if task.Spec.App == app && task.Spec.Kind == "diagnose" && strings.Contains(task.Spec.Input, cause) {
+				return nil
+			}
+		}
+		return fmt.Errorf("no diagnose task for %s naming %s: %+v", app, cause, tasks.Items)
+	})
 }
 
 // A rejected change never touches the app.
@@ -506,6 +525,7 @@ func TestRestoresTakeTurnsAndFailSafe(t *testing.T) {
 	if !strings.Contains(apimeta.FindStatusCondition(attention.Status.Conditions, "Ready").Message, "vault-r1") {
 		t.Errorf("reason %+v", attention.Status.Conditions)
 	}
+	diagnosed(t, "vault", "vault-r1")
 	time.Sleep(time.Second)
 	if n := replicasOf(t, "app-vault", "vault"); n != 0 {
 		t.Fatalf("app restarted on half-restored data: %d replicas", n)

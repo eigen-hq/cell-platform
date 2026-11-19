@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -29,6 +30,8 @@ import (
 type apiClient struct {
 	tc                 *testCell
 	username, password string
+	// task the account's calls belong to (agents work in tasks)
+	task string
 
 	mu    sync.Mutex
 	token string
@@ -128,6 +131,9 @@ func (a *apiClient) call(t *testing.T, method, path string, in any) (int, any) {
 	req, _ := http.NewRequest(method, "https://"+a.tc.cfg.Host("api")+path, body)
 	req.Header.Set("Authorization", "Bearer "+a.bearer(t))
 	req.Header.Set("Content-Type", "application/json")
+	if a.task != "" {
+		req.Header.Set("X-Cell-Task", a.task)
+	}
 	resp, err := a.tc.akHTTP.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -156,6 +162,14 @@ func field(v any, path ...string) any {
 		v = m[p]
 	}
 	return v
+}
+
+// working is the agent at work in a new task that admin asked for.
+func (a *apiClient) working(t *testing.T, admin *apiClient, app string) *apiClient {
+	t.Helper()
+	task := field(admin.do(t, http.MethodPost, "/v0/tasks", map[string]any{"kind": "diagnose", "app": app, "input": "e2e"}, http.StatusCreated), "name").(string)
+	a.do(t, http.MethodPost, "/v0/tasks/"+task+"/claim", nil, http.StatusOK)
+	return &apiClient{tc: a.tc, username: a.username, password: a.password, task: task}
 }
 
 // propose sends a proposal, has admin approve it and returns its name.
@@ -253,13 +267,20 @@ func TestChangeApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Agents work in tasks: the API records each of their calls.
+	agent.do(t, http.MethodGet, "/v0/apps/whoami", nil, http.StatusBadRequest)
+	agent = agent.working(t, admin, "whoami")
 	cr := agent.do(t, http.MethodPatch, "/v0/apps/whoami", map[string]any{"patch": map[string]any{"title": "Who am I"}, "reason": "e2e"}, http.StatusAccepted)
 	name := field(cr, "name").(string)
-	if field(cr, "requester", "kind") != "Agent" || field(cr, "requester", "name") != "e2e-agent" {
-		t.Errorf("requester %v", field(cr, "requester"))
+	if field(cr, "requester", "kind") != "Agent" || field(cr, "requester", "name") != "e2e-agent" || field(cr, "task") != agent.task {
+		t.Errorf("requester %v, task %v", field(cr, "requester"), field(cr, "task"))
+	}
+	if steps := calls(admin.do(t, http.MethodGet, "/v0/tasks/"+agent.task, nil, http.StatusOK)); !slices.Equal(steps, []string{"PATCH /v0/apps/whoami"}) {
+		t.Errorf("task steps %v", steps)
 	}
 	agent.do(t, http.MethodPost, "/v0/changes/"+name+"/approve", nil, http.StatusForbidden)
 	agent.waitChange(t, name, time.Minute, "WaitingForApproval")
+	agent.do(t, http.MethodPost, "/v0/tasks/"+agent.task+"/finish", map[string]any{"result": "proposed " + name}, http.StatusOK)
 	if !events(func(e map[string]any) bool { return e["kind"] == "ChangeRequest" && e["name"] == name }) {
 		t.Error("no event for the change")
 	}

@@ -139,6 +139,10 @@ Neben `App` gibt es drei Ressourcen (`api/v1alpha1/operations_types.go`):
 
   Der Name ist höchstens 244 Zeichen lang, weil Backup und Rollback `<name>-pre`, `<name>-rollback` und `<name>-restore` heißen.
 
+## Aufgaben für Agenten
+
+Eine **`Task`** (`kind: diagnose` oder `package`) ist Arbeit für den Ops-Agenten. Der Operator legt eine Diagnose an, wenn eine App `NeedsAttention` wird, eine je Ursache (Health-Checks scheitern länger, als das Manifest erlaubt; eine gescheiterte Änderung; eine gescheiterte Wiederherstellung; Name `<app>-diagnose-<Prüfsumme der Ursache>`), mit den Bedingungen der App als `input`. Ein Admin legt Diagnosen oder Paketierungen über `POST /v0/tasks` an; bei `package` ist `input` die Compose-Datei und `app` der Name der neuen App. Der Agent übernimmt die Aufgabe, arbeitet nur über die API (jeder Aufruf ein Schritt in `status.steps`) und beendet sie mit seiner Antwort in `status.result`. Verliert er eine Aufgabe (Neustart, verlorene Antwort der API), beendet er sie beim nächsten Abfragen als gescheitert; ein Admin kann neu fragen. Was er ändern will, schlägt er als `ChangeRequest` mit `spec.task` vor; ein paketiertes Manifest als `install` mit hohem Risiko, das der Cluster vor der Freigabe prüft (E-35).
+
 ## Entfernen
 
 Das Löschen einer `App` entfernt Workload, Ingress und Login-Client. Die Daten bleiben als letzte Sicherung: Volumes bleiben, die Datenbank wird schlafen gelegt (CloudNativePG-Hibernation), der Namespace bekommt das Label `cell.internal/retained=true`. PVCs aus Charts sind per Post-Renderer mit `helm.sh/resource-policy: keep` vor dem Deinstallieren geschützt. Wird die App wieder angelegt, übernimmt sie die Daten. Läuft gerade eine Änderung, Wiederherstellung oder ein Backup, wartet das Entfernen, bis es beendet ist (eine Änderung bricht dabei ihr laufendes Backup ab und gibt die App erst frei, wenn dessen Job gestoppt ist); eine Wiederherstellung, die noch keine Daten ersetzt hat, bricht ab, und neue starten nicht mehr. Endgültig gelöscht werden die Daten nur mit einer freigegebenen Änderung `remove` mit `deleteData` (über die API: `DELETE /v0/apps/{name}?deleteData=true`).
@@ -146,7 +150,7 @@ Das Löschen einer `App` entfernt Workload, Ingress und Login-Client. Die Daten 
 ## Zwei Stufen im Katalog
 
 - **Integriert**: gepflegtes Manifest mit Login, geprüften Updates und, wo vorhanden, MCP. Das kuratierte Standard-Set.
-- **Generisch**: Manifest aus einem Chart oder einer Compose-Datei abgeleitet, vom Paketier-Agenten erzeugt. Läuft mit Subdomain, Backup und Neustart, aber ohne Garantie für Login und Updates.
+- **Generisch**: Manifest aus einer Compose-Datei abgeleitet (Charts: O-15), vom Ops-Agenten erzeugt und über `POST /v0/apps` mit `manifest` installiert. Läuft mit Subdomain, Backup und Neustart, aber ohne Garantie für Login und Updates.
 
 ## Antworten auf die offenen Punkte aus M1
 

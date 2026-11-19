@@ -6,10 +6,11 @@ Das Repo ist namensneutral gehalten. Der Produktname steht an genau einer Stelle
 
 ## Stand
 
-M0 bis M3 sind abgeschlossen: Eine Zelle entsteht per Befehl, lokal (`make cell-up`) oder auf einer Ubuntu-VM (`deploy/install.sh`). Apps werden allein über ihr Manifest installiert, mit Datenbank, Single Sign-on und Zertifikat. Sie werden außerhalb der Zelle gesichert, lassen sich wiederherstellen (auch in eine neue Zelle), und Änderungen laufen mit Backup, Health-Check und automatischem Rollback. Alles das geht über die Plattform-API unter `https://api.<domain>`; jede Änderung wartet dort auf die Freigabe eines Admins. Details und Messwerte in `docs/mvp-plan.md`, der Vertrag der API in `api/openapi.yaml`.
+M0 bis M4 sind abgeschlossen: Eine Zelle entsteht per Befehl, lokal (`make cell-up`) oder auf einer Ubuntu-VM (`deploy/install.sh`). Apps werden allein über ihr Manifest installiert, mit Datenbank, Single Sign-on und Zertifikat. Sie werden außerhalb der Zelle gesichert, lassen sich wiederherstellen (auch in eine neue Zelle), und Änderungen laufen mit Backup, Health-Check und automatischem Rollback. Alles das geht über die Plattform-API unter `https://api.<domain>`; jede Änderung wartet dort auf die Freigabe eines Admins. Der Ops-Agent diagnostiziert Apps, die Aufmerksamkeit brauchen, und paketiert Apps aus Compose-Dateien; er arbeitet nur über die API und schlägt Änderungen zur Freigabe vor. Details und Messwerte in `docs/mvp-plan.md`, der Vertrag der API in `api/openapi.yaml`.
 
 ```
 make cell-up     # lokale Zelle (k3d), Login unter https://auth.cell.localhost
+                 # mit CELL_LLM_API_KEY=<Anthropic-Schlüssel> arbeitet der Ops-Agent
 make status      # Zustand der Basisdienste
 make test        # Unit-, API- und Controller-Tests (envtest)
 make e2e         # Ende-zu-Ende-Tests gegen die lokale Zelle, über die API
@@ -38,17 +39,14 @@ curl -H 'Authorization: Bearer <access_token>' -X POST https://api.cell.localhos
 
 Für Coding Agents zusätzlich: `CLAUDE.md`.
 
-## Geplante Struktur
-
-Noch nicht angelegt; entsteht mit den Meilensteinen.
+## Struktur
 
 ```
-cmd/         Einstiegspunkte: operator, api, cellctl
-api/         CRD-Typen (Go)
-internal/    Controller, API-Server, Clients für Plattformdienste
+cmd/         Einstiegspunkte: operator, api, agent, cellctl, bridge
+api/         CRD-Typen (Go) und der Vertrag der API (openapi.yaml)
+internal/    Controller, API-Server, Ops-Agent, Clients für Plattformdienste
 catalog/     App-Manifeste, ein Ordner pro App
 deploy/      Zellen-Bootstrap: k3s und Basisdienste
-agent/       Ops-Agent als eigener Dienst
 test/e2e/    Ende-zu-Ende-Tests gegen eine lokale Zelle
 docs/        Diese Dokumente
 ```

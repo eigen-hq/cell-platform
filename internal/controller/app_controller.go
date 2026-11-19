@@ -124,6 +124,7 @@ func (r *AppReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 // +kubebuilder:rbac:groups=cell.internal,resources=apps;apps/status;apps/finalizers,verbs=*
+// +kubebuilder:rbac:groups=cell.internal,resources=tasks,verbs=get;list;watch;create
 
 func (r *AppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var app cellv1.App
@@ -149,7 +150,10 @@ func (r *AppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		// app has to pass its health check again afterwards.
 		app.Status.Phase, app.Status.PausedBy, app.Status.WorkloadGeneration = act.phase, act.pausedBy, 0
 		r.condition(&app, condReady, false, string(act.phase), act.reason)
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, r.updateStatus(ctx, &app, before)
+		if err := r.updateStatus(ctx, &app, before); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, r.askAgent(ctx, &app, act)
 	}
 	app.Status.PausedBy = ""
 	target, err := loadTarget(ctx, r)
@@ -167,6 +171,9 @@ func (r *AppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	}
 	if uerr := r.updateStatus(ctx, &app, before); uerr != nil {
 		return ctrl.Result{}, uerr
+	}
+	if aerr := r.askAgent(ctx, &app, act); aerr != nil {
+		return ctrl.Result{}, aerr
 	}
 	if err != nil {
 		return ctrl.Result{}, err
@@ -219,19 +226,29 @@ func (r *AppReconciler) setPhase(app *cellv1.App, healthy bool, msg string, act 
 		app.Status.Phase = act.phase
 		return
 	}
-	since := apimeta.FindStatusCondition(app.Status.Conditions, condReady).LastTransitionTime.Time
-	timeout := time.Duration(app.Spec.Health.TimeoutSeconds) * time.Second
-	if timeout == 0 {
-		timeout = 300 * time.Second
-	}
+	_, long := r.unhealthyTooLong(app)
 	switch {
-	case r.now().Sub(since) > timeout, act.failedChange != "":
+	case long, act.failedChange != "":
 		app.Status.Phase = cellv1.PhaseNeedsAttention
 	case app.Status.Version == "":
 		app.Status.Phase = cellv1.PhaseInstalling
 	case app.Status.Phase != cellv1.PhaseReady && app.Status.Phase != cellv1.PhaseNeedsAttention:
 		app.Status.Phase = cellv1.PhaseReady // back from a change or restore, not unhealthy for long yet
 	}
+}
+
+// unhealthyTooLong reports since when the app fails its health checks and
+// whether that is longer than its manifest allows.
+func (r *AppReconciler) unhealthyTooLong(app *cellv1.App) (time.Time, bool) {
+	c := apimeta.FindStatusCondition(app.Status.Conditions, condReady)
+	if c == nil || c.Status != metav1.ConditionFalse {
+		return time.Time{}, false
+	}
+	timeout := time.Duration(app.Spec.Health.TimeoutSeconds) * time.Second
+	if timeout == 0 {
+		timeout = 300 * time.Second
+	}
+	return c.LastTransitionTime.Time, r.now().Sub(c.LastTransitionTime.Time) > timeout
 }
 
 func (r *AppReconciler) condition(app *cellv1.App, typ string, ok bool, reason, msg string) {

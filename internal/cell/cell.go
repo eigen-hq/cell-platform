@@ -20,6 +20,11 @@ const (
 	SystemNamespace = "cell-system"
 	// Issuer is the ClusterIssuer every cell certificate comes from.
 	Issuer = "cell"
+	// AgentGroup gives its members the agent role in the platform API.
+	AgentGroup = "cell-agents"
+	// AgentAccount is the ops agent's account in the identity; its
+	// credentials are the Secret of the same name in SystemNamespace.
+	AgentAccount = "cell-agent"
 )
 
 // Config is the cell-system/cell-config ConfigMap.

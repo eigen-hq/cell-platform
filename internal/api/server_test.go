@@ -28,6 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	k8sfake "k8s.io/client-go/kubernetes/fake"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -140,7 +141,12 @@ type harness struct {
 	srv    *httptest.Server
 	router routers.Router
 	server *Server
+	// agentTask is the task the agent's calls name ("" for none).
+	agentTask string
 }
+
+// agentWork is the running task the harness's agent works in.
+const agentWork = "agent-work"
 
 func newHarness(t *testing.T, objs ...client.Object) *harness {
 	t.Helper()
@@ -153,13 +159,24 @@ func newHarnessWith(t *testing.T, funcs interceptor.Funcs, objs ...client.Object
 	scheme := runtime.NewScheme()
 	_ = clientgoscheme.AddToScheme(scheme)
 	_ = cellv1.AddToScheme(scheme)
-	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).WithInterceptorFuncs(funcs).Build()
+	var pods []runtime.Object
+	for _, o := range objs {
+		if p, ok := o.(*corev1.Pod); ok {
+			pods = append(pods, p)
+		}
+	}
+	work := &cellv1.Task{ObjectMeta: metav1.ObjectMeta{Name: agentWork},
+		Spec:   cellv1.TaskSpec{Kind: "diagnose", App: "notes", Requester: cellv1.Requester{Kind: "Human", Name: "admin-user"}},
+		Status: cellv1.TaskStatus{Phase: cellv1.RunRunning, Assignee: "agent-user"}}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(append(objs, work)...).WithInterceptorFuncs(funcs).
+		WithStatusSubresource(&cellv1.Task{}).Build()
 	spec, err := os.ReadFile("../../api/openapi.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := &Server{
 		Kube:     kube,
+		Pods:     k8sfake.NewSimpleClientset(pods...).CoreV1(),
 		Identity: newFakeIdentity(),
 		Authenticate: func(_ context.Context, token string) (*Caller, error) {
 			switch token {
@@ -185,7 +202,7 @@ func newHarnessWith(t *testing.T, funcs interceptor.Funcs, objs ...client.Object
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &harness{t: t, kube: kube, srv: httptest.NewServer(s.Handler()), router: router, server: s}
+	h := &harness{t: t, kube: kube, srv: httptest.NewServer(s.Handler()), router: router, server: s, agentTask: agentWork}
 	t.Cleanup(h.srv.Close)
 	return h
 }
@@ -204,6 +221,9 @@ func (h *harness) do(method, path, token string, body any) (int, any) {
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	if token == "agent" && h.agentTask != "" {
+		req.Header.Set(TaskHeader, h.agentTask)
 	}
 	resp, err := h.srv.Client().Do(req)
 	if err != nil {
