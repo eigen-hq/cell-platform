@@ -11,6 +11,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -161,6 +162,182 @@ func TestRemoveChangeDeletesData(t *testing.T) {
 	eventually(t, func() error { return k8s.Get(ctx, client.ObjectKey{Name: "purge"}, &again) })
 	changePhase(t, "install-purge", cellv1.RunRunning)
 	removeApp(t, &again)
+}
+
+// An app that waits for its host is checked again like an unhealthy one, not
+// after an error backoff that grows to minutes, so it takes the host over
+// soon after the reservation is gone.
+func TestWaitingForHostIsNoError(t *testing.T) {
+	ctx := context.Background()
+	app := &cellv1.App{ObjectMeta: metav1.ObjectMeta{Name: "patient", UID: "patient-uid"}, Spec: plainSpec("busy")}
+	config := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: "cell-system", Name: "cell-config"}, Data: map[string]string{"domain": "cell.test"}}
+	held := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: "cell-system", Name: "host-busy", Labels: map[string]string{hostLabel: "holder"}}}
+	r := &AppReconciler{Client: fakeClient(k8s.Scheme(), app, config, held)}
+	res, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(app)})
+	if err != nil || res.RequeueAfter == 0 {
+		t.Fatalf("reconcile: %v, requeue after %s", err, res.RequeueAfter)
+	}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(app), app); err != nil {
+		t.Fatal(err)
+	}
+	if c := apimeta.FindStatusCondition(app.Status.Conditions, condReady); c == nil || !strings.Contains(c.Message, "taken by app holder") {
+		t.Errorf("ready condition %v", c)
+	}
+}
+
+// M3: an app never takes over a host another app has: a second app on the
+// same subdomain stops before it sets anything up, an app moving onto a
+// taken host stops while the other keeps it, and a reservation no cache
+// shows yet (another app claimed the host a moment ago) counts too. Hosts
+// are given up once the routes left them.
+func TestHostCollision(t *testing.T) {
+	ctx := context.Background()
+	create := func(name, subdomain string) *cellv1.App {
+		t.Helper()
+		app := &cellv1.App{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: plainSpec(subdomain)}
+		if err := k8s.Create(ctx, app); err != nil {
+			t.Fatal(err)
+		}
+		eventually(t, func() error { return k8s.Get(ctx, client.ObjectKeyFromObject(app), app) })
+		return app
+	}
+	// stopped waits until the app reports one of the reasons.
+	stopped := func(name string, reasons ...string) {
+		t.Helper()
+		eventually(t, func() error {
+			var a cellv1.App
+			if err := k8s.Get(ctx, client.ObjectKey{Name: name}, &a); err != nil {
+				return err
+			}
+			c := apimeta.FindStatusCondition(a.Status.Conditions, condReady)
+			for _, r := range reasons {
+				if c != nil && strings.Contains(c.Message, r) {
+					return nil
+				}
+			}
+			return fmt.Errorf("%s: %v", name, c)
+		})
+	}
+	// The operator routes an app once its workload runs.
+	routed := func(name string) {
+		t.Helper()
+		kubelet(t, Namespace(name), name)
+		eventually(t, func() error {
+			return k8s.Get(ctx, client.ObjectKey{Namespace: Namespace(name), Name: name}, &networkingv1.Ingress{})
+		})
+	}
+	first := create("first", "shared")
+	defer removeApp(t, first)
+	routed("first")
+	second := create("second", "shared")
+	defer removeApp(t, second)
+	stopped("second", "taken by app first", "served by app-first/first")
+	if err := k8s.Get(ctx, client.ObjectKey{Name: Namespace("second")}, &corev1.Namespace{}); !apierrors.IsNotFound(err) {
+		t.Errorf("second app set up on a taken host: %v", err)
+	}
+
+	third := create("third", "third")
+	defer removeApp(t, third)
+	routed("third")
+	eventually(t, func() error {
+		if err := k8s.Get(ctx, client.ObjectKeyFromObject(first), first); err != nil {
+			return err
+		}
+		first.Spec.Access.Subdomain = "third"
+		return k8s.Update(ctx, first)
+	})
+	stopped("first", "taken by app third", "served by app-third/third")
+	var a cellv1.App
+	if err := k8s.Get(ctx, client.ObjectKey{Name: "third"}, &a); err != nil {
+		t.Fatal(err)
+	}
+	if c := apimeta.FindStatusCondition(a.Status.Conditions, condReady); c != nil && strings.Contains(c.Message, "taken") {
+		t.Errorf("the serving app lost its host: %s", c.Message)
+	}
+
+	reserved := func(subdomain string) string {
+		var cm corev1.ConfigMap
+		if err := k8s.Get(ctx, client.ObjectKey{Namespace: "cell-system", Name: "host-" + subdomain}, &cm); err != nil {
+			return ""
+		}
+		return cm.Labels[hostLabel]
+	}
+	// A route outside the cell's apps keeps its host too.
+	var ing networkingv1.Ingress
+	if err := k8s.Get(ctx, client.ObjectKey{Namespace: Namespace("first"), Name: "first"}, &ing); err != nil {
+		t.Fatal(err)
+	}
+	manual := ing.DeepCopy()
+	manual.ObjectMeta = metav1.ObjectMeta{Namespace: "default", Name: "manual"}
+	manual.Spec.Rules[0].Host = strings.Replace(ing.Spec.Rules[0].Host, "shared.", "manual.", 1)
+	manual.Spec.TLS = nil
+	if err := k8s.Create(ctx, manual); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = k8s.Delete(ctx, manual) }()
+	byHand := create("byhand", "manual")
+	defer removeApp(t, byHand)
+	stopped("byhand", "served by default/manual")
+	if o := reserved("manual"); o != "" {
+		t.Errorf("host served by another route reserved by %s", o)
+	}
+
+	ghost := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: "cell-system", Name: "host-racy", Labels: map[string]string{hostLabel: "ghost"}}}
+	if err := k8s.Create(ctx, ghost); err != nil {
+		t.Fatal(err)
+	}
+	late := create("late", "racy")
+	defer removeApp(t, late)
+	stopped("late", "taken by app ghost")
+
+	// Moving to a free host gives up the old one once the route moved.
+	eventually(t, func() error {
+		if err := k8s.Get(ctx, client.ObjectKeyFromObject(first), first); err != nil {
+			return err
+		}
+		first.Spec.Access.Subdomain = "fresh"
+		return k8s.Update(ctx, first)
+	})
+	eventually(t, func() error {
+		var ing networkingv1.Ingress
+		if err := k8s.Get(ctx, client.ObjectKey{Namespace: Namespace("first"), Name: "first"}, &ing); err != nil {
+			return err
+		}
+		if h := ing.Spec.Rules[0].Host; !strings.HasPrefix(h, "fresh.") {
+			return fmt.Errorf("first still routes %s", h)
+		}
+		// The app that waited for the host takes it over.
+		if o := reserved("shared"); o != "second" {
+			return fmt.Errorf("shared reserved by %q", o)
+		}
+		return nil
+	})
+	if o := reserved("fresh"); o != "first" {
+		t.Errorf("fresh reserved by %q", o)
+	}
+	// The reservation belongs to the App: the garbage collector removes it
+	// with the App even if the operator's cache misses it on removal.
+	var cm corev1.ConfigMap
+	if err := k8s.Get(ctx, client.ObjectKey{Namespace: "cell-system", Name: "host-fresh"}, &cm); err != nil {
+		t.Fatal(err)
+	}
+	if refs := cm.OwnerReferences; len(refs) != 1 || refs[0].UID != first.UID || refs[0].Kind != "App" {
+		t.Errorf("reservation owners %v", refs)
+	}
+	// A reservation an earlier installation of the name left behind (the
+	// garbage collector has not removed it yet) is not taken over.
+	stale := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: "cell-system", Name: "host-again", Labels: map[string]string{hostLabel: "again"},
+		OwnerReferences: []metav1.OwnerReference{{APIVersion: "cell.internal/v1alpha1", Kind: "App", Name: "again", UID: "gone-uid"}}}}
+	if err := k8s.Create(ctx, stale); err != nil {
+		t.Fatal(err)
+	}
+	again := create("again", "again")
+	defer removeApp(t, again)
+	stopped("again", "earlier installation of again")
+	removeApp(t, third)
+	if o := reserved("third"); o != "" {
+		t.Errorf("a removed app keeps its host: %s", o)
+	}
 }
 
 // A running install whose app the cache does not show yet keeps waiting

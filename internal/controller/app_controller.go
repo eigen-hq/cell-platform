@@ -254,6 +254,11 @@ func (r *AppReconciler) install(ctx context.Context, app *cellv1.App, target *ba
 	}
 	ns := Namespace(app.Name)
 	host := cfg.Host(app.Spec.Access.Subdomain)
+	// A taken host is a state, not an error: the app is checked again like
+	// an unhealthy one instead of backing off for minutes.
+	if wait, err := r.claimHost(ctx, app, host); err != nil || wait != "" {
+		return false, wait, err
+	}
 	cellCA, err := cell.LoadCA(ctx, r, cfg)
 	if err != nil {
 		return false, "", err
@@ -318,6 +323,10 @@ func (r *AppReconciler) install(ctx context.Context, app *cellv1.App, target *ba
 	}
 	published, err := r.apply(ctx, ingress(app, host, svc)...)
 	if err != nil {
+		return false, "", err
+	}
+	// The routes left any earlier host: let it go.
+	if err := r.releaseHosts(ctx, app.Name, app.Spec.Access.Subdomain); err != nil {
 		return false, "", err
 	}
 	app.Status.URL = "https://" + host
@@ -693,6 +702,79 @@ func (r *AppReconciler) probe(ctx context.Context, url, host string) error {
 	return nil
 }
 
+// hostLabel names the app that reserved a host.
+const hostLabel = "cell.internal/host-of"
+
+// claimHost reserves the app's subdomain before anything is set up for it.
+// A host that another route serves (an app from before reservations, a
+// route added by hand) stays with it. The reservation is a ConfigMap named
+// after the subdomain: creating it is atomic, so of two apps that want one
+// host only one ever gets it, whatever their caches show. An app keeps its
+// hosts until its routes left them; the reservation belongs to the App, so
+// the garbage collector removes it with the App whatever the cache shows.
+// wait says why the app has to wait for its host.
+func (r *AppReconciler) claimHost(ctx context.Context, app *cellv1.App, host string) (wait string, err error) {
+	var ings networkingv1.IngressList
+	if err := r.List(ctx, &ings); err != nil {
+		return "", err
+	}
+	for _, ing := range ings.Items {
+		// The app's own routes: its namespace, and the login outpost's path
+		// on its host (proxy mode) in the system namespace.
+		if ing.Namespace == Namespace(app.Name) || ing.Namespace == cell.SystemNamespace && ing.Name == outpostIngress(app) {
+			continue
+		}
+		for _, rule := range ing.Spec.Rules {
+			if rule.Host == host {
+				return fmt.Sprintf("host %s is served by %s/%s", host, ing.Namespace, ing.Name), nil
+			}
+		}
+	}
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+		Name: "host-" + app.Spec.Access.Subdomain, Namespace: cell.SystemNamespace,
+		Labels: map[string]string{hostLabel: app.Name},
+		OwnerReferences: []metav1.OwnerReference{{
+			APIVersion: cellv1.GroupVersion.String(), Kind: "App", Name: app.Name, UID: app.UID,
+		}},
+	}}
+	switch err := r.Get(ctx, client.ObjectKeyFromObject(cm), cm); {
+	case apierrors.IsNotFound(err):
+		if err := r.Create(ctx, cm); apierrors.IsAlreadyExists(err) {
+			return "", fmt.Errorf("subdomain %s was just reserved, checking by whom", app.Spec.Access.Subdomain)
+		} else if err != nil {
+			return "", err
+		}
+	case err != nil:
+		return "", err
+	}
+	if owner := cm.Labels[hostLabel]; owner != app.Name {
+		return fmt.Sprintf("subdomain %s is taken by app %s", app.Spec.Access.Subdomain, owner), nil
+	}
+	if refs := cm.OwnerReferences; len(refs) != 1 || refs[0].UID != app.UID {
+		return fmt.Sprintf("subdomain %s is still reserved by an earlier installation of %s", app.Spec.Access.Subdomain, app.Name), nil
+	}
+	return "", nil
+}
+
+// releaseHosts gives up the hosts an app reserved except keep ("" for
+// all, when the app is removed).
+func (r *AppReconciler) releaseHosts(ctx context.Context, app, keep string) error {
+	var cms corev1.ConfigMapList
+	if err := r.List(ctx, &cms, client.InNamespace(cell.SystemNamespace), client.MatchingLabels{hostLabel: app}); err != nil {
+		return err
+	}
+	for i := range cms.Items {
+		cm := &cms.Items[i]
+		if cm.Name == "host-"+keep {
+			continue
+		}
+		if err := r.Delete(ctx, cm, client.Preconditions{UID: &cm.UID}); client.IgnoreNotFound(err) != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // remove deletes the running parts of an app and its login client but keeps
 // its data: volumes stay, the database is hibernated, and the namespace is
 // marked as retained. Installing the app again picks the data up.
@@ -780,6 +862,9 @@ func (r *AppReconciler) remove(ctx context.Context, app *cellv1.App) (ctrl.Resul
 		}
 	}
 	if _, err := r.apply(ctx, namespaceObj(app, true)); err != nil {
+		return ctrl.Result{}, err
+	}
+	if err := r.releaseHosts(ctx, app.Name, ""); err != nil {
 		return ctrl.Result{}, err
 	}
 	controllerutil.RemoveFinalizer(app, finalizer)

@@ -70,7 +70,7 @@ paths:
         "401": {$ref: "#/components/responses/Error"}
     post:
       operationId: installApp
-      description: Proposes to install an app from the catalog.
+      description: Proposes to install an app from the catalog. 409 if the name or the subdomain is taken. Data an earlier installation of the name left behind goes to the new app; such a change is high risk and says so.
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: "#/components/schemas/InstallRequest"}}}
@@ -91,7 +91,11 @@ paths:
         "404": {$ref: "#/components/responses/Error"}
     patch:
       operationId: updateApp
-      description: Proposes a JSON merge patch on the app's manifest, for example a new version.
+      description: |
+        Proposes a JSON merge patch on the app's manifest, for example a new
+        version. The API rates the risk: a change of access groups only is
+        low, of the version only medium, anything else high. 409 if the new
+        subdomain is taken.
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: "#/components/schemas/UpdateRequest"}}}
@@ -101,6 +105,7 @@ paths:
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
     delete:
       operationId: removeApp
       description: |
@@ -379,7 +384,6 @@ components:
       properties:
         patch: {type: object, additionalProperties: true, description: JSON merge patch on the app's manifest.}
         reason: {type: string}
-        risk: {type: string, enum: [low, medium, high]}
     RestoreRequest:
       type: object
       additionalProperties: false

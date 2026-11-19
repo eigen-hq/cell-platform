@@ -14,6 +14,7 @@ import (
 	"time"
 
 	jsonpatch "github.com/evanphx/json-patch/v5"
+	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -265,6 +266,9 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request, c *Caller) e
 		spec.Access.Subdomain = req.Subdomain
 	}
 	spec.Access.Groups = req.Groups
+	if err := s.subdomainFree(r.Context(), spec.Access.Subdomain, name); err != nil {
+		return err
+	}
 	raw, err := json.Marshal(spec)
 	if err != nil {
 		return err
@@ -272,14 +276,39 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request, c *Caller) e
 	if req.Reason == "" {
 		req.Reason = "install " + req.Catalog + " from the catalog"
 	}
-	return s.record(r.Context(), c, w, cellv1.ChangeRequestSpec{App: name, Action: "install", Reason: req.Reason, Risk: "low",
+	// Data an earlier installation of the name left behind goes to the new
+	// app, whatever it is: approvers must see that.
+	risk := "low"
+	var ns corev1.Namespace
+	switch err := s.Kube.Get(r.Context(), client.ObjectKey{Name: "app-" + name}, &ns); {
+	case err == nil:
+		risk = "high"
+		req.Reason += "; reuses the data (volumes, database, secrets) an earlier installation left in namespace app-" + name
+	case !apierrors.IsNotFound(err):
+		return err
+	}
+	return s.record(r.Context(), c, w, cellv1.ChangeRequestSpec{App: name, Action: "install", Reason: req.Reason, Risk: risk,
 		Patch: &apiextensionsv1.JSON{Raw: raw}})
+}
+
+// subdomainFree refuses a subdomain another app serves. The operator
+// enforces the same for changes approved side by side.
+func (s *Server) subdomainFree(ctx context.Context, subdomain, app string) error {
+	var apps cellv1.AppList
+	if err := s.Kube.List(ctx, &apps); err != nil {
+		return err
+	}
+	for _, a := range apps.Items {
+		if a.Name != app && a.Spec.Access.Subdomain == subdomain {
+			return errorf(http.StatusConflict, "subdomain %s is taken by app %s", subdomain, a.Name)
+		}
+	}
+	return nil
 }
 
 type updateRequest struct {
 	Patch  json.RawMessage `json:"patch"`
 	Reason string          `json:"reason"`
-	Risk   string          `json:"risk"`
 }
 
 func (s *Server) updateApp(w http.ResponseWriter, r *http.Request, c *Caller) error {
@@ -291,39 +320,63 @@ func (s *Server) updateApp(w http.ResponseWriter, r *http.Request, c *Caller) er
 	if err := readJSON(r, &req); err != nil {
 		return err
 	}
-	if err := checkPatch(app, req.Patch); err != nil {
+	spec, err := checkPatch(app, req.Patch)
+	if err != nil {
 		return err
 	}
-	return s.record(r.Context(), c, w, cellv1.ChangeRequestSpec{App: app.Name, Action: "update", Reason: req.Reason, Risk: req.Risk,
+	if spec.Access.Subdomain != app.Spec.Access.Subdomain {
+		if err := s.subdomainFree(r.Context(), spec.Access.Subdomain, app.Name); err != nil {
+			return err
+		}
+	}
+	return s.record(r.Context(), c, w, cellv1.ChangeRequestSpec{App: app.Name, Action: "update", Reason: req.Reason, Risk: patchRisk(req.Patch),
 		Patch: &apiextensionsv1.JSON{Raw: req.Patch}})
+}
+
+// patchRisk rates an update by what it touches, so the requester cannot
+// play it down: who may use the app is low, a new version medium, anything
+// else (source, values, needs, subdomain, ...) high.
+func patchRisk(patch json.RawMessage) string {
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(patch, &obj) != nil || len(obj) != 1 {
+		return "high"
+	}
+	if _, ok := obj["version"]; ok {
+		return "medium"
+	}
+	var access map[string]json.RawMessage
+	if json.Unmarshal(obj["access"], &access) == nil && len(access) == 1 && access["groups"] != nil {
+		return "low"
+	}
+	return "high"
 }
 
 // checkPatch catches what is wrong with a patch before anyone approves it:
 // not an object, or a field the manifest does not have. The API server
 // validates the rest when the change runs.
-func checkPatch(app *cellv1.App, patch json.RawMessage) error {
+func checkPatch(app *cellv1.App, patch json.RawMessage) (*cellv1.AppSpec, error) {
 	var obj map[string]any
 	if err := json.Unmarshal(patch, &obj); err != nil || obj == nil {
-		return errorf(http.StatusBadRequest, "patch must be a JSON object")
+		return nil, errorf(http.StatusBadRequest, "patch must be a JSON object")
 	}
 	cur, err := json.Marshal(app.Spec)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	next, err := jsonpatch.MergePatch(cur, patch)
 	if err != nil {
-		return errorf(http.StatusBadRequest, "patch: %v", err)
+		return nil, errorf(http.StatusBadRequest, "patch: %v", err)
 	}
 	dec := json.NewDecoder(bytes.NewReader(next))
 	dec.DisallowUnknownFields()
 	var spec cellv1.AppSpec
 	if err := dec.Decode(&spec); err != nil {
-		return errorf(http.StatusBadRequest, "patched manifest: %v", err)
+		return nil, errorf(http.StatusBadRequest, "patched manifest: %v", err)
 	}
 	if len(spec.Access.Groups) > 0 && spec.Access.Auth.Mode == "none" {
-		return errorf(http.StatusBadRequest, "app %s has no login (auth mode none): access groups need one", app.Name)
+		return nil, errorf(http.StatusBadRequest, "app %s has no login (auth mode none): access groups need one", app.Name)
 	}
-	return nil
+	return &spec, nil
 }
 
 func (s *Server) removeApp(w http.ResponseWriter, r *http.Request, c *Caller) error {
@@ -419,7 +472,7 @@ func (s *Server) setAccess(w http.ResponseWriter, r *http.Request, c *Caller) er
 	if err != nil {
 		return err
 	}
-	if err := checkPatch(app, patch); err != nil {
+	if _, err := checkPatch(app, patch); err != nil {
 		return err
 	}
 	if req.Reason == "" {

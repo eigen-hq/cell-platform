@@ -23,6 +23,7 @@ import (
 	"github.com/getkin/kin-openapi/openapi3filter"
 	"github.com/getkin/kin-openapi/routers"
 	"github.com/getkin/kin-openapi/routers/legacy"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -403,9 +404,22 @@ func TestInstallConflictsAndRejection(t *testing.T) {
 			t.Errorf("name %s: %d", name, code)
 		}
 	}
+	// Another name on the same host would take over the app's traffic.
+	if code, _ := h.do("POST", "/v0/apps", "agent", map[string]any{"catalog": "notes", "name": "notes2"}); code != 409 {
+		t.Errorf("install on a taken subdomain: %d", code)
+	}
 	code, body := h.do("POST", "/v0/apps", "admin", map[string]any{"catalog": "notes", "name": "notes2", "subdomain": "notes2"})
-	if code != 202 || field(body, "app") != "notes2" || field(body, "patch", "access", "subdomain") != "notes2" {
+	if code != 202 || field(body, "app") != "notes2" || field(body, "patch", "access", "subdomain") != "notes2" || field(body, "risk") != "low" {
 		t.Fatalf("install under another name: %d %v", code, body)
+	}
+	// Data a removed app left behind goes to whatever is installed under
+	// its name: approvers see that.
+	if err := h.kube.Create(context.Background(), &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "app-old"}}); err != nil {
+		t.Fatal(err)
+	}
+	code, body = h.do("POST", "/v0/apps", "agent", map[string]any{"catalog": "notes", "name": "old", "subdomain": "old"})
+	if code != 202 || field(body, "risk") != "high" || !strings.Contains(field(body, "reason").(string), "namespace app-old") {
+		t.Errorf("install over retained data: %d %v", code, body)
 	}
 	code, body = h.do("POST", "/v0/changes/"+field(body, "name").(string)+"/reject", "admin", nil)
 	if code != 200 || field(body, "approval", "decision") != "Rejected" {
@@ -438,6 +452,22 @@ func TestAppChanges(t *testing.T) {
 	}
 	if code, _ = h.do("PATCH", "/v0/apps/notes", "agent", map[string]any{"patch": map[string]any{"versoin": "1.1"}}); code != 400 {
 		t.Errorf("patch with a typo: %d", code)
+	}
+	// The API rates the risk; the requester cannot play it down.
+	if code, _ = h.do("PATCH", "/v0/apps/notes", "agent", map[string]any{"patch": map[string]any{"version": "1.1"}, "risk": "low"}); code != 400 {
+		t.Errorf("requester sets the risk: %d", code)
+	}
+	for _, patch := range []map[string]any{
+		{"source": map[string]any{"image": map[string]any{"repository": "evil/notes"}}},
+		{"version": "1.2", "health": map[string]any{"timeoutSeconds": 10}},
+		{"access": map[string]any{"subdomain": "free"}},
+	} {
+		if code, body = h.do("PATCH", "/v0/apps/notes", "agent", map[string]any{"patch": patch}); code != 202 || field(body, "risk") != "high" {
+			t.Errorf("patch %v: %d %v", patch, code, body)
+		}
+	}
+	if code, _ = h.do("PATCH", "/v0/apps/notes", "agent", map[string]any{"patch": map[string]any{"access": map[string]any{"subdomain": "plain"}}}); code != 409 {
+		t.Errorf("move onto a taken subdomain: %d", code)
 	}
 
 	// Access: a low-risk update; an app without login cannot have groups.
@@ -481,7 +511,7 @@ func TestAppChanges(t *testing.T) {
 
 	// The change log, newest first and per app.
 	code, body = h.do("GET", "/v0/changes?app=notes", "member", nil)
-	if code != 200 || len(body.([]any)) != 5 {
+	if code != 200 || len(body.([]any)) != 8 {
 		t.Errorf("change log: %d %v", code, body)
 	}
 	if code, body = h.do("GET", "/v0/changes?app=plain", "member", nil); code != 200 || len(body.([]any)) != 0 {

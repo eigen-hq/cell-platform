@@ -20,6 +20,10 @@ rules:
   - apiGroups: [cell.internal]
     resources: [changerequests]
     verbs: [get, list, watch, create, update]
+  # An install says whether it takes over data a removed app left behind.
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

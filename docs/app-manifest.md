@@ -72,7 +72,7 @@ spec:
 | `needs.volumes` | `name`, `size`, `mountPath` (Image-Apps), höchstens 16. Charts legen ihre Volumes selbst an. Die Größe lässt sich wie bei der Datenbank noch nicht ändern, weil das Zurückrollen ein Volume nicht verkleinern kann |
 | `needs.secrets` | Namen generierter Geheimnisse (Schlüssel `password`), einmal erzeugt, bleiben über Neuinstallationen erhalten |
 | `metadata.name` | Name der App, höchstens 40 Zeichen; Namen mit `cell-` am Anfang gehören der Plattform (ihre eigenen Clients in der Identität) |
-| `access` | `subdomain` (nicht `auth` und `api`, die gehören der Zelle), `port`, `service` (Standard: App-Name), `auth`, `groups` |
+| `access` | `subdomain` (nicht `auth` und `api`, die gehören der Zelle; je Zelle nur einmal: ein Host, den schon eine andere Route bedient, bleibt bei ihr; sonst reserviert der Operator den Host atomar als ConfigMap `host-<subdomain>` in `cell-system`, bevor er etwas einrichtet; wer zuerst reserviert, behält ihn, bis seine Routen ihn verlassen haben oder die App entfernt ist), `port`, `service` (Standard: App-Name), `auth`, `groups` |
 | `access.auth` | `mode`, `redirectPaths` (OIDC-Rückrufpfade), `secretKeys` (Schlüsselnamen im Client-Secret, wie Chart oder App sie erwarten) |
 | `access.groups` | Gruppen der Identität, deren Mitglieder die App nutzen dürfen; leer heißt alle Nutzer der Zelle. Braucht einen Login (`oidc` oder `proxy`); andere werden schon beim Login abgewiesen |
 | `health` | `path` (Standard `/`) und `timeoutSeconds` (Standard 300), siehe Status. Auch die Frist, in der ein Update gesund werden muss |
