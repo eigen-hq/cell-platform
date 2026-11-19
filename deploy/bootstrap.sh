@@ -30,6 +30,13 @@ BASE_DIR="$here/base"
 # shellcheck source=lib.sh
 source "$here/lib.sh"
 
+# Namespaces first, with a label owned by our own field manager. Without an
+# owned field, the next server-side apply would rewrite their managed fields.
+for ns in cert-manager cnpg-system cell-system; do
+  printf 'apiVersion: v1\nkind: Namespace\nmetadata:\n  name: %s\n  labels:\n    app.kubernetes.io/part-of: cell\n' "$ns"
+  echo ---
+done | kubectl apply --server-side --field-manager=cell-bootstrap -f - >/dev/null
+
 log "cert-manager $CERT_MANAGER_VERSION, CloudNativePG $CNPG_VERSION"
 kubectl apply --server-side -f "https://github.com/cert-manager/cert-manager/releases/download/$CERT_MANAGER_VERSION/cert-manager.yaml" >/dev/null
 kubectl apply --server-side -f "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$CNPG_VERSION/cnpg-$CNPG_VERSION.yaml" >/dev/null
@@ -55,11 +62,6 @@ esac
 log "cell config"
 kubectl apply -f - >/dev/null <<EOF
 apiVersion: v1
-kind: Namespace
-metadata:
-  name: cell-system
----
-apiVersion: v1
 kind: ConfigMap
 metadata:
   name: cell-config
@@ -75,13 +77,10 @@ s3_set=0
 for v in "${s3_vars[@]}"; do [ -n "${!v:-}" ] && s3_set=$((s3_set + 1)); done
 if [ "$s3_set" -eq "${#s3_vars[@]}" ]; then
   log "backup target: $CELL_BACKUP_S3_ENDPOINT/$CELL_BACKUP_S3_BUCKET"
-  kubectl -n cell-system create secret generic backup-target \
-    --from-literal=endpoint="$CELL_BACKUP_S3_ENDPOINT" \
-    --from-literal=bucket="$CELL_BACKUP_S3_BUCKET" \
-    --from-literal=region="$CELL_BACKUP_S3_REGION" \
-    --from-literal=accessKey="$CELL_BACKUP_S3_ACCESS_KEY" \
-    --from-literal=secretKey="$CELL_BACKUP_S3_SECRET_KEY" \
-    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  secret_manifest cell-system backup-target Opaque \
+    endpoint="$CELL_BACKUP_S3_ENDPOINT" bucket="$CELL_BACKUP_S3_BUCKET" \
+    region="$CELL_BACKUP_S3_REGION" accessKey="$CELL_BACKUP_S3_ACCESS_KEY" \
+    secretKey="$CELL_BACKUP_S3_SECRET_KEY" | kubectl apply -f - >/dev/null
 elif [ "$s3_set" -ne 0 ]; then
   die "backup target needs all of: ${s3_vars[*]}"
 fi

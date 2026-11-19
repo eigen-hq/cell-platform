@@ -56,26 +56,57 @@ func LoadCA(ctx context.Context, c client.Reader, cfg Config) ([]byte, error) {
 	return s.Data["ca.crt"], nil
 }
 
-// HTTPClient trusts the system roots plus the cell CA and sends *.localhost
-// to the loopback address (RFC 6761), so it works against a local cell
-// without any DNS setup.
-func HTTPClient(caPEM []byte) (*http.Client, error) {
-	pool, err := x509.SystemCertPool()
+// HTTPClient trusts the system roots for every host and the cell CA only for
+// hosts in domain. *.localhost goes to the loopback address (RFC 6761), so it
+// works against a local cell without any DNS setup.
+func HTTPClient(domain string, caPEM []byte) (*http.Client, error) {
+	system, err := x509.SystemCertPool()
 	if err != nil {
 		return nil, fmt.Errorf("system cert pool: %w", err)
 	}
-	if len(caPEM) > 0 && !pool.AppendCertsFromPEM(caPEM) {
-		return nil, fmt.Errorf("cell CA is not valid PEM")
+	tlsCfg := &tls.Config{RootCAs: system, MinVersion: tls.VersionTLS12}
+	if len(caPEM) > 0 {
+		cellRoots := x509.NewCertPool()
+		if !cellRoots.AppendCertsFromPEM(caPEM) {
+			return nil, fmt.Errorf("cell CA is not valid PEM")
+		}
+		// Standard verification is replaced, not skipped: VerifyConnection
+		// checks the chain against the roots that belong to the host.
+		tlsCfg.InsecureSkipVerify = true
+		tlsCfg.VerifyConnection = func(cs tls.ConnectionState) error {
+			if len(cs.PeerCertificates) == 0 {
+				return fmt.Errorf("tls: no server certificate")
+			}
+			if cs.ServerName == "" {
+				return fmt.Errorf("tls: refusing connection without server name (IP address?)")
+			}
+			roots := system
+			if InDomain(cs.ServerName, domain) {
+				roots = cellRoots
+			}
+			opts := x509.VerifyOptions{DNSName: cs.ServerName, Roots: roots, Intermediates: x509.NewCertPool()}
+			for _, c := range cs.PeerCertificates[1:] {
+				opts.Intermediates.AddCert(c)
+			}
+			_, err := cs.PeerCertificates[0].Verify(opts)
+			return err
+		}
 	}
 	dialer := &net.Dialer{Timeout: 5 * time.Second}
 	tr := http.DefaultTransport.(*http.Transport).Clone()
-	tr.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+	tr.TLSClientConfig = tlsCfg
 	tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(addr)
-		if err == nil && (host == "localhost" || strings.HasSuffix(host, ".localhost")) {
+		if err == nil && InDomain(host, "localhost") {
 			addr = net.JoinHostPort("127.0.0.1", port)
 		}
 		return dialer.DialContext(ctx, network, addr)
 	}
 	return &http.Client{Transport: tr, Timeout: 15 * time.Second}, nil
+}
+
+// InDomain reports whether host is domain or one of its subdomains.
+func InDomain(host, domain string) bool {
+	host, domain = strings.ToLower(strings.TrimSuffix(host, ".")), strings.ToLower(domain)
+	return host == domain || strings.HasSuffix(host, "."+domain)
 }

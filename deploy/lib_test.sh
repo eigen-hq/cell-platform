@@ -5,19 +5,24 @@ here=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-# Fake kubectl: behaviour comes from $FAKE (notfound | down | value), calls are logged.
+# Fake kubectl: behaviour comes from $FAKE (notfound | down | value). Calls go
+# to $FAKE_LOG, env files passed via --from-env-file to $FAKE_ENV.
 cat >"$tmp/kubectl" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >>"$FAKE_LOG"
-case "$FAKE:$1:$3" in
+for a in "$@"; do
+  case $a in --from-env-file=*) cat "${a#--from-env-file=}" >>"$FAKE_ENV" ;; esac
+done
+case "$FAKE:$*" in
+  *--dry-run=client*) echo "kind: Secret" ;;
+  *"create -f -"*) cat >/dev/null ;;
   notfound:*) echo 'Error from server (NotFound): secrets "x" not found' >&2; exit 1 ;;
   down:*) echo 'The connection to the server was refused' >&2; exit 1 ;;
-  value:-n:get) printf '%s' "$(printf 'secret-pw' | base64)" ;;
-  value:-n:create) ;;
+  value:*get*) printf '%s' "$(printf 'secret-pw' | base64)" ;;
 esac
 EOF
 chmod +x "$tmp/kubectl"
-export PATH="$tmp:$PATH" FAKE_LOG="$tmp/log"
+export PATH="$tmp:$PATH" FAKE_LOG="$tmp/log" FAKE_ENV="$tmp/env"
 source "$here/lib.sh"
 
 fails=0
@@ -33,8 +38,12 @@ export FAKE=down; check "secret_value aborts on API error" "1" "$( (secret_value
 check "ensure_secret aborts on API error" "1" "$( (ensure_secret ns s Opaque a=b >/dev/null 2>&1) && echo 0 || echo 1)"
 check "ensure_secret does not create after API error" "0" "$(grep -c create "$FAKE_LOG" || true)"
 : >"$FAKE_LOG"
-export FAKE=notfound; ensure_secret ns s Opaque a=b 2>/dev/null || true
-check "ensure_secret creates a missing secret" "1" "$(grep -c 'create secret generic s --type=Opaque --from-literal=a=b' "$FAKE_LOG")"
+: >"$FAKE_ENV"
+export FAKE=notfound
+ensure_secret ns s Opaque user=a password=hunter2
+check "ensure_secret creates a missing secret" "1" "$(grep -c 'create -f -' "$FAKE_LOG")"
+check "ensure_secret passes values via env file" "user=a password=hunter2" "$(paste -sd' ' "$FAKE_ENV")"
+check "ensure_secret keeps values out of argv" "0" "$(grep -c hunter2 "$FAKE_LOG" || true)"
 
 BASE_DIR=$tmp
 printf 'host: ${CELL_DOMAIN}\n' >"$tmp/t.yaml"

@@ -1,5 +1,7 @@
 # Local cells: a cell-owned root CA. Every app certificate is issued by the
-# ClusterIssuer "cell"; its CA lives in cert-manager/cell-ca.
+# ClusterIssuer "cell"; its CA lives in cert-manager/cell-ca. Name constraints
+# limit the CA to the cell domain (no IP addresses), so importing it into a browser cannot make
+# any other site trusted.
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
@@ -20,6 +22,15 @@ spec:
   privateKey:
     algorithm: ECDSA
     size: 256
+  nameConstraints:
+    critical: true
+    permitted:
+      dnsDomains:
+        - ${CELL_DOMAIN}
+    excluded:
+      ipRanges:
+        - 0.0.0.0/0
+        - ::/0
   issuerRef:
     name: cell-selfsigned
     kind: ClusterIssuer

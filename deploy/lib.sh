@@ -37,14 +37,22 @@ secret_value() {
   printf '%s' "$out" | base64 -d
 }
 
+# secret_manifest prints a Secret with KEY=VALUE pairs from the arguments.
+# Values travel through a pipe, never through the argv of another process.
+secret_manifest() {
+  local ns=$1 name=$2 type=$3
+  shift 3
+  kubectl -n "$ns" create secret generic "$name" --type="$type" \
+    --from-env-file=<(printf '%s\n' "$@") --dry-run=client -o yaml
+}
+
 # ensure_secret creates a secret once and never touches it again.
 # Creating fails loudly if it appeared in the meantime.
 ensure_secret() {
-  local ns=$1 name=$2 type=$3 out
-  shift 3
+  local ns=$1 name=$2 out
   if out=$(kubectl -n "$ns" get secret "$name" -o name 2>&1); then
     return 0
   fi
   [[ $out == *NotFound* ]] || die "read secret $ns/$name: $out"
-  kubectl -n "$ns" create secret generic "$name" --type="$type" "${@/#/--from-literal=}" >/dev/null
+  secret_manifest "$@" | kubectl create -f - >/dev/null
 }

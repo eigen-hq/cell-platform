@@ -12,10 +12,10 @@ export KUBECONFIG := $(CURDIR)/.cell/kubeconfig
 K3D := $(BIN)/k3d-$(K3D_VERSION)
 KUBECTL := $(BIN)/kubectl-$(KUBECTL_VERSION)
 
-.PHONY: help tools cell-up cell-down status test e2e demo
+.PHONY: help tools cell-up cell-down status test e2e demo lima vm-test
 
 help:
-	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
+	@grep -hE '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
 
 $(K3D):
 	@mkdir -p $(BIN)
@@ -47,3 +47,14 @@ test: ## Unit and controller tests
 
 e2e: ## End-to-end tests against the local cell
 	go test -tags e2e -count=1 -timeout 30m ./test/e2e/...
+
+LIMACTL := $(BIN)/lima/bin/limactl
+
+$(LIMACTL):
+	@mkdir -p $(BIN)/lima
+	curl -fsSL https://github.com/lima-vm/lima/releases/download/v$(LIMA_VERSION)/lima-$(LIMA_VERSION)-$(shell uname -s)-$(shell uname -m).tar.gz | tar xz -C $(BIN)/lima
+
+lima: $(LIMACTL)
+
+vm-test: $(LIMACTL) ## M0 acceptance on a fresh Ubuntu VM (Lima, local)
+	test/vm/run.sh

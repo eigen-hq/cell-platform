@@ -180,7 +180,7 @@ func checkLogin(ctx context.Context, c client.Client, cfg cell.Config) result {
 	if err != nil {
 		return result{"login", fail, err.Error()}
 	}
-	hc, err := cell.HTTPClient(ca)
+	hc, err := cell.HTTPClient(cfg.Domain, ca)
 	if err != nil {
 		return result{"login", fail, err.Error()}
 	}
