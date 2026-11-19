@@ -32,10 +32,13 @@ var taskFree = map[string]bool{
 
 type taskKey struct{}
 
-// taskOf is the task the request's agent works in ("" for people).
-func taskOf(ctx context.Context) string {
-	name, _ := ctx.Value(taskKey{}).(string)
-	return name
+// taskRef is the task an agent's request works in.
+type taskRef struct{ Name, App string }
+
+// taskOf is the task the request's agent works in (zero for people).
+func taskOf(ctx context.Context) taskRef {
+	ref, _ := ctx.Value(taskKey{}).(taskRef)
+	return ref
 }
 
 // inTask records an agent's call as a step of the task it names and
@@ -51,11 +54,13 @@ func (s *Server) inTask(r *http.Request, c *Caller) (context.Context, error) {
 		call = call[:1024]
 	}
 	backoff := wait.Backoff{Steps: 10, Duration: 10 * time.Millisecond, Factor: 1.5, Jitter: 0.5}
+	var ref taskRef
 	err := retry.RetryOnConflict(backoff, func() error {
 		t, err := s.task(r.Context(), name)
 		if err != nil {
 			return err
 		}
+		ref = taskRef{Name: t.Name, App: t.Spec.App}
 		if t.Status.Phase != cellv1.RunRunning || t.Status.Assignee != c.Username {
 			return errorf(http.StatusConflict, "task %s is not running for you (phase %s, assignee %q)", name, t.Status.Phase, t.Status.Assignee)
 		}
@@ -68,7 +73,7 @@ func (s *Server) inTask(r *http.Request, c *Caller) (context.Context, error) {
 	if err != nil {
 		return nil, err
 	}
-	return context.WithValue(r.Context(), taskKey{}, name), nil
+	return context.WithValue(r.Context(), taskKey{}, ref), nil
 }
 
 func (s *Server) task(ctx context.Context, name string) (*cellv1.Task, error) {

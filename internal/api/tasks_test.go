@@ -42,7 +42,7 @@ func (h *harness) steps(task string) []string {
 // call of theirs as a step before it serves it; changes they propose name
 // the task.
 func TestAgentsWorkInTasks(t *testing.T) {
-	h := newHarness(t, installed("notes", "oidc"), pendingTask("notes-diagnose-1"), pendingTask("notes-diagnose-2"))
+	h := newHarness(t, installed("notes", "oidc"), installed("plain", "none"), pendingTask("notes-diagnose-1"), pendingTask("notes-diagnose-2"))
 
 	h.agentTask = ""
 	if code, body := h.do("GET", "/v0/apps/notes", "agent", nil); code != 400 || !strings.Contains(field(body, "error").(string), TaskHeader) {
@@ -76,6 +76,10 @@ func TestAgentsWorkInTasks(t *testing.T) {
 	if got, want := h.steps("notes-diagnose-1"), []string{"GET /v0/apps/notes?x=1", "PATCH /v0/apps/notes"}; !slices.Equal(got, want) {
 		t.Errorf("steps %v, want %v", got, want)
 	}
+	// Proposals go only to the task's app; the refused call is a step too.
+	if code, _ := h.do("PATCH", "/v0/apps/plain", "agent", map[string]any{"patch": map[string]any{"version": "9"}, "reason": "x"}); code != 403 {
+		t.Errorf("proposal for another app: %d", code)
+	}
 	// A person's proposal names no task, whatever header it sends.
 	_, body = h.do("PATCH", "/v0/apps/notes", "admin", map[string]any{"patch": map[string]any{"version": "1.2"}})
 	if field(body, "task") != nil {
@@ -100,12 +104,18 @@ func TestAgentsWorkInTasks(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	if n := len(h.steps("notes-diagnose-1")); n != 10 || slices.ContainsFunc(codes, func(c int) bool { return c != 200 }) {
+	if n := len(h.steps("notes-diagnose-1")); n != 11 || slices.ContainsFunc(codes, func(c int) bool { return c != 200 }) {
 		t.Errorf("parallel calls: %v, %d steps", codes, n)
 	}
 
-	_, body = h.do("GET", "/v0/tasks/notes-diagnose-1", "member", nil)
-	if ch := field(body, "changes").([]any); len(ch) != 1 || ch[0] != change || len(field(body, "steps").([]any)) != 10 {
+	// Tasks hold what agents read (logs in results): not for members.
+	for _, path := range []string{"/v0/tasks", "/v0/tasks/notes-diagnose-1"} {
+		if code, _ := h.do("GET", path, "member", nil); code != 403 {
+			t.Errorf("member read %s: %d", path, code)
+		}
+	}
+	_, body = h.do("GET", "/v0/tasks/notes-diagnose-1", "admin", nil)
+	if ch := field(body, "changes").([]any); len(ch) != 1 || ch[0] != change || len(field(body, "steps").([]any)) != 11 {
 		t.Errorf("task view %v", body)
 	}
 	if code, _ := h.do("POST", "/v0/tasks/notes-diagnose-1/finish", "admin", map[string]any{"result": "x"}); code != 409 {
@@ -127,7 +137,7 @@ func TestAgentsWorkInTasks(t *testing.T) {
 	if code != 200 || field(body, "phase") != "Failed" {
 		t.Errorf("failed finish: %d %v", code, body)
 	}
-	_, body = h.do("GET", "/v0/tasks?phase=Running", "member", nil)
+	_, body = h.do("GET", "/v0/tasks?phase=Running", "admin", nil)
 	if names := names(body); !slices.Equal(names, []string{agentWork}) {
 		t.Errorf("running tasks %v", names)
 	}
@@ -178,7 +188,7 @@ func TestCreateTask(t *testing.T) {
 	if code != 201 || field(body, "phase") != "Pending" || field(body, "requester", "name") != "admin-user" || field(body, "input") != compose {
 		t.Fatalf("package task: %d %v", code, body)
 	}
-	_, body = h.do("GET", "/v0/tasks?app=memo", "member", nil)
+	_, body = h.do("GET", "/v0/tasks?app=memo", "admin", nil)
 	if len(body.([]any)) != 1 {
 		t.Errorf("tasks of memo: %v", body)
 	}
@@ -252,7 +262,10 @@ func TestInstallFromManifest(t *testing.T) {
 				fieldpath.ErrorList{fieldpath.Invalid(fieldpath.NewPath("spec", "access"), "api", "subdomains auth and api belong to the cell")})
 		}
 		return c.Create(ctx, obj, opts...)
-	}}, installed("notes", "oidc"))
+	}}, installed("notes", "oidc"), &cellv1.Task{ObjectMeta: metav1.ObjectMeta{Name: "memo-package-1"},
+		Spec:   cellv1.TaskSpec{Kind: "package", App: "memo", Input: "services: {}", Requester: cellv1.Requester{Kind: "Human", Name: "admin-user"}},
+		Status: cellv1.TaskStatus{Phase: cellv1.RunRunning, Assignee: "agent-user"}})
+	h.agentTask = "memo-package-1"
 	spec := map[string]any{"version": "1.0", "source": map[string]any{"image": map[string]any{"repository": "example/memo"}},
 		"needs":  map[string]any{"volumes": []any{map[string]any{"name": "data", "size": "1Gi", "mountPath": "/data"}}},
 		"access": map[string]any{"subdomain": "memo", "port": 5230, "auth": map[string]any{"mode": "proxy"}}}
@@ -282,7 +295,7 @@ func TestInstallFromManifest(t *testing.T) {
 		field(body, "patch", "access", "port") != 5230.0 || !strings.Contains(field(body, "reason").(string), "not in the catalog") {
 		t.Fatalf("install from a manifest: %d %v", code, body)
 	}
-	if code, _ := h.do("POST", "/v0/apps", "agent", map[string]any{"catalog": "notes", "name": "notes2", "subdomain": "notes2"}); code != 202 {
+	if code, _ := h.do("POST", "/v0/apps", "admin", map[string]any{"catalog": "notes", "name": "notes2", "subdomain": "notes2"}); code != 202 {
 		t.Errorf("catalog install: %d", code)
 	}
 	if len(created) != 0 {

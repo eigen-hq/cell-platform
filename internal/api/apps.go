@@ -210,8 +210,13 @@ func (s *Server) getApp(w http.ResponseWriter, r *http.Request, _ *Caller) error
 func (s *Server) record(ctx context.Context, c *Caller, w http.ResponseWriter, spec cellv1.ChangeRequestSpec) error {
 	spec.Requester = cellv1.Requester{Kind: "Human", Name: c.Username}
 	if c.Role == RoleAgent {
+		// An agent proposes changes only for the app its task is about.
+		task := taskOf(ctx)
+		if spec.App != task.App {
+			return errorf(http.StatusForbidden, "task %s is about app %s, not %s", task.Name, task.App, spec.App)
+		}
 		spec.Requester.Kind = "Agent"
-		spec.Task = taskOf(ctx)
+		spec.Task = task.Name
 	}
 	spec.Approval = cellv1.Approval{Required: true}
 	if spec.Risk == "" {

@@ -118,9 +118,9 @@ func (s *Server) routes() []route {
 		{"GET", "/v0/apps/{name}/pods", RoleAgent, s.listPods},
 		{"GET", "/v0/apps/{name}/logs", RoleAgent, s.appLogs},
 		{"GET", "/v0/apps/{name}/events", RoleAgent, s.appEvents},
-		{"GET", "/v0/tasks", RoleMember, s.listTasks},
+		{"GET", "/v0/tasks", RoleAgent, s.listTasks},
 		{"POST", "/v0/tasks", RoleAdmin, s.createTask},
-		{"GET", "/v0/tasks/{name}", RoleMember, s.getTask},
+		{"GET", "/v0/tasks/{name}", RoleAgent, s.getTask},
 		{"POST", "/v0/tasks/{name}/claim", RoleAgent, s.claimTask},
 		{"POST", "/v0/tasks/{name}/finish", RoleAgent, s.finishTask},
 	}

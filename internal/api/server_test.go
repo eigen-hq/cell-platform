@@ -437,7 +437,7 @@ func TestInstallConflictsAndRejection(t *testing.T) {
 	if err := h.kube.Create(context.Background(), &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "app-old"}}); err != nil {
 		t.Fatal(err)
 	}
-	code, body = h.do("POST", "/v0/apps", "agent", map[string]any{"catalog": "notes", "name": "old", "subdomain": "old"})
+	code, body = h.do("POST", "/v0/apps", "admin", map[string]any{"catalog": "notes", "name": "old", "subdomain": "old"})
 	if code != 202 || field(body, "risk") != "high" || !strings.Contains(field(body, "reason").(string), "namespace app-old") {
 		t.Errorf("install over retained data: %d %v", code, body)
 	}

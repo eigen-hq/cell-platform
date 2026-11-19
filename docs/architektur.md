@@ -99,7 +99,7 @@ Kubernetes startet die App neu. Bleibt sie über eine Schwelle hinaus ungesund, 
 
 1. Auslöser: eine `Task`, angelegt vom Operator bei `NeedsAttention` oder von einem Admin (Diagnose, neu zu paketierende App).
 2. Der Agent übernimmt sie und liest Status, Pods, Logs und Ereignisse über die API; jeder Aufruf steht als Schritt in der Aufgabe.
-3. Er schlägt einen `ChangeRequest` mit Diff und Begründung vor; die Risikostufe setzt die API.
+3. Er schlägt einen `ChangeRequest` mit Diff und Begründung vor, nur für die App seiner Aufgabe; die Risikostufe setzt die API.
 4. Er beendet die Aufgabe mit seiner Antwort: Ursache, Belege, vorgeschlagene Änderung.
 5. Nach Freigabe führt der Operator die Änderung wie ein Update aus, mit Backup und Rollback.
 
@@ -140,7 +140,7 @@ REST mit OpenAPI-Beschreibung (`api/openapi.yaml`), Anmeldung über Tokens der I
 | `/users`, `/groups` | Organisationsstruktur |
 | `/changes` | Änderungsprotokoll, Freigeben und Ablehnen |
 | `/apps/{name}/pods`, `/logs`, `/events` | Diagnose (Admins und Agenten) |
-| `/tasks` | Aufgaben für Agenten mit ihren Schritten |
+| `/tasks` | Aufgaben für Agenten mit ihren Schritten (Admins und Agenten; Antworten können Logs zitieren) |
 | `/events` | Live-Ereignisse als Stream |
 
 Dazu der eine MCP-Endpunkt des Gateways für die Agenten in der Oberfläche.

@@ -24,8 +24,10 @@ info:
     finishing tasks, every call of an agent names the task it belongs to in
     the header `X-Cell-Task`; the API records the call as a step of the
     task before it serves it, and changes the agent proposes name the task.
+    An agent proposes changes only for the app of its task (403 otherwise).
     A call outside a running task of the agent is refused (400, 404, 409);
-    that is why every operation can answer with an error.
+    that is why every operation can answer with an error. Tasks are for
+    agents and admins: results can quote logs.
 servers:
   - url: https://api.cell.localhost
 security:
