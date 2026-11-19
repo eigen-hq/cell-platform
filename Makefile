@@ -13,7 +13,7 @@ K3D := $(BIN)/k3d-$(K3D_VERSION)
 KUBECTL := $(BIN)/kubectl-$(KUBECTL_VERSION)
 FLUX := $(BIN)/flux-$(FLUX_VERSION)
 
-.PHONY: help tools cell-up cell-down status test e2e demo lima vm-test generate
+.PHONY: help tools cell-up cell-down status test e2e demo lima vm-test generate dr-test
 
 help:
 	@grep -hE '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
@@ -41,7 +41,9 @@ tools: $(K3D) $(KUBECTL) $(FLUX) ## Download pinned CLI tools into bin/
 cell-up: tools ## Start the local cell (k3d) with all base services
 	deploy/local-up.sh
 
-cell-down: tools ## Delete the local cell
+cell-down: tools ## Delete the local cell (the backup S3 next to it stays)
+	@if docker inspect -f '{{json .NetworkSettings.Networks}}' cell-backup-s3 2>/dev/null | grep -q '"k3d-$(CELL_NAME)"'; then \
+		docker network disconnect k3d-$(CELL_NAME) cell-backup-s3; fi
 	k3d cluster delete $(CELL_NAME)
 	rm -f $(KUBECONFIG)
 
@@ -54,7 +56,10 @@ test: ## Unit and controller tests (envtest)
 	KUBEBUILDER_ASSETS="$$(go tool setup-envtest use $(ENVTEST_K8S_VERSION) --bin-dir $(BIN)/envtest -p path)" go test ./...
 
 e2e: ## End-to-end tests against the local cell
-	go test -tags e2e -count=1 -timeout 30m ./test/e2e/...
+	go test -tags e2e -count=1 -timeout 60m ./test/e2e/...
+
+dr-test: ## Restore an app into a freshly recreated local cell (destroys the cell)
+	go test -tags 'e2e dr' -count=1 -timeout 60m -run TestRestoreIntoFreshCell -v ./test/e2e/...
 
 LIMACTL := $(BIN)/lima/bin/limactl
 

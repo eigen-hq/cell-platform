@@ -69,31 +69,59 @@ func caBundle(app *cellv1.App, cellCA, systemCAs []byte) *corev1.ConfigMap {
 
 func dbName(app *cellv1.App) string { return strings.ReplaceAll(app.Name, "-", "_") }
 
-// database is a single-instance CloudNativePG cluster owned by the app.
-// Hibernation keeps its volume but stops the pod (app removed, data kept).
-func database(app *cellv1.App, hibernate bool) *unstructured.Unstructured {
+// database is the app's single-instance CloudNativePG cluster as created.
+// The owner role is managed, so its password always follows the
+// db-credentials secret (also after restoring another cell's database).
+// archive names the WAL archive; empty means the cell has no backup target.
+func database(app *cellv1.App, archive string) *unstructured.Unstructured {
 	size := app.Spec.Needs.Database.Size.String()
 	if app.Spec.Needs.Database.Size.IsZero() {
 		size = "1Gi"
 	}
-	u := &unstructured.Unstructured{Object: map[string]any{
+	spec := map[string]any{
+		"instances": int64(1),
+		"storage":   map[string]any{"size": size},
+		"bootstrap": map[string]any{"initdb": map[string]any{
+			"database": dbName(app), "owner": dbName(app),
+			"secret": map[string]any{"name": dbCredentials},
+		}},
+		"managed": map[string]any{"roles": []any{ownerRole(app)}},
+	}
+	if archive != "" {
+		spec["plugins"] = []any{archiverPlugin(archive)}
+	}
+	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "postgresql.cnpg.io/v1",
 		"kind":       "Cluster",
-		"metadata": map[string]any{
-			"name": dbCluster, "namespace": Namespace(app.Name), "labels": toAny(labels(app)),
-		},
-		"spec": map[string]any{
-			"instances": int64(1),
-			"storage":   map[string]any{"size": size},
-			"bootstrap": map[string]any{"initdb": map[string]any{
-				"database": dbName(app), "owner": dbName(app),
-				"secret": map[string]any{"name": dbCredentials},
-			}},
-		},
+		"metadata":   map[string]any{"name": dbCluster, "namespace": Namespace(app.Name), "labels": toAny(labels(app))},
+		"spec":       spec,
 	}}
-	if hibernate {
-		u.SetAnnotations(map[string]string{hibernateKey: "on"})
+}
+
+func ownerRole(app *cellv1.App) map[string]any {
+	return map[string]any{
+		"name": dbName(app), "ensure": "present", "login": true,
+		"passwordSecret": map[string]any{"name": dbCredentials},
 	}
+}
+
+// recoveryDatabase is the cluster recovered to the end of a base backup,
+// archiving into a new WAL archive.
+func recoveryDatabase(app *cellv1.App, from cellv1.DatabaseBackup, archive, restoreUID string) *unstructured.Unstructured {
+	u := database(app, archive)
+	u.SetAnnotations(map[string]string{restoreAnnotation: restoreUID})
+	spec := u.Object["spec"].(map[string]any)
+	spec["bootstrap"] = map[string]any{"recovery": map[string]any{
+		"source": "origin", "database": dbName(app), "owner": dbName(app),
+		"secret":         map[string]any{"name": dbCredentials},
+		"recoveryTarget": map[string]any{"backupID": from.BackupID, "targetImmediate": true},
+	}}
+	spec["externalClusters"] = []any{map[string]any{
+		"name": "origin",
+		"plugin": map[string]any{"name": barmanPlugin, "parameters": map[string]any{
+			"barmanObjectName": objectStore, "serverName": from.ServerName,
+		}},
+	}}
 	return u
 }
 
@@ -226,6 +254,10 @@ func helmWorkload(app *cellv1.App, src cellv1.HelmSource) ([]client.Object, erro
 	}
 	release := map[string]any{
 		"interval": "10m",
+		// Never left suspended by the operator, and drift (e.g. workloads a
+		// restore scaled to zero) is put back to the chart's state.
+		"suspend":        false,
+		"driftDetection": map[string]any{"mode": "enabled"},
 		"postRenderers": []any{map[string]any{"kustomize": map[string]any{"patches": []any{map[string]any{
 			"target": map[string]any{"kind": "PersistentVolumeClaim"},
 			"patch":  "apiVersion: v1\nkind: PersistentVolumeClaim\nmetadata:\n  name: any\n  annotations:\n    helm.sh/resource-policy: keep\n",

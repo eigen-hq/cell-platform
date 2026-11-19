@@ -1,0 +1,119 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.23.0
+  name: backups.cell.internal
+spec:
+  group: cell.internal
+  names:
+    kind: Backup
+    listKind: BackupList
+    plural: backups
+    singular: backup
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.app
+      name: App
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.completedAt
+      name: Completed
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Backup is one backup of an app outside the cell: its database (base
+          backup in the object store, WAL archived continuously) and its volumes
+          (restic snapshot tagged with the backup name and database backup).
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              app:
+                type: string
+                x-kubernetes-validations:
+                - message: app is immutable
+                  rule: self == oldSelf
+              reason:
+                description: 'Reason: scheduled, manual, pre-change or a free text.'
+                type: string
+            required:
+            - app
+            type: object
+          status:
+            properties:
+              claims:
+                description: Claims are the volumes in the snapshot.
+                items:
+                  type: string
+                type: array
+              claimsRecorded:
+                description: |-
+                  ClaimsRecorded is true when Claims is the complete list (also when
+                  empty); older backups did not record their volumes.
+                type: boolean
+              completedAt:
+                format: date-time
+                type: string
+              database:
+                description: Database is set when the app has a database.
+                properties:
+                  backupId:
+                    type: string
+                  serverName:
+                    description: ServerName is the archive the backup and its WAL
+                      live in.
+                    type: string
+                required:
+                - serverName
+                type: object
+              message:
+                type: string
+              phase:
+                description: Lifecycle of Backup, Restore and ChangeRequest.
+                enum:
+                - Pending
+                - WaitingForApproval
+                - Running
+                - Completed
+                - Failed
+                - Succeeded
+                - RolledBack
+                - Rejected
+                type: string
+              startedAt:
+                format: date-time
+                type: string
+              volumesSnapshot:
+                description: Volumes is the restic snapshot of the app's volumes.
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -17,6 +17,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 
@@ -202,7 +203,10 @@ func install(t *testing.T, tc *testCell, app *cellv1.App, timeout time.Duration)
 		if err := tc.kube.Get(ctx, client.ObjectKey{Name: app.Name}, &a); err != nil {
 			return err
 		}
-		if a.Status.Phase != cellv1.PhaseReady || !apimeta.IsStatusConditionTrue(a.Status.Conditions, "Ready") {
+		// Healthy for its current spec; NeedsAttention after an earlier
+		// failed change still counts as running.
+		c := apimeta.FindStatusCondition(a.Status.Conditions, "Ready")
+		if c == nil || c.Status != metav1.ConditionTrue || c.ObservedGeneration != a.Generation {
 			return fmt.Errorf("%s is %s: %+v", app.Name, a.Status.Phase, a.Status.Conditions)
 		}
 		return nil

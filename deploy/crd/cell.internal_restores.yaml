@@ -1,0 +1,146 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.23.0
+  name: restores.cell.internal
+spec:
+  group: cell.internal
+  names:
+    kind: Restore
+    listKind: RestoreList
+    plural: restores
+    singular: restore
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.app
+      name: App
+      type: string
+    - jsonPath: .spec.backup
+      name: Backup
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Restore brings an app back to the state of a backup: it stops the app,
+          restores its volumes and database, and starts it again. The backup is
+          found by name in the object store, so a fresh cell can restore too.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              app:
+                type: string
+                x-kubernetes-validations:
+                - message: app is immutable
+                  rule: self == oldSelf
+              backup:
+                default: latest
+                description: Backup name, or "latest" for the newest backup of the
+                  app.
+                type: string
+              change:
+                description: |-
+                  Change names the ChangeRequest this restore rolls back; it then runs
+                  under that change's hold on the app.
+                type: string
+                x-kubernetes-validations:
+                - message: change is immutable
+                  rule: self == oldSelf
+            required:
+            - app
+            type: object
+          status:
+            properties:
+              appUID:
+                description: AppUID binds the restore to the app it started on.
+                type: string
+              completedAt:
+                format: date-time
+                type: string
+              message:
+                type: string
+              phase:
+                description: Lifecycle of Backup, Restore and ChangeRequest.
+                enum:
+                - Pending
+                - WaitingForApproval
+                - Running
+                - Completed
+                - Failed
+                - Succeeded
+                - RolledBack
+                - Rejected
+                type: string
+              replicas:
+                additionalProperties:
+                  format: int32
+                  type: integer
+                description: Replicas of the app's workloads before it was stopped.
+                type: object
+              resolved:
+                description: Resolved is what the backup name pointed to in the object
+                  store.
+                properties:
+                  backup:
+                    type: string
+                  claims:
+                    description: Claims in the snapshot, complete if ClaimsRecorded.
+                    items:
+                      type: string
+                    type: array
+                  claimsRecorded:
+                    type: boolean
+                  database:
+                    properties:
+                      backupId:
+                        type: string
+                      serverName:
+                        description: ServerName is the archive the backup and its
+                          WAL live in.
+                        type: string
+                    required:
+                    - serverName
+                    type: object
+                  volumesSnapshot:
+                    type: string
+                required:
+                - backup
+                type: object
+              startedAt:
+                format: date-time
+                type: string
+              step:
+                description: 'Step is the current step: lookup, stop, volumes, database,
+                  start.'
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

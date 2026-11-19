@@ -1,6 +1,9 @@
 package controller
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -97,5 +100,45 @@ func TestReadyConditionPerConditionGeneration(t *testing.T) {
 	u.SetGeneration(1)
 	if ok, _, _ := readyCondition(u); !ok {
 		t.Error("current condition not ready")
+	}
+}
+
+// The login proxy counts as ready only when the outpost redirects to the
+// login with the provider's current client ID.
+func TestForwardAuthProbe(t *testing.T) {
+	clientID := "old-client"
+	outpost := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Forwarded-Host") != "board.cell.test" {
+			http.NotFound(w, r)
+			return
+		}
+		switch r.URL.Path {
+		case "/outpost.goauthentik.io/auth/traefik":
+			http.Redirect(w, r, "https://board.cell.test/outpost.goauthentik.io/start?rd=%2F", http.StatusFound)
+		case "/outpost.goauthentik.io/start":
+			http.Redirect(w, r, "https://auth.cell.test/application/o/authorize/?client_id="+clientID, http.StatusFound)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer outpost.Close()
+	r := &AppReconciler{OutpostURL: outpost.URL}
+	if err := r.forwardAuth(context.Background(), "board.cell.test", "new-client"); err == nil {
+		t.Error("stale login client accepted")
+	}
+	clientID = "new-client"
+	if err := r.forwardAuth(context.Background(), "board.cell.test", "new-client"); err != nil {
+		t.Errorf("current login client rejected: %v", err)
+	}
+	if err := r.forwardAuth(context.Background(), "other.cell.test", "new-client"); err == nil {
+		t.Error("host the outpost does not serve accepted")
+	}
+	// Without the start hop (authentik 2026.8 redirects straight to the login).
+	direct := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://auth.cell.test/application/o/authorize/?client_id=new-client", http.StatusFound)
+	}))
+	defer direct.Close()
+	if err := (&AppReconciler{OutpostURL: direct.URL}).forwardAuth(context.Background(), "board.cell.test", "new-client"); err != nil {
+		t.Errorf("direct redirect rejected: %v", err)
 	}
 }

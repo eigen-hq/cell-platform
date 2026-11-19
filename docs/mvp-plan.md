@@ -4,8 +4,8 @@ Erste Ausbaustufe der Plattform. Jeder Meilenstein endet mit etwas Vorführbarem
 
 ## Stand
 
-- Aktueller Meilenstein: **M2**
-- Abgeschlossen: M0, M1 (19.11.2026)
+- Aktueller Meilenstein: **M3**
+- Abgeschlossen: M0, M1, M2 (19.11.2026)
 
 ## Ziel-Demo
 
@@ -89,6 +89,16 @@ Akzeptanz:
 - Fehlerhaftes Update wird automatisch zurückgerollt; Daten und Version sind wie vorher
 - Jede Änderung hat einen Protokolleintrag mit Urheber, Diff und Ergebnis
 
+Ergebnis (19.11.2026): Backups über barman-cloud und restic (E-23 bis E-28), lokales Backup-Ziel neben der Zelle.
+
+| Prüfung | Wie | Ergebnis |
+|---|---|---|
+| Restore in frischer Zelle | `make dr-test`: Markierung in Datenbank und Volume von Forgejo, Backup, Zelle löschen und neu aufbauen, Forgejo installieren, Restore aus dem Bucket, danach Login mit der neuen Identität | Daten vollständig, Login funktioniert; rund 12 min inklusive Neuaufbau der Zelle |
+| Restore in derselben Zelle | `make e2e`, `TestBackupAndRestore`: Markierung, Backup, Markierung überschreiben, Restore | Forgejo und Nextcloud wieder auf dem Stand des Backups, je rund 100 s |
+| Fehlerhaftes Update | `make e2e`, `TestFailedUpdateRollsBack`: `ChangeRequest` auf eine Version, die es nicht gibt | nach 90 s Health-Frist zurück auf 15.0.11, Daten wie vorher, App `NeedsAttention`, `ChangeRequest` `RolledBack` |
+| Änderungsprotokoll | jeder `ChangeRequest` hält Urheber, Begründung, Risiko, Patch, vorige Spec, Backup, Restore, Ergebnis und Zeiten | geprüft in `make test` (envtest) und `make e2e` |
+| Steuerlogik | `make test`: geplantes Backup, Freigabe, erfolgreiche Änderung, Rollback mit Restore, Ablehnung | bestanden |
+
 ### M3 – Plattform-API v0
 
 Alles aus M1 und M2 geht ohne `kubectl`.
@@ -97,6 +107,7 @@ Umfang:
 - REST-API für Katalog, Apps, Backups, Zugriff, Nutzer und Gruppen, Änderungsprotokoll, Ereignis-Stream
 - Anmeldung über Tokens der Identität
 - OpenAPI-Beschreibung im Repo als Vertrag mit der Oberfläche
+- Freigaben nur über die API: Wer eine Änderung anfragt, kann `approval` nicht setzen; entscheiden darf nur eine berechtigte Rolle über einen eigenen Aufruf. Bis dahin schreiben nur Cluster-Admins `ChangeRequest`s
 
 Akzeptanz:
 - Der Ende-zu-Ende-Test aus M1 und M2 läuft ausschließlich über die API

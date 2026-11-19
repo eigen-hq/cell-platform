@@ -1,0 +1,182 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.23.0
+  name: changerequests.cell.internal
+spec:
+  group: cell.internal
+  names:
+    kind: ChangeRequest
+    listKind: ChangeRequestList
+    plural: changerequests
+    shortNames:
+    - cr
+    singular: changerequest
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.app
+      name: App
+      type: string
+    - jsonPath: .spec.requester.name
+      name: Requester
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          ChangeRequest is a proposed or executed change to an app: who wants it,
+          why, the diff, and what happened. All ChangeRequests together are the
+          change log. An approved change runs as backup, change, health check and,
+          on failure, rollback to the backup.
+
+          Its backup and rollback are named <name>-pre and <name>-rollback.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              app:
+                type: string
+                x-kubernetes-validations:
+                - message: app is immutable
+                  rule: self == oldSelf
+              approval:
+                default:
+                  required: true
+                description: |-
+                  Approval is required before anything changes (A-10). Approving or
+                  rejecting is the API's job; it records who decided.
+                properties:
+                  at:
+                    format: date-time
+                    type: string
+                  by:
+                    type: string
+                  decision:
+                    enum:
+                    - Approved
+                    - Rejected
+                    type: string
+                  required:
+                    default: true
+                    type: boolean
+                type: object
+              patch:
+                description: Patch is a JSON merge patch on the App spec.
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+              reason:
+                type: string
+              requester:
+                properties:
+                  kind:
+                    enum:
+                    - Human
+                    - Agent
+                    - Operator
+                    type: string
+                  name:
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+              risk:
+                default: medium
+                enum:
+                - low
+                - medium
+                - high
+                type: string
+            required:
+            - app
+            - patch
+            - requester
+            type: object
+            x-kubernetes-validations:
+            - message: patch is immutable
+              rule: '!has(oldSelf.patch) || self.patch == oldSelf.patch'
+          status:
+            properties:
+              appUID:
+                description: AppUID binds the change to the app it started on.
+                type: string
+              appliedAt:
+                description: AppliedAt is when the change was written to the App.
+                format: date-time
+                type: string
+              appliedGeneration:
+                description: AppliedGeneration is the App generation that carries
+                  the change.
+                format: int64
+                type: integer
+              backup:
+                description: Backup taken before the change (rollback point).
+                type: string
+              baseGeneration:
+                description: BaseGeneration is the App generation PreviousSpec was
+                  read at.
+                format: int64
+                type: integer
+              finishedAt:
+                format: date-time
+                type: string
+              message:
+                type: string
+              phase:
+                description: Lifecycle of Backup, Restore and ChangeRequest.
+                enum:
+                - Pending
+                - WaitingForApproval
+                - Running
+                - Completed
+                - Failed
+                - Succeeded
+                - RolledBack
+                - Rejected
+                type: string
+              previousSpec:
+                description: PreviousSpec is the App spec before the change.
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+              restore:
+                description: Restore used for the rollback.
+                type: string
+              startedAt:
+                format: date-time
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+        x-kubernetes-validations:
+        - message: name must be at most 244 characters
+          rule: size(self.metadata.name) <= 244
+    served: true
+    storage: true
+    subresources:
+      status: {}

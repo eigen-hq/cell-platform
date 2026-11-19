@@ -68,13 +68,14 @@ spec:
 | `source.image` | `repository`, `tag` (Standard: `version`), `command`, `args`, `env` (wie bei Kubernetes, inklusive `valueFrom`), `files` |
 | `source.image.files` | Dateien, die schreibgeschützt in den Container kommen (`path`, `content`, `executable`). So laufen app-spezifische Schritte nach der Installation, zum Beispiel als Start-Hook des Images |
 | `needs.database` | `engine: postgres`, `size`. Eine eigene CloudNativePG-Datenbank je App |
-| `needs.volumes` | `name`, `size`, `mountPath` (Image-Apps). Charts legen ihre Volumes selbst an |
+| `needs.volumes` | `name`, `size`, `mountPath` (Image-Apps), höchstens 16. Charts legen ihre Volumes selbst an. Die Größe lässt sich wie bei der Datenbank noch nicht ändern, weil das Zurückrollen ein Volume nicht verkleinern kann |
 | `needs.secrets` | Namen generierter Geheimnisse (Schlüssel `password`), einmal erzeugt, bleiben über Neuinstallationen erhalten |
 | `access` | `subdomain`, `port`, `service` (Standard: App-Name), `auth` |
 | `access.auth` | `mode`, `redirectPaths` (OIDC-Rückrufpfade), `secretKeys` (Schlüsselnamen im Client-Secret, wie Chart oder App sie erwarten) |
-| `health` | `path` (Standard `/`) und `timeoutSeconds` (Standard 300), siehe Status |
+| `health` | `path` (Standard `/`) und `timeoutSeconds` (Standard 300), siehe Status. Auch die Frist, in der ein Update gesund werden muss |
+| `backup.schedule` | `none`, `hourly`, `daily` (Standard), `weekly`. Gesichert werden Apps mit Datenbank oder Volumes, das erste Mal direkt nach der Installation. Aufbewahrung 30 Tage |
 
-Noch nicht umgesetzt und deshalb nicht im Schema: `backup`, `update` (M2), `provisioning`, `mcp` (M5), Objektspeicher, SMTP.
+Noch nicht umgesetzt und deshalb nicht im Schema: Backup-Hooks (O-10), `update` (O-09), `provisioning`, `mcp` (M5), Objektspeicher, SMTP.
 
 ## Login-Arten
 
@@ -115,14 +116,23 @@ Image-Apps vertrauen der Zellen-CA automatisch (eingehängtes Bundle, `SSL_CERT_
 
 ## Status
 
-- `phase`: `Installing` bis zum ersten erfolgreichen Health-Check, dann `Ready`. Bleibt eine App länger als `health.timeoutSeconds` ungesund, wird sie `NeedsAttention`. Beim Entfernen `Removing`. `Updating` und `RollingBack` kommen mit M2.
+- `phase`: `Installing` bis zum ersten erfolgreichen Health-Check, dann `Ready`. Bleibt eine App länger als `health.timeoutSeconds` ungesund oder ist ihre letzte Änderung gescheitert, wird sie `NeedsAttention`. Während einer Änderung `Updating`, beim Zurückrollen `RollingBack`, bei einer Wiederherstellung `Restoring`, beim Entfernen `Removing`.
 - `version`: Version, mit der der letzte Health-Check bestanden wurde
+- `lastBackup`: Name und Zeitpunkt des letzten vollständigen Backups
 - `url`: Adresse der App
-- `conditions`: `DatabaseReady`, `LoginReady`, `WorkloadReady`, `Ready`, jeweils mit lesbarer Begründung
+- `conditions`: `DatabaseReady`, `LoginReady`, `WorkloadReady`, `Ready`, nach einer gescheiterten Änderung `LastChangeSucceeded=False`, jeweils mit lesbarer Begründung
+
+## Tag-2-Betrieb
+
+Neben `App` gibt es drei Ressourcen (`api/v1alpha1/operations_types.go`):
+
+- **`Backup`**: Datenbank (Basissicherung über barman-cloud) und Volumes (restic) einer App im Bucket der Zelle. Entsteht nach Zeitplan, vor jeder Änderung oder auf Anfrage. Wartet, solange eine Änderung oder Wiederherstellung der App läuft, und umgekehrt. Ein laufendes Backup bricht beim Löschen ab: Datenbanksicherung und Job werden gelöscht, restic gibt die Sperre des Repositorys frei, und das Backup hält die App, bis kein Pod des Jobs mehr läuft.
+- **`Restore`**: stoppt die App, stellt Volumes und Datenbank aus einem Backup wieder her (Name oder `latest`) und startet sie. Funktioniert auch in einer frischen Zelle, die das Backup nur im Bucket kennt. Beginnt erst, wenn die App eingerichtet ist (Namespace, Volumes) und ihre Backup-Zugangsdaten zum Backup-Ziel der Zelle passen, damit sie die Installation nicht anhält. Eine App ohne Daten (keine Datenbank, keine Volumes, kein Chart) lässt sich nicht wiederherstellen. Vor dem Start konfiguriert der Operator die App für ihre aktuelle Spec (bei Helm-Apps: Flux hat die Release dafür ausgerollt), damit keine Workloads mit einer anderen Konfiguration auf den wiederhergestellten Daten laufen. Gibt Flux dabei auf, scheitert die Wiederherstellung, und die App bleibt angehalten.
+- **`ChangeRequest`**: Urheber, Begründung, Risikostufe, Patch auf die App-Spec, Freigabe. Ablauf: Freigabe, Backup, Patch, Health-Check, bei Fehler zurück zur vorigen Spec und Restore. Die Summe der `ChangeRequest`s ist das Änderungsprotokoll. Der Name ist höchstens 244 Zeichen lang, weil Backup und Rollback `<name>-pre` und `<name>-rollback` heißen.
 
 ## Entfernen
 
-Das Löschen einer `App` entfernt Workload, Ingress und Login-Client. Die Daten bleiben als letzte Sicherung: Volumes bleiben, die Datenbank wird schlafen gelegt (CloudNativePG-Hibernation), der Namespace bekommt das Label `cell.internal/retained=true`. PVCs aus Charts sind per Post-Renderer mit `helm.sh/resource-policy: keep` vor dem Deinstallieren geschützt. Wird die App wieder angelegt, übernimmt sie die Daten. Endgültiges Löschen kommt als eigene, freigabepflichtige Aktion mit der API (M3).
+Das Löschen einer `App` entfernt Workload, Ingress und Login-Client. Die Daten bleiben als letzte Sicherung: Volumes bleiben, die Datenbank wird schlafen gelegt (CloudNativePG-Hibernation), der Namespace bekommt das Label `cell.internal/retained=true`. PVCs aus Charts sind per Post-Renderer mit `helm.sh/resource-policy: keep` vor dem Deinstallieren geschützt. Wird die App wieder angelegt, übernimmt sie die Daten. Läuft gerade eine Änderung, Wiederherstellung oder ein Backup, wartet das Entfernen, bis es beendet ist (eine Änderung bricht dabei ihr laufendes Backup ab und gibt die App erst frei, wenn dessen Job gestoppt ist); eine Wiederherstellung, die noch keine Daten ersetzt hat, bricht ab, und neue starten nicht mehr. Endgültiges Löschen kommt als eigene, freigabepflichtige Aktion mit der API (M3).
 
 ## Zwei Stufen im Katalog
 

@@ -13,8 +13,11 @@
 #   OPERATOR_IMAGE     operator image, already present on the node (required)
 #   BRIDGE_IMAGE       loopback bridge image, needed for *.localhost cells
 #   CELL_BACKUP_S3_ENDPOINT, CELL_BACKUP_S3_BUCKET, CELL_BACKUP_S3_REGION,
-#   CELL_BACKUP_S3_ACCESS_KEY, CELL_BACKUP_S3_SECRET_KEY
-#                      off-cell backup target (optional, all or none)
+#   CELL_BACKUP_S3_ACCESS_KEY, CELL_BACKUP_S3_SECRET_KEY, CELL_BACKUP_PASSWORD
+#                      off-cell backup target (optional, all or none). The
+#                      password encrypts the backups; keep it outside the cell,
+#                      a restore into a new cell needs it.
+#   CELL_BACKUP_S3_PREFIX  path in the bucket (default: CELL_DOMAIN)
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=versions.env
@@ -24,7 +27,7 @@ source "$here/versions.env"
 : "${OPERATOR_IMAGE:?OPERATOR_IMAGE must be set}"
 export BRIDGE_IMAGE=${BRIDGE_IMAGE:-}
 case $CELL_DOMAIN in *.localhost | localhost) [ -n "$BRIDGE_IMAGE" ] || die "BRIDGE_IMAGE must be set for *.localhost cells" ;; esac
-export CELL_DOMAIN AUTHENTIK_CHART_VERSION LONGHORN_VERSION OPERATOR_IMAGE
+export CELL_DOMAIN AUTHENTIK_CHART_VERSION LONGHORN_VERSION OPERATOR_IMAGE RESTIC_VERSION
 export CELL_TLS=${CELL_TLS:-selfsigned}
 export CELL_ACME_EMAIL=${CELL_ACME_EMAIL:-}
 export CELL_ACME_SERVER=${CELL_ACME_SERVER:-https://acme-v02.api.letsencrypt.org/directory}
@@ -46,6 +49,9 @@ log "cert-manager $CERT_MANAGER_VERSION, CloudNativePG $CNPG_VERSION"
 kubectl apply --server-side -f "https://github.com/cert-manager/cert-manager/releases/download/$CERT_MANAGER_VERSION/cert-manager.yaml" >/dev/null
 kubectl apply --server-side -f "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$CNPG_VERSION/cnpg-$CNPG_VERSION.yaml" >/dev/null
 kubectl -n cert-manager wait deploy --all --for=condition=Available --timeout=5m >/dev/null
+kubectl -n cnpg-system wait deploy --all --for=condition=Available --timeout=5m >/dev/null
+log "CloudNativePG backup plugin (barman-cloud) $BARMAN_PLUGIN_VERSION"
+retry kubectl apply --server-side -f "https://github.com/cloudnative-pg/plugin-barman-cloud/releases/download/v$BARMAN_PLUGIN_VERSION/manifest.yaml" >/dev/null
 kubectl -n cnpg-system wait deploy --all --for=condition=Available --timeout=5m >/dev/null
 
 log "storage: $CELL_STORAGE"
@@ -77,7 +83,7 @@ data:
   storage: "$CELL_STORAGE"
 EOF
 
-s3_vars=(CELL_BACKUP_S3_ENDPOINT CELL_BACKUP_S3_BUCKET CELL_BACKUP_S3_REGION CELL_BACKUP_S3_ACCESS_KEY CELL_BACKUP_S3_SECRET_KEY)
+s3_vars=(CELL_BACKUP_S3_ENDPOINT CELL_BACKUP_S3_BUCKET CELL_BACKUP_S3_REGION CELL_BACKUP_S3_ACCESS_KEY CELL_BACKUP_S3_SECRET_KEY CELL_BACKUP_PASSWORD)
 s3_set=0
 for v in "${s3_vars[@]}"; do [ -n "${!v:-}" ] && s3_set=$((s3_set + 1)); done
 if [ "$s3_set" -eq "${#s3_vars[@]}" ]; then
@@ -85,7 +91,8 @@ if [ "$s3_set" -eq "${#s3_vars[@]}" ]; then
   secret_manifest cell-system backup-target Opaque \
     endpoint="$CELL_BACKUP_S3_ENDPOINT" bucket="$CELL_BACKUP_S3_BUCKET" \
     region="$CELL_BACKUP_S3_REGION" accessKey="$CELL_BACKUP_S3_ACCESS_KEY" \
-    secretKey="$CELL_BACKUP_S3_SECRET_KEY" | kubectl apply -f - >/dev/null
+    secretKey="$CELL_BACKUP_S3_SECRET_KEY" password="$CELL_BACKUP_PASSWORD" \
+    prefix="${CELL_BACKUP_S3_PREFIX:-$CELL_DOMAIN}" | kubectl apply -f - >/dev/null
 elif [ "$s3_set" -ne 0 ]; then
   die "backup target needs all of: ${s3_vars[*]}"
 fi

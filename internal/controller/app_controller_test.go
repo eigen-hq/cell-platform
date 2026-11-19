@@ -1,11 +1,16 @@
 package controller
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -64,6 +69,10 @@ func (f *fakeIdentity) EnsureProxy(_ context.Context, p authentik.Proxy) error {
 	return nil
 }
 
+func (f *fakeIdentity) ProxyClientID(_ context.Context, slug string) (string, error) {
+	return "client-" + slug, nil
+}
+
 func (f *fakeIdentity) Delete(_ context.Context, slug string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -102,14 +111,24 @@ func TestMain(m *testing.M) {
 			return errors.New("connection refused")
 		},
 		Now: func() time.Time { return time.Now().Add(time.Duration(skew.Load())) },
-		ForwardAuth: func(_ context.Context, host string) error {
-			if outpostReady.Load() {
+		ForwardAuth: func(_ context.Context, host, clientID string) error {
+			if outpostReady.Load() && strings.HasPrefix(clientID, "client-") {
 				return nil
 			}
 			return errors.New("HTTP 404")
 		},
 	}
 	if err := r.SetupWithManager(mgr); err != nil {
+		panic(err)
+	}
+	now := func() time.Time { return time.Now().Add(time.Duration(skew.Load())) }
+	if err := (&BackupReconciler{Client: mgr.GetClient(), ResticImage: "restic:test", Now: now}).SetupWithManager(mgr); err != nil {
+		panic(err)
+	}
+	if err := (&RestoreReconciler{Client: mgr.GetClient(), ResticImage: "restic:test", Now: now, Restored: r.ForgetLogin}).SetupWithManager(mgr); err != nil {
+		panic(err)
+	}
+	if err := (&ChangeReconciler{Client: mgr.GetClient(), Now: now}).SetupWithManager(mgr); err != nil {
 		panic(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -125,6 +144,9 @@ func TestMain(m *testing.M) {
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "cell-system"}},
 		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "cell-config", Namespace: "cell-system"},
 			Data: map[string]string{"domain": "cell.localhost", "tls": "acme", "storage": "local-path"}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "backup-target", Namespace: "cell-system"},
+			StringData: map[string]string{"endpoint": "http://s3.test:8080", "bucket": "backups", "region": "x",
+				"accessKey": "ak", "secretKey": "sk", "password": "pw", "prefix": "cell.localhost"}},
 	} {
 		if err := k8s.Create(ctx, o); err != nil {
 			panic(err)
@@ -234,8 +256,29 @@ func deployed(t *testing.T, ns, name, chartVersion, digest string) {
 	}
 	_ = unstructured.SetNestedSlice(hr.Object, []any{map[string]any{
 		"chartName": "forgejo", "chartVersion": chartVersion, "status": "deployed",
+		"name": name, "namespace": ns, "version": int64(1),
 	}}, "status", "history")
+	_ = unstructured.SetNestedField(hr.Object, ns, "status", "storageNamespace")
+	helmRecord(t, ns, name, 1, "")
 	setReady(t, hr)
+}
+
+// helmRecord writes the release record Helm keeps for each revision.
+func helmRecord(t *testing.T, ns, release string, version int, manifest string) {
+	t.Helper()
+	var gz bytes.Buffer
+	zw := gzip.NewWriter(&gz)
+	if err := json.NewEncoder(zw).Encode(map[string]any{"name": release, "manifest": manifest}); err != nil {
+		t.Fatal(err)
+	}
+	_ = zw.Close()
+	s := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: fmt.Sprintf("sh.helm.release.v1.%s.v%d", release, version)},
+		Type: "helm.sh/release.v1", Data: map[string][]byte{"release": []byte(base64.StdEncoding.EncodeToString(gz.Bytes()))}}
+	if err := k8s.Create(context.Background(), s); apierrors.IsAlreadyExists(err) {
+		err = k8s.Update(context.Background(), s)
+	} else if err != nil {
+		t.Fatal(err)
+	}
 }
 
 // kubelet plays the Deployment controller: one available, updated pod.
@@ -303,6 +346,7 @@ func TestImageAppLifecycle(t *testing.T) {
 			},
 			Access: cellv1.Access{Subdomain: "notes", Port: 8080, Auth: cellv1.Auth{Mode: "oidc", RedirectPaths: []string{"/cb"}}},
 			Health: cellv1.Health{Path: "/health", TimeoutSeconds: 300},
+			Backup: cellv1.BackupPolicy{Schedule: "none"}, // a running backup would hold the removal
 		},
 	}
 	if err := k8s.Create(ctx, app); err != nil {
@@ -464,6 +508,7 @@ func TestHelmApp(t *testing.T) {
 				Values: jsonValue(t, `{"image":{"tag":"{{ .app.version }}"},"url":"{{ .access.url }}"}`),
 			}},
 			Access: cellv1.Access{Subdomain: "git", Port: 3000, Service: "git-http", Auth: cellv1.Auth{Mode: "none"}},
+			Backup: cellv1.BackupPolicy{Schedule: "none"},
 		},
 	}
 	if err := k8s.Create(ctx, app); err != nil {
@@ -691,6 +736,7 @@ func TestHelmRepositoryChange(t *testing.T) {
 			Version: "1",
 			Source:  cellv1.Source{Helm: &cellv1.HelmSource{Repo: "https://charts.example.org", Chart: "wiki", Version: "2.0.0"}},
 			Access:  cellv1.Access{Subdomain: "wiki", Port: 80, Auth: cellv1.Auth{Mode: "none"}},
+			Backup:  cellv1.BackupPolicy{Schedule: "none"},
 		},
 	}
 	if err := k8s.Create(ctx, app); err != nil {

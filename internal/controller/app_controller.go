@@ -7,8 +7,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
@@ -43,6 +46,7 @@ const (
 	condLogin    = "LoginReady"
 	condWorkload = "WorkloadReady"
 	condReady    = "Ready"
+	condChange   = "LastChangeSucceeded"
 )
 
 var (
@@ -57,6 +61,7 @@ var (
 type Identity interface {
 	EnsureOIDC(ctx context.Context, o authentik.OIDC) error
 	EnsureProxy(ctx context.Context, p authentik.Proxy) error
+	ProxyClientID(ctx context.Context, slug string) (string, error)
 	Delete(ctx context.Context, slug string) error
 }
 
@@ -74,9 +79,11 @@ type AppReconciler struct {
 	// Probe checks an app's health endpoint; nil means HTTP GET.
 	Probe func(ctx context.Context, url, host string) error
 	// ForwardAuth checks that the identity's outpost serves a proxy app's
-	// host; nil means asking the outpost over HTTP.
-	ForwardAuth func(ctx context.Context, host string) error
-	Now         func() time.Time
+	// host with its current login client; nil means asking the outpost.
+	ForwardAuth func(ctx context.Context, host, clientID string) error
+	// OutpostURL is where forwardAuth asks; default: the authentik service.
+	OutpostURL string
+	Now        func() time.Time
 }
 
 func (r *AppReconciler) SetupWithManager(mgr ctrl.Manager) error {
@@ -91,8 +98,23 @@ func (r *AppReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		u.SetGroupVersionKind(gvk)
 		return u
 	}
+	byApp := handler.EnqueueRequestsFromMapFunc(func(_ context.Context, o client.Object) []reconcile.Request {
+		var name string
+		switch t := o.(type) {
+		case *cellv1.Backup:
+			name = t.Spec.App
+		case *cellv1.Restore:
+			name = t.Spec.App
+		case *cellv1.ChangeRequest:
+			name = t.Spec.App
+		}
+		return []reconcile.Request{{NamespacedName: client.ObjectKey{Name: name}}}
+	})
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&cellv1.App{}).
+		Watches(&cellv1.Backup{}, byApp).
+		Watches(&cellv1.Restore{}, byApp).
+		Watches(&cellv1.ChangeRequest{}, byApp).
 		Watches(&appsv1.Deployment{}, byLabel).
 		Watches(watch(gvkCluster), byLabel).
 		Watches(watch(gvkHelmRelease), byLabel).
@@ -116,16 +138,33 @@ func (r *AppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	}
 
 	before := app.Status.DeepCopy()
-	healthy, msg, err := r.install(ctx, &app)
+	act, err := r.activity(ctx, &app)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if act.paused {
+		// A restore owns the app's workloads and data until it is done; the
+		// app has to pass its health check again afterwards.
+		app.Status.Phase, app.Status.PausedBy, app.Status.WorkloadGeneration = act.phase, act.pausedBy, 0
+		r.condition(&app, condReady, false, string(act.phase), act.reason)
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, r.updateStatus(ctx, &app, before)
+	}
+	app.Status.PausedBy = ""
+	target, err := loadTarget(ctx, r)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	healthy, msg, err := r.install(ctx, &app, target)
 	if err != nil {
 		msg = err.Error()
 	}
-	r.setPhase(&app, healthy, msg)
+	r.setPhase(&app, healthy, msg, act)
 	app.Status.ObservedGeneration = app.Generation
-	if !equality.Semantic.DeepEqual(before, &app.Status) {
-		if uerr := r.Status().Update(ctx, &app); uerr != nil {
-			return ctrl.Result{}, uerr
-		}
+	if err == nil && healthy {
+		err = r.scheduleBackup(ctx, &app, target)
+	}
+	if uerr := r.updateStatus(ctx, &app, before); uerr != nil {
+		return ctrl.Result{}, uerr
 	}
 	if err != nil {
 		return ctrl.Result{}, err
@@ -136,6 +175,13 @@ func (r *AppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 }
 
+func (r *AppReconciler) updateStatus(ctx context.Context, app *cellv1.App, before *cellv1.AppStatus) error {
+	if equality.Semantic.DeepEqual(before, &app.Status) {
+		return nil
+	}
+	return r.Status().Update(ctx, app)
+}
+
 func (r *AppReconciler) now() time.Time {
 	if r.Now != nil {
 		return r.Now()
@@ -143,26 +189,46 @@ func (r *AppReconciler) now() time.Time {
 	return time.Now()
 }
 
-// setPhase derives the phase: Ready when healthy, NeedsAttention when
-// unhealthy for longer than the manifest allows, Installing before that.
-func (r *AppReconciler) setPhase(app *cellv1.App, healthy bool, msg string) {
+// setPhase derives the phase: a running change shows as Updating or
+// RollingBack; otherwise Ready when healthy, NeedsAttention when unhealthy
+// for longer than the manifest allows or when the last change failed, and
+// Installing before the app was ever ready.
+func (r *AppReconciler) setPhase(app *cellv1.App, healthy bool, msg string, act activity) {
+	if act.failedChange != "" {
+		r.condition(app, condChange, false, "ChangeFailed", act.failedChange)
+	} else {
+		apimeta.RemoveStatusCondition(&app.Status.Conditions, condChange)
+	}
 	if healthy {
 		r.condition(app, condReady, true, "Healthy", "health check passed")
-		app.Status.Phase = cellv1.PhaseReady
 		app.Status.Version = app.Spec.Version
+		switch {
+		case act.phase != "":
+			app.Status.Phase = act.phase
+		case act.failedChange != "":
+			app.Status.Phase = cellv1.PhaseNeedsAttention
+		default:
+			app.Status.Phase = cellv1.PhaseReady
+		}
 		return
 	}
 	r.condition(app, condReady, false, "Unhealthy", msg)
+	if act.phase != "" {
+		app.Status.Phase = act.phase
+		return
+	}
 	since := apimeta.FindStatusCondition(app.Status.Conditions, condReady).LastTransitionTime.Time
 	timeout := time.Duration(app.Spec.Health.TimeoutSeconds) * time.Second
 	if timeout == 0 {
 		timeout = 300 * time.Second
 	}
 	switch {
-	case r.now().Sub(since) > timeout:
+	case r.now().Sub(since) > timeout, act.failedChange != "":
 		app.Status.Phase = cellv1.PhaseNeedsAttention
-	case app.Status.Phase == "":
+	case app.Status.Version == "":
 		app.Status.Phase = cellv1.PhaseInstalling
+	case app.Status.Phase != cellv1.PhaseReady && app.Status.Phase != cellv1.PhaseNeedsAttention:
+		app.Status.Phase = cellv1.PhaseReady // back from a change or restore, not unhealthy for long yet
 	}
 }
 
@@ -179,7 +245,7 @@ func (r *AppReconciler) condition(app *cellv1.App, typ string, ok bool, reason, 
 
 // install brings every part of the app to its desired state, in order, and
 // reports whether the app answers its health check.
-func (r *AppReconciler) install(ctx context.Context, app *cellv1.App) (bool, string, error) {
+func (r *AppReconciler) install(ctx context.Context, app *cellv1.App, target *backupTarget) (bool, string, error) {
 	cfg, err := cell.LoadConfig(ctx, r)
 	if err != nil {
 		return false, "", err
@@ -192,6 +258,11 @@ func (r *AppReconciler) install(ctx context.Context, app *cellv1.App) (bool, str
 	}
 	if _, err := r.apply(ctx, namespaceObj(app, false), caBundle(app, cellCA, r.SystemCAs)); err != nil {
 		return false, "", err
+	}
+	if target != nil && hasData(app) {
+		if _, err := r.apply(ctx, backupResources(app, target)...); err != nil {
+			return false, "", err
+		}
 	}
 
 	data := map[string]any{
@@ -214,7 +285,7 @@ func (r *AppReconciler) install(ctx context.Context, app *cellv1.App) (bool, str
 	data["volumes"] = volumes
 
 	if app.Spec.Needs.Database != nil {
-		ready, msg, err := r.ensureDatabase(ctx, app)
+		ready, msg, err := r.ensureDatabase(ctx, app, target)
 		if err != nil || !ready {
 			r.condition(app, condDatabase, false, "Waiting", msg)
 			return false, "database: " + msg, err
@@ -261,54 +332,123 @@ func (r *AppReconciler) install(ctx context.Context, app *cellv1.App) (bool, str
 		return false, "health check: " + err.Error(), nil
 	}
 	if app.Spec.Access.Auth.Mode == "proxy" {
-		if err := r.forwardAuth(ctx, host); err != nil {
+		clientID, err := r.Identity.ProxyClientID(ctx, app.Name)
+		if err != nil {
+			return false, "", err
+		}
+		if err := r.forwardAuth(ctx, host, clientID); err != nil {
 			return false, "login proxy: " + err.Error(), nil
 		}
 	}
 	return true, "", nil
 }
 
-// forwardAuth asks the outpost the way Traefik does. It answers with a
-// redirect to the login (or 401) once it serves the host, 404 before that.
-func (r *AppReconciler) forwardAuth(ctx context.Context, host string) error {
+// forwardAuth asks the outpost the way Traefik and a browser do: the auth
+// endpoint (possibly via the outpost's start) must send to the login with
+// the app's current client ID. Right after a provider changed,
+// the outpost still serves its old configuration (unknown client ID).
+func (r *AppReconciler) forwardAuth(ctx context.Context, host, clientID string) error {
 	if r.ForwardAuth != nil {
-		return r.ForwardAuth(ctx, host)
+		return r.ForwardAuth(ctx, host, clientID)
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		"http://"+authentikSvc+"."+cell.SystemNamespace+".svc.cluster.local/outpost.goauthentik.io/auth/traefik", nil)
+	outpost := r.OutpostURL
+	if outpost == "" {
+		outpost = "http://" + authentikSvc + "." + cell.SystemNamespace + ".svc.cluster.local"
+	}
+	ask := func(path string) (string, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, outpost+path, nil)
+		if err != nil {
+			return "", err
+		}
+		req.Header.Set("X-Forwarded-Host", host)
+		req.Header.Set("X-Forwarded-Proto", "https")
+		req.Header.Set("X-Forwarded-Method", http.MethodGet)
+		req.Header.Set("X-Forwarded-Uri", "/")
+		hc := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		resp, err := hc.Do(req)
+		if err != nil {
+			return "", err
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusFound && resp.StatusCode != http.StatusTemporaryRedirect {
+			return "", fmt.Errorf("outpost does not serve %s yet (HTTP %d)", host, resp.StatusCode)
+		}
+		return resp.Header.Get("Location"), nil
+	}
+	login, err := ask("/outpost.goauthentik.io/auth/traefik")
 	if err != nil {
 		return err
 	}
-	req.Header.Set("X-Forwarded-Host", host)
-	req.Header.Set("X-Forwarded-Proto", "https")
-	req.Header.Set("X-Forwarded-Method", http.MethodGet)
-	req.Header.Set("X-Forwarded-Uri", "/")
-	hc := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	resp, err := hc.Do(req)
+	l, err := url.Parse(login)
 	if err != nil {
-		return err
+		return fmt.Errorf("outpost redirect %q: %w", login, err)
 	}
-	resp.Body.Close()
-	switch resp.StatusCode {
-	case http.StatusFound, http.StatusTemporaryRedirect, http.StatusUnauthorized:
-		return nil
+	if strings.HasPrefix(l.Path, "/outpost.goauthentik.io/start") { // some versions take this extra hop
+		if login, err = ask(l.RequestURI()); err != nil {
+			return err
+		}
+		if l, err = url.Parse(login); err != nil {
+			return fmt.Errorf("outpost redirect %q: %w", login, err)
+		}
 	}
-	return fmt.Errorf("outpost does not serve %s yet (HTTP %d)", host, resp.StatusCode)
+	if l.Query().Get("client_id") != clientID {
+		return fmt.Errorf("outpost still uses an old login client for %s", host)
+	}
+	return nil
 }
 
-func (r *AppReconciler) ensureDatabase(ctx context.Context, app *cellv1.App) (bool, string, error) {
+// ensureDatabase creates the app's database cluster once. Afterwards only
+// what the platform adds later is patched in: WAL archiving once the cell
+// has a backup target, the managed owner role, and waking it up after the
+// app was removed. A restored cluster keeps its recovery bootstrap.
+func (r *AppReconciler) ensureDatabase(ctx context.Context, app *cellv1.App, target *backupTarget) (bool, string, error) {
 	ns := Namespace(app.Name)
 	if _, err := r.ensureSecret(ctx, ns, dbCredentials, corev1.SecretTypeBasicAuth,
 		map[string]string{"username": dbName(app), "password": token()}); err != nil {
 		return false, "", err
 	}
-	applied, err := r.apply(ctx, database(app, false))
+	cluster := &unstructured.Unstructured{}
+	cluster.SetGroupVersionKind(gvkCluster)
+	err := r.Get(ctx, client.ObjectKey{Namespace: ns, Name: dbCluster}, cluster)
+	if apierrors.IsNotFound(err) {
+		archive := ""
+		if target != nil {
+			archive = newServerName(r.now())
+		}
+		if err := r.Create(ctx, database(app, archive)); err != nil && !apierrors.IsAlreadyExists(err) {
+			return false, "", err
+		}
+		return false, "creating the database", nil
+	}
 	if err != nil {
 		return false, "", err
 	}
-	return readyCondition(applied[0])
+	patch := map[string]any{}
+	if _, hibernated := cluster.GetAnnotations()[hibernateKey]; hibernated {
+		patch["metadata"] = map[string]any{"annotations": map[string]any{hibernateKey: nil}}
+	}
+	spec := map[string]any{}
+	if target != nil && serverName(cluster) == "" {
+		spec["plugins"] = []any{archiverPlugin(newServerName(r.now()))}
+	}
+	if roles, _, _ := unstructured.NestedSlice(cluster.Object, "spec", "managed", "roles"); len(roles) == 0 {
+		spec["managed"] = map[string]any{"roles": []any{ownerRole(app)}}
+	}
+	if len(spec) > 0 {
+		patch["spec"] = spec
+	}
+	if len(patch) > 0 {
+		raw, err := json.Marshal(patch)
+		if err != nil {
+			return false, "", err
+		}
+		if err := r.Patch(ctx, cluster, client.RawPatch(types.MergePatchType, raw)); err != nil {
+			return false, "", err
+		}
+	}
+	return readyCondition(cluster)
 }
 
 // ensureLogin registers the app with the identity once per spec generation.
@@ -411,6 +551,7 @@ func (r *AppReconciler) ensureWorkload(ctx context.Context, app *cellv1.App, cfg
 		if err != nil {
 			return false, "", err
 		}
+		app.Status.WorkloadGeneration = app.Generation
 		var d appsv1.Deployment
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(findKind(applied, "Deployment").Object, &d); err != nil {
 			return false, "", err
@@ -440,7 +581,13 @@ func (r *AppReconciler) ensureWorkload(ctx context.Context, app *cellv1.App, cfg
 	if err := r.deleteOtherSources(ctx, app, source.GetName()); err != nil {
 		return false, "", err
 	}
-	return helmReady(source, findKind(applied, "HelmRelease"), helm.Version)
+	// Only a release Flux deployed for the current spec shows the workloads
+	// carry it; a failed upgrade may have left the old templates in place.
+	ready, msg, err := helmReady(source, findKind(applied, "HelmRelease"), helm.Version)
+	if ready {
+		app.Status.WorkloadGeneration = app.Generation
+	}
+	return ready, msg, err
 }
 
 // deleteOtherSources removes chart sources the app no longer uses.
@@ -552,6 +699,20 @@ func (r *AppReconciler) remove(ctx context.Context, app *cellv1.App) (ctrl.Resul
 			return ctrl.Result{}, err
 		}
 	}
+	// A running restore or change finishes first: a restore may be writing
+	// the volumes, and a reinstall must not start on them meanwhile (the
+	// app's name stays taken until removal is done).
+	if holder := app.Annotations[lockKey]; holder != "" {
+		active, err := operationActive(ctx, r, holder)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if active {
+			before := app.Status.DeepCopy()
+			r.condition(app, condReady, false, "Removing", "waiting for "+holder+" to end")
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, r.updateStatus(ctx, app, before)
+		}
+	}
 	if err := r.Identity.Delete(ctx, app.Name); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -565,6 +726,12 @@ func (r *AppReconciler) remove(ctx context.Context, app *cellv1.App) (ctrl.Resul
 		return u
 	}
 	if err := r.deleteOtherSources(ctx, app, ""); err != nil && !apimeta.IsNoMatchError(err) {
+		return ctrl.Result{}, err
+	}
+	// Flux skips the uninstall of a suspended release; a failed restore
+	// leaves the release suspended.
+	resume := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"suspend":false}}`))
+	if err := r.Patch(ctx, obj(gvkHelmRelease, ns, app.Name), resume); err != nil && !apierrors.IsNotFound(err) && !apimeta.IsNoMatchError(err) {
 		return ctrl.Result{}, err
 	}
 	for _, o := range []client.Object{
@@ -596,7 +763,12 @@ func (r *AppReconciler) remove(ctx context.Context, app *cellv1.App) (ctrl.Resul
 		return ctrl.Result{}, err
 	}
 	if app.Spec.Needs.Database != nil {
-		if _, err := r.apply(ctx, database(app, true)); err != nil {
+		cluster := &unstructured.Unstructured{}
+		cluster.SetGroupVersionKind(gvkCluster)
+		cluster.SetNamespace(ns)
+		cluster.SetName(dbCluster)
+		hibernate := client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"annotations":{"`+hibernateKey+`":"on"}}}`))
+		if err := r.Patch(ctx, cluster, hibernate); client.IgnoreNotFound(err) != nil {
 			return ctrl.Result{}, err
 		}
 	}

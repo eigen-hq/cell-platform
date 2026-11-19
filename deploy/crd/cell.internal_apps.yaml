@@ -106,6 +106,21 @@ spec:
                 - port
                 - subdomain
                 type: object
+              backup:
+                description: |-
+                  BackupPolicy says how often the platform backs the app up outside the
+                  cell. Apps without database and volumes are skipped. Backups are kept
+                  for 30 days.
+                properties:
+                  schedule:
+                    default: daily
+                    enum:
+                    - none
+                    - hourly
+                    - daily
+                    - weekly
+                    type: string
+                type: object
               health:
                 properties:
                   path:
@@ -137,6 +152,9 @@ spec:
                     required:
                     - engine
                     type: object
+                    x-kubernetes-validations:
+                    - message: resizing the database is not supported yet
+                      rule: self.size == oldSelf.size
                   secrets:
                     description: |-
                       Secrets are generated once (key "password") and kept across reinstalls;
@@ -146,6 +164,9 @@ spec:
                     type: array
                   volumes:
                     items:
+                      description: |-
+                        Resizing is not supported yet: a change could grow a volume, but its
+                        rollback could not shrink it again.
                       properties:
                         mountPath:
                           description: MountPath in the container (image apps).
@@ -163,7 +184,14 @@ spec:
                       - name
                       - size
                       type: object
+                      x-kubernetes-validations:
+                      - message: resizing a volume is not supported yet
+                        rule: self.size == oldSelf.size
+                    maxItems: 16
                     type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
                 type: object
               source:
                 description: |-
@@ -462,15 +490,32 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              lastBackup:
+                description: LastBackup is the newest completed backup.
+                properties:
+                  at:
+                    format: date-time
+                    type: string
+                  name:
+                    type: string
+                required:
+                - at
+                - name
+                type: object
               observedGeneration:
                 format: int64
                 type: integer
+              pausedBy:
+                description: PausedBy names the Restore the operator stopped managing
+                  the app for.
+                type: string
               phase:
                 enum:
                 - Installing
                 - Ready
                 - Updating
                 - RollingBack
+                - Restoring
                 - NeedsAttention
                 - Removing
                 type: string
@@ -478,6 +523,13 @@ spec:
                 type: string
               version:
                 type: string
+              workloadGeneration:
+                description: |-
+                  WorkloadGeneration is the spec generation the operator configured the
+                  workloads for (for Helm apps: and Flux applied) since the app was last
+                  paused; 0 while paused.
+                format: int64
+                type: integer
             type: object
         required:
         - spec

@@ -297,6 +297,19 @@ func (c *Client) EnsureProxy(ctx context.Context, p Proxy) error {
 	})
 }
 
+// ProxyClientID returns the OAuth2 client ID of an app's forward-auth
+// provider; the outpost redirects to the login with it.
+func (c *Client) ProxyClientID(ctx context.Context, slug string) (string, error) {
+	p, err := c.find(ctx, "providers/proxy/", url.Values{"name": {slug}})
+	if err != nil {
+		return "", err
+	}
+	if p == nil {
+		return "", fmt.Errorf("authentik: no proxy provider %q", slug)
+	}
+	return fmt.Sprint(p["client_id"]), nil
+}
+
 func (c *Client) updateOutpost(ctx context.Context, authentikURL string, change func([]any) []any) error {
 	outpost, err := c.find(ctx, "outposts/instances/", url.Values{"managed": {"goauthentik.io/outposts/embedded"}})
 	if err != nil {

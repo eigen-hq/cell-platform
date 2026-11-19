@@ -64,6 +64,19 @@ func run() error {
 	if err := r.SetupWithManager(mgr); err != nil {
 		return err
 	}
+	restic := os.Getenv("RESTIC_IMAGE")
+	if restic == "" {
+		return fmt.Errorf("RESTIC_IMAGE is not set")
+	}
+	if err := (&controller.BackupReconciler{Client: mgr.GetClient(), ResticImage: restic}).SetupWithManager(mgr); err != nil {
+		return err
+	}
+	if err := (&controller.RestoreReconciler{Client: mgr.GetClient(), ResticImage: restic, Restored: r.ForgetLogin}).SetupWithManager(mgr); err != nil {
+		return err
+	}
+	if err := (&controller.ChangeReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
+		return err
+	}
 	if err := mgr.AddHealthzCheck("ping", healthz.Ping); err != nil {
 		return err
 	}

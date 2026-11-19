@@ -29,11 +29,21 @@ type AppSpec struct {
 	Title string `json:"title,omitempty"`
 	// Version of the app; templates see it as {{ .app.version }}.
 	// +kubebuilder:validation:MinLength=1
-	Version string `json:"version"`
-	Source  Source `json:"source"`
-	Needs   Needs  `json:"needs,omitempty"`
-	Access  Access `json:"access"`
-	Health  Health `json:"health,omitempty"`
+	Version string       `json:"version"`
+	Source  Source       `json:"source"`
+	Needs   Needs        `json:"needs,omitempty"`
+	Access  Access       `json:"access"`
+	Health  Health       `json:"health,omitempty"`
+	Backup  BackupPolicy `json:"backup,omitempty"`
+}
+
+// BackupPolicy says how often the platform backs the app up outside the
+// cell. Apps without database and volumes are skipped. Backups are kept
+// for 30 days.
+type BackupPolicy struct {
+	// +kubebuilder:validation:Enum=none;hourly;daily;weekly
+	// +kubebuilder:default=daily
+	Schedule string `json:"schedule,omitempty"`
 }
 
 // Source says where the app comes from. Strings in it may contain
@@ -78,12 +88,16 @@ type File struct {
 // Needs are shared services the platform provides.
 type Needs struct {
 	Database *Database `json:"database,omitempty"`
-	Volumes  []Volume  `json:"volumes,omitempty"`
+	// +listType=map
+	// +listMapKey=name
+	// +kubebuilder:validation:MaxItems=16
+	Volumes []Volume `json:"volumes,omitempty"`
 	// Secrets are generated once (key "password") and kept across reinstalls;
 	// templates see their names as {{ .secrets.<name> }}.
 	Secrets []string `json:"secrets,omitempty"`
 }
 
+// +kubebuilder:validation:XValidation:rule="self.size == oldSelf.size",message="resizing the database is not supported yet"
 type Database struct {
 	// +kubebuilder:validation:Enum=postgres
 	Engine string `json:"engine"`
@@ -91,6 +105,9 @@ type Database struct {
 	Size resource.Quantity `json:"size,omitempty"`
 }
 
+// Resizing is not supported yet: a change could grow a volume, but its
+// rollback could not shrink it again.
+// +kubebuilder:validation:XValidation:rule="self.size == oldSelf.size",message="resizing a volume is not supported yet"
 type Volume struct {
 	// +kubebuilder:validation:Pattern=`^[a-z]([a-z0-9-]*[a-z0-9])?$`
 	Name string            `json:"name"`
@@ -136,12 +153,15 @@ type Health struct {
 	TimeoutSeconds int32 `json:"timeoutSeconds,omitempty"`
 }
 
-// +kubebuilder:validation:Enum=Installing;Ready;Updating;RollingBack;NeedsAttention;Removing
+// +kubebuilder:validation:Enum=Installing;Ready;Updating;RollingBack;Restoring;NeedsAttention;Removing
 type Phase string
 
 const (
 	PhaseInstalling     Phase = "Installing"
 	PhaseReady          Phase = "Ready"
+	PhaseUpdating       Phase = "Updating"
+	PhaseRollingBack    Phase = "RollingBack"
+	PhaseRestoring      Phase = "Restoring"
 	PhaseNeedsAttention Phase = "NeedsAttention"
 	PhaseRemoving       Phase = "Removing"
 )
@@ -151,9 +171,22 @@ type AppStatus struct {
 	Version            string `json:"version,omitempty"`
 	URL                string `json:"url,omitempty"`
 	ObservedGeneration int64  `json:"observedGeneration,omitempty"`
+	// LastBackup is the newest completed backup.
+	LastBackup *LastBackup `json:"lastBackup,omitempty"`
+	// PausedBy names the Restore the operator stopped managing the app for.
+	PausedBy string `json:"pausedBy,omitempty"`
+	// WorkloadGeneration is the spec generation the operator configured the
+	// workloads for (for Helm apps: and Flux applied) since the app was last
+	// paused; 0 while paused.
+	WorkloadGeneration int64 `json:"workloadGeneration,omitempty"`
 	// +listType=map
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+type LastBackup struct {
+	Name string      `json:"name"`
+	At   metav1.Time `json:"at"`
 }
 
 // +kubebuilder:object:root=true
