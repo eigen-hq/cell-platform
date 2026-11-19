@@ -11,8 +11,9 @@ export KUBECONFIG := $(CURDIR)/.cell/kubeconfig
 
 K3D := $(BIN)/k3d-$(K3D_VERSION)
 KUBECTL := $(BIN)/kubectl-$(KUBECTL_VERSION)
+FLUX := $(BIN)/flux-$(FLUX_VERSION)
 
-.PHONY: help tools cell-up cell-down status test e2e demo lima vm-test
+.PHONY: help tools cell-up cell-down status test e2e demo lima vm-test generate
 
 help:
 	@grep -hE '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
@@ -27,9 +28,15 @@ $(KUBECTL):
 	curl -fsSL -o $@ https://dl.k8s.io/release/$(KUBECTL_VERSION)/bin/$(OS)/$(ARCH)/kubectl
 	chmod +x $@
 
-tools: $(K3D) $(KUBECTL) ## Download pinned CLI tools into bin/
+$(FLUX):
+	@mkdir -p $(BIN)
+	curl -fsSL https://github.com/fluxcd/flux2/releases/download/v$(FLUX_VERSION)/flux_$(FLUX_VERSION)_$(OS)_$(ARCH).tar.gz | tar xz -C $(BIN) flux
+	mv $(BIN)/flux $@
+
+tools: $(K3D) $(KUBECTL) $(FLUX) ## Download pinned CLI tools into bin/
 	@ln -sf $(notdir $(K3D)) $(BIN)/k3d
 	@ln -sf $(notdir $(KUBECTL)) $(BIN)/kubectl
+	@ln -sf $(notdir $(FLUX)) $(BIN)/flux
 
 cell-up: tools ## Start the local cell (k3d) with all base services
 	deploy/local-up.sh
@@ -41,9 +48,10 @@ cell-down: tools ## Delete the local cell
 status: ## Show the state of the cell base services
 	go run ./cmd/cellctl status
 
-test: ## Unit and controller tests
+test: ## Unit and controller tests (envtest)
+	deploy/lib_test.sh
 	go vet ./...
-	go test ./...
+	KUBEBUILDER_ASSETS="$$(go tool setup-envtest use $(ENVTEST_K8S_VERSION) --bin-dir $(BIN)/envtest -p path)" go test ./...
 
 e2e: ## End-to-end tests against the local cell
 	go test -tags e2e -count=1 -timeout 30m ./test/e2e/...
@@ -59,3 +67,5 @@ lima: $(LIMACTL)
 vm-test: $(LIMACTL) ## M0 acceptance on a fresh Ubuntu VM (Lima, local)
 	test/vm/run.sh
 
+generate: ## Regenerate deepcopy code and CRDs from api/
+	go tool controller-gen object paths=./api/... crd paths=./api/... output:crd:artifacts:config=deploy/crd

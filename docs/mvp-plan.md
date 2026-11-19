@@ -4,8 +4,8 @@ Erste Ausbaustufe der Plattform. Jeder Meilenstein endet mit etwas Vorführbarem
 
 ## Stand
 
-- Aktueller Meilenstein: **M1**
-- Abgeschlossen: M0 (19.11.2026)
+- Aktueller Meilenstein: **M2**
+- Abgeschlossen: M0, M1 (19.11.2026)
 
 ## Ziel-Demo
 
@@ -63,6 +63,16 @@ Akzeptanz:
 - Alle drei Referenz-Apps bestehen denselben Ende-zu-Ende-Test
 
 Zu klären in M1: Helm-Anbindung (A-07) und das Manifest-Format gegen die drei Apps schärfen.
+
+Ergebnis (19.11.2026): Helm über Flux (E-18), Manifest geschärft (`app-manifest.md`).
+
+| Prüfung | Wie | Ergebnis |
+|---|---|---|
+| App aus Manifest, Subdomain, SSO ohne Handgriff | `make e2e`, `TestReferenceApps`: Login als Testnutzer über den authentik-Flow, danach fragt der Test die App, wer angemeldet ist | bestanden für Forgejo, Nextcloud, Eigenbau-Platzhalter |
+| Pod löschen | derselbe Test löscht alle App-Pods und wartet, bis die Sitzung wieder antwortet | bestanden |
+| Entfernen behält Daten | derselbe Test löscht die App, prüft Namespace und Volumes, installiert neu und meldet sich wieder an | bestanden |
+| Operator-Logik | `make test`: envtest mit echtem API-Server (Datenbank zuerst, Platzhalter, Login, Proxy, Helm, `NeedsAttention`, Entfernen) | bestanden |
+| Laufzeiten lokal | erste Installation inklusive Image-Download | Eigenbau-Platzhalter 10 s, Forgejo rund 2 min, Nextcloud rund 2 min |
 
 ### M2 – Tag-2-Betrieb
 

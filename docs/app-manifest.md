@@ -1,131 +1,136 @@
 # App-Manifest
 
-Entwurf v0. Das Manifest ist die zentrale Abstraktion der Plattform: Eine App beschreibt, was sie braucht, und die Plattform stellt es bereit. Das Format wird in M1 gegen die drei Referenz-Apps geschärft.
+Stand v1alpha1 (M1, an den drei Referenz-Apps geschärft). Das Manifest ist die zentrale Abstraktion der Plattform: Eine App beschreibt, was sie braucht, und die Plattform stellt es bereit. Die Go-Typen liegen in `api/v1alpha1/app_types.go`, die CRD in `deploy/crd/`.
 
 Vorbild ist das Manifest von Cloudron, bei dem Datenbank, Login und Mail als geteilte Dienste der Plattform angefordert werden.
 
 ## Grundidee
 
 - Die App bringt nur sich selbst mit (Helm-Chart oder Container-Image).
-- Alles Geteilte fordert sie an: Datenbank, Speicher, Login, Subdomain, Backup.
-- Die Plattform setzt die konkreten Werte beim Installieren ein.
+- Alles Geteilte fordert sie an: Datenbank, Volumes, generierte Geheimnisse, Login, Subdomain.
+- Die Plattform setzt die konkreten Werte beim Installieren ein (Platzhalter).
 - Der Kunde gibt nur an, was nur er wissen kann, zum Beispiel die gewünschte Subdomain.
 
+Ein Katalog-Manifest (`catalog/<app>/manifest.yaml`) ist selbst eine `App`. Installieren heißt im MVP: dieses Objekt anlegen, gegebenenfalls mit geänderter Subdomain.
+
 ## Beispiel
+
+Gekürzt aus `catalog/forgejo/manifest.yaml`:
 
 ```yaml
 apiVersion: cell.internal/v1alpha1
 kind: App
 metadata:
-  name: forgejo
+  name: forgejo                     # ergibt Namespace app-forgejo
 spec:
   title: Forgejo
-  version: "<app-version>"
-
+  version: "15.0.11"                # als {{ .app.version }} verfügbar
   source:
-    helm:                         # alternativ: image
-      chart: oci://<registry>/<chart>
-      version: "<chart-version>"
-      values:                     # Schlüssel beispielhaft; Platzhalter ersetzt die Plattform
-        database:
-          host: "{{ .database.host }}"
-          name: "{{ .database.name }}"
-          user: "{{ .database.user }}"
-          passwordSecret: "{{ .database.secretName }}"
-        oidc:
-          issuer: "{{ .auth.issuer }}"
-          clientId: "{{ .auth.clientId }}"
-          clientSecretRef: "{{ .auth.secretName }}"
-        url: "https://{{ .access.host }}"
-
+    helm:                           # alternativ: image
+      repo: oci://code.forgejo.org/forgejo-helm
+      chart: forgejo
+      version: "17.3.2"
+      values:
+        image:
+          tag: "{{ .app.version }}"
+        gitea:
+          oauth:
+            - name: authentik
+              provider: openidConnect
+              existingSecret: "{{ .auth.secretName }}"
+              autoDiscoverUrl: "{{ .auth.discoveryUrl }}"
+          config:
+            database:
+              HOST: "{{ .database.host }}:{{ .database.port }}"
   needs:
     database:
       engine: postgres
-    volumes:
-      - name: data
-        size: 10Gi
-        mountPath: /data
-    objectStorage: false
-    smtp: false
-
+      size: 2Gi
   access:
-    subdomain: git                # ergibt git.<domain-der-zelle>
+    subdomain: git                  # ergibt git.<domain-der-zelle>
     port: 3000
+    service: "{{ .app.name }}-http" # Service des Charts
     auth:
-      mode: oidc                  # oidc | proxy | ldap | none
-      groupsClaim: groups
-
+      mode: oidc
+      redirectPaths: [/user/oauth2/authentik/callback]
+      secretKeys: {clientId: key, clientSecret: secret}
   health:
     path: /api/healthz
-    timeoutSeconds: 300
-
-  backup:
-    schedule: daily
-    hooks:
-      pre: []                     # Befehle vor dem Snapshot, falls nötig
-      post: []
-
-  update:
-    auto: patch                   # none | patch | minor
-    strategy: snapshot-then-upgrade
-
-  provisioning:
-    users: jit                    # jit | scim | api | none
-
-  mcp:
-    endpoint: ""                  # leer, wenn die App keinen MCP-Server hat
+    timeoutSeconds: 600
 ```
 
 ## Felder
 
 | Feld | Bedeutung |
 |---|---|
-| `source` | Woher die App kommt: `helm` (Chart, Version, Werte) oder `image` (ein Container mit Ports, Umgebungsvariablen, Kommando) |
-| `needs` | Geteilte Dienste, die die Plattform bereitstellt |
-| `access` | Subdomain, Port und Art des Logins |
-| `health` | Woran die Plattform erkennt, dass die App gesund ist |
-| `backup` | Zeitplan und optionale Befehle für einen konsistenten Stand |
-| `update` | Was automatisch aktualisiert werden darf und wie |
-| `provisioning` | Wie Nutzer in die App kommen |
-| `mcp` | MCP-Endpunkt der App für das Gateway |
+| `version` | Version der App. Bei Images der Standard-Tag, bei Charts über `{{ .app.version }}` in den Werten |
+| `source.helm` | `repo` (`https://…` oder `oci://…`), `chart`, `version`, `values` mit Platzhaltern |
+| `source.image` | `repository`, `tag` (Standard: `version`), `command`, `args`, `env` (wie bei Kubernetes, inklusive `valueFrom`), `files` |
+| `source.image.files` | Dateien, die schreibgeschützt in den Container kommen (`path`, `content`, `executable`). So laufen app-spezifische Schritte nach der Installation, zum Beispiel als Start-Hook des Images |
+| `needs.database` | `engine: postgres`, `size`. Eine eigene CloudNativePG-Datenbank je App |
+| `needs.volumes` | `name`, `size`, `mountPath` (Image-Apps). Charts legen ihre Volumes selbst an |
+| `needs.secrets` | Namen generierter Geheimnisse (Schlüssel `password`), einmal erzeugt, bleiben über Neuinstallationen erhalten |
+| `access` | `subdomain`, `port`, `service` (Standard: App-Name), `auth` |
+| `access.auth` | `mode`, `redirectPaths` (OIDC-Rückrufpfade), `secretKeys` (Schlüsselnamen im Client-Secret, wie Chart oder App sie erwarten) |
+| `health` | `path` (Standard `/`) und `timeoutSeconds` (Standard 300), siehe Status |
+
+Noch nicht umgesetzt und deshalb nicht im Schema: `backup`, `update` (M2), `provisioning`, `mcp` (M5), Objektspeicher, SMTP.
 
 ## Login-Arten
 
-| `auth.mode` | Wann | Was die Plattform tut |
-|---|---|---|
-| `oidc` | App kann OpenID Connect | Legt einen Client in der Identität an und setzt die Werte ein |
-| `ldap` | App kann nur LDAP | Stellt ein LDAP-Verzeichnis aus der Identität bereit |
-| `proxy` | App hat kein eigenes Login | Schaltet einen Login-Proxy vor die App |
-| `none` | App ist bewusst offen oder verwaltet Nutzer selbst | Nichts |
+| `auth.mode` | Wann | Was die Plattform tut | Referenz-App |
+|---|---|---|---|
+| `oidc` | App kann OpenID Connect | Legt in authentik Provider und Application an (implizite Zustimmung, also kein Klick) und ein Secret `oidc` mit Client-ID und -Secret | Forgejo (Chart), Nextcloud (über `user_oidc`, eingerichtet per Start-Hook) |
+| `proxy` | App hat kein eigenes Login | Forward-Auth-Provider am eingebetteten Outpost, Traefik-Middleware vor der App; die App bekommt den Nutzer als `X-authentik-*`-Header | Eigenbau-Platzhalter (`traefik/whoami`) |
+| `none` | App ist bewusst offen oder verwaltet Nutzer selbst | Nichts | – |
+
+`ldap` ist vorgesehen, aber erst umgesetzt, wenn eine App es braucht.
 
 ## Platzhalter
 
-Werte, die erst in der Zelle feststehen, werden im Manifest als Platzhalter geschrieben und vom Operator ersetzt.
+Strings in `source` und `access.service` sind Go-Templates. Ein Platzhalter, den es für die App nicht gibt (zum Beispiel `.database.host` ohne Datenbank), ist ein Fehler und steht im Status. Passwörter gibt es nie als Platzhalter, nur Secret-Namen.
 
 | Platzhalter | Inhalt |
 |---|---|
-| `.database.*` | Host, Name, Nutzer und Secret der App-Datenbank |
-| `.auth.*` | Aussteller, Client-ID und Secret für den Login |
-| `.access.host` | Vollständiger Hostname der App |
-| `.volumes.<name>.claim` | Name des angelegten Volumes |
+| `.app.name`, `.app.version`, `.app.namespace` | Name, Version, Namespace `app-<name>` |
+| `.cell.domain`, `.cell.caConfigMap` | Domain der Zelle; ConfigMap mit `ca.crt` (Zellen-CA) und `ca-certificates.crt` (öffentliche Wurzeln plus Zellen-CA) |
+| `.access.host`, `.access.url` | Hostname und `https://`-URL der App |
+| `.database.host`, `.port`, `.name`, `.user`, `.secretName` | Datenbank; das Secret hat `username` und `password` |
+| `.auth.issuer`, `.auth.discoveryUrl`, `.auth.clientId`, `.auth.secretName` | OIDC-Werte; das Secret hat die Schlüssel aus `secretKeys` |
+| `.volumes.<name>.claim` | Name des PersistentVolumeClaims |
+| `.secrets.<name>` | Name des generierten Secrets |
+
+## Was der Operator anlegt
+
+In dieser Reihenfolge, jeder Schritt mit eigener Bedingung im Status:
+
+1. Namespace `app-<name>` und ConfigMap `cell-ca`
+2. generierte Secrets, Datenbank (`DatabaseReady`), wartet bis sie bereit ist
+3. Login-Client in authentik (`LoginReady`); wird bei Spec-Änderung, nach einem Operator-Neustart und alle 10 Minuten neu geschrieben, damit Abweichungen heilen
+4. Workload (`WorkloadReady`): Image-Apps als Deployment (Strategie `Recreate`), Service, PVCs; Helm-Apps als Flux `OCIRepository`/`HelmRepository` und `HelmRelease`
+5. Ingress mit Zertifikat vom ClusterIssuer `cell`, bei `proxy` zusätzlich Middleware und Outpost-Route
+6. Health-Check direkt gegen den Service (`Ready`)
+
+Image-Apps vertrauen der Zellen-CA automatisch (eingehängtes Bundle, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`). Helm-Apps hängen `{{ .cell.caConfigMap }}` über ihre Chart-Werte ein. In lokalen Zellen (`*.localhost`) bekommen Image-Apps zusätzlich die Loopback-Brücke (E-21).
 
 ## Status
 
-Der Operator schreibt in `status`:
-
-- `phase`: `Installing`, `Ready`, `Updating`, `RollingBack`, `NeedsAttention`, `Removing`
-- `version`: tatsächlich laufende Version
+- `phase`: `Installing` bis zum ersten erfolgreichen Health-Check, dann `Ready`. Bleibt eine App länger als `health.timeoutSeconds` ungesund, wird sie `NeedsAttention`. Beim Entfernen `Removing`. `Updating` und `RollingBack` kommen mit M2.
+- `version`: Version, mit der der letzte Health-Check bestanden wurde
 - `url`: Adresse der App
-- `lastBackup`: Zeitpunkt und Ergebnis der letzten Sicherung
-- `conditions`: Einzelzustände mit Begründung, lesbar für Menschen und Agenten
+- `conditions`: `DatabaseReady`, `LoginReady`, `WorkloadReady`, `Ready`, jeweils mit lesbarer Begründung
+
+## Entfernen
+
+Das Löschen einer `App` entfernt Workload, Ingress und Login-Client. Die Daten bleiben als letzte Sicherung: Volumes bleiben, die Datenbank wird schlafen gelegt (CloudNativePG-Hibernation), der Namespace bekommt das Label `cell.internal/retained=true`. PVCs aus Charts sind per Post-Renderer mit `helm.sh/resource-policy: keep` vor dem Deinstallieren geschützt. Wird die App wieder angelegt, übernimmt sie die Daten. Endgültiges Löschen kommt als eigene, freigabepflichtige Aktion mit der API (M3).
 
 ## Zwei Stufen im Katalog
 
 - **Integriert**: gepflegtes Manifest mit Login, geprüften Updates und, wo vorhanden, MCP. Das kuratierte Standard-Set.
 - **Generisch**: Manifest aus einem Chart oder einer Compose-Datei abgeleitet, vom Paketier-Agenten erzeugt. Läuft mit Subdomain, Backup und Neustart, aber ohne Garantie für Login und Updates.
 
-## Offene Punkte für M1
+## Antworten auf die offenen Punkte aus M1
 
-- Wie werden app-spezifische Schritte nach der Installation abgebildet, zum Beispiel ein Login-Plugin aktivieren?
-- Reicht ein Platzhalter-Mechanismus, oder braucht es pro App ein kleines Übersetzungsstück?
-- Wie beschreibt ein Manifest Apps, die aus mehreren Containern bestehen und kein Chart haben?
+- **App-spezifische Schritte nach der Installation**: als Dateien im Manifest (`source.image.files`), meist als Start-Hook des Images, der bei jedem Start idempotent läuft (Nextcloud: `user_oidc` installieren und Provider anlegen). Bei Charts über deren eigene Mechanismen (Forgejo legt die OAuth-Quelle im Init-Container an).
+- **Platzhalter oder Übersetzungsstück**: Platzhalter reichen für alle drei Apps. Nötig waren zwei kleine Ergänzungen: `secretKeys` (Charts erwarten eigene Schlüsselnamen) und Platzhalter in `access.service` (Service-Name hängt am Release-Namen).
+- **Apps aus mehreren Containern ohne Chart**: noch offen; bis eine solche App kommt, ist der Weg ein Helm-Chart. Kandidat für die Paketierung in M4.

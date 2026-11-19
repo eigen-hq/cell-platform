@@ -1,0 +1,98 @@
+# The App operator. Its only write path into apps is this ServiceAccount.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cell-operator
+  namespace: cell-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cell-operator
+rules:
+  - apiGroups: [cell.internal]
+    resources: [apps, apps/status, apps/finalizers]
+    verbs: ["*"]
+  - apiGroups: [""]
+    resources: [namespaces, configmaps, secrets, services, persistentvolumeclaims]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [postgresql.cnpg.io]
+    resources: [clusters]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [helm.toolkit.fluxcd.io]
+    resources: [helmreleases]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [source.toolkit.fluxcd.io]
+    resources: [helmrepositories, ocirepositories]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [traefik.io]
+    resources: [middlewares]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [cert-manager.io]
+    resources: [certificates]
+    verbs: [get, list, watch, create, update, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cell-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cell-operator
+subjects:
+  - kind: ServiceAccount
+    name: cell-operator
+    namespace: cell-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cell-operator
+  namespace: cell-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cell-operator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cell-operator
+    spec:
+      serviceAccountName: cell-operator
+      containers:
+        - name: operator
+          image: ${OPERATOR_IMAGE}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: BRIDGE_IMAGE
+              value: "${BRIDGE_IMAGE}"
+            - name: AUTHENTIK_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: identity
+                  key: AUTHENTIK_BOOTSTRAP_TOKEN
+          ports:
+            - name: health
+              containerPort: 8081
+          readinessProbe:
+            httpGet: {path: /readyz, port: health}
+          livenessProbe:
+            httpGet: {path: /healthz, port: health}
+          resources:
+            requests: {cpu: 10m, memory: 64Mi}
+            limits: {memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}

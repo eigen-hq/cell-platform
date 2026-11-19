@@ -20,5 +20,13 @@ mkdir -p "$(dirname "$KUBECONFIG")"
 k3d kubeconfig get "$CELL_NAME" >"$KUBECONFIG"
 chmod 600 "$KUBECONFIG"
 
+# Images: tags are source hashes, so an operator change does not touch the
+# bridge (and with it every app pod).
+root=$(cd "$here/.." && pwd)
+source "$here/lib.sh"
+OPERATOR_IMAGE=$(build_image cell-operator operator "$root" "$CELL_NAME" api cmd/operator internal Dockerfile go.mod go.sum)
+BRIDGE_IMAGE=$(build_image cell-bridge bridge "$root" "$CELL_NAME" cmd/bridge Dockerfile go.mod go.sum)
+export OPERATOR_IMAGE BRIDGE_IMAGE
+
 CELL_DOMAIN=${CELL_DOMAIN:-cell.localhost} "$here/bootstrap.sh"
 echo "local cell up in $(($(date +%s) - start))s"

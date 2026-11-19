@@ -10,6 +10,8 @@
 #   CELL_ACME_SERVER   default: Let's Encrypt production
 #   CELL_INGRESS_IP    address the ingress answers on (default 127.0.0.1)
 #   CELL_STORAGE       local-path (default) | longhorn
+#   OPERATOR_IMAGE     operator image, already present on the node (required)
+#   BRIDGE_IMAGE       loopback bridge image, needed for *.localhost cells
 #   CELL_BACKUP_S3_ENDPOINT, CELL_BACKUP_S3_BUCKET, CELL_BACKUP_S3_REGION,
 #   CELL_BACKUP_S3_ACCESS_KEY, CELL_BACKUP_S3_SECRET_KEY
 #                      off-cell backup target (optional, all or none)
@@ -19,7 +21,10 @@ here=$(cd "$(dirname "$0")" && pwd)
 source "$here/versions.env"
 
 : "${CELL_DOMAIN:?CELL_DOMAIN must be set}"
-export CELL_DOMAIN AUTHENTIK_CHART_VERSION LONGHORN_VERSION
+: "${OPERATOR_IMAGE:?OPERATOR_IMAGE must be set}"
+export BRIDGE_IMAGE=${BRIDGE_IMAGE:-}
+case $CELL_DOMAIN in *.localhost | localhost) [ -n "$BRIDGE_IMAGE" ] || die "BRIDGE_IMAGE must be set for *.localhost cells" ;; esac
+export CELL_DOMAIN AUTHENTIK_CHART_VERSION LONGHORN_VERSION OPERATOR_IMAGE
 export CELL_TLS=${CELL_TLS:-selfsigned}
 export CELL_ACME_EMAIL=${CELL_ACME_EMAIL:-}
 export CELL_ACME_SERVER=${CELL_ACME_SERVER:-https://acme-v02.api.letsencrypt.org/directory}
@@ -127,4 +132,31 @@ fi
 # The flow executor answers with the first login stage once the default flows exist.
 retry curl -fsS -o /dev/null "${cacert[@]}" --resolve "auth.$CELL_DOMAIN:443:$CELL_INGRESS_IP" \
   "https://auth.$CELL_DOMAIN/api/v3/flows/executor/default-authentication-flow/"
+log "Flux $FLUX_VERSION (source and helm controllers)"
+flux install --version="v$FLUX_VERSION" --components=source-controller,helm-controller --export |
+  kubectl apply --server-side -f - >/dev/null
+kubectl -n flux-system wait deploy --all --for=condition=Available --timeout=5m >/dev/null
+
+log "cluster DNS: *.$CELL_DOMAIN to the ingress"
+# Pods reach cell hosts (e.g. the OIDC issuer) through the ingress, like
+# browsers do, without hairpin NAT or public DNS.
+domain_re=$(printf '%s' "$CELL_DOMAIN" | sed 's/[.]/\\./g')
+dns=$(kubectl apply -f - <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  cell.override: |
+    rewrite name regex ^(.+\.)?$domain_re\.?$ traefik.kube-system.svc.cluster.local answer auto
+EOF
+)
+case $dns in *unchanged*) ;; *) kubectl -n kube-system rollout restart deploy/coredns >/dev/null ;; esac
+kubectl -n kube-system rollout status deploy/coredns --timeout=2m >/dev/null
+
+log "operator $OPERATOR_IMAGE"
+kubectl apply --server-side -f "$here/crd/" >/dev/null
+apply operator.yaml
+kubectl -n cell-system rollout status deploy/cell-operator --timeout=5m >/dev/null
 log "cell ready"

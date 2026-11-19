@@ -56,3 +56,23 @@ ensure_secret() {
   [[ $out == *NotFound* ]] || die "read secret $ns/$name: $out"
   secret_manifest "$@" | kubectl create -f - >/dev/null
 }
+
+# build_image builds an image unless it exists, imports it into the k3d cell
+# unless it is there, and prints its reference. The tag is a hash of the
+# sources, so unchanged code is a no-op. Every failure is returned: callers
+# use $(...), where errexit does not apply.
+# Usage: build_image <name> <docker target> <repo root> <cell> <sources...>
+build_image() {
+  local name=$1 target=$2 root=$3 cell=$4 hash ref
+  shift 4
+  hash=$(cd "$root" && find "$@" -type f ! -name '*_test.go' ! -path '*/testdata/*' | sort | xargs shasum | shasum | cut -c1-12) || return 1
+  [ -n "$hash" ] || return 1
+  ref=$name:$hash
+  if ! docker image inspect "$ref" >/dev/null 2>&1; then
+    docker build -q --target "$target" -t "$ref" "$root" >/dev/null || return 1
+  fi
+  if ! docker exec "k3d-$cell-server-0" ctr -n k8s.io images ls -q | grep -q "$ref\$"; then
+    k3d image import "$ref" -c "$cell" >/dev/null || return 1
+  fi
+  echo "$ref"
+}

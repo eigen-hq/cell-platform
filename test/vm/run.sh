@@ -24,9 +24,16 @@ start=$(date +%s)
 booted=$(date +%s)
 vmsh cat /etc/os-release | grep PRETTY_NAME
 "$limactl" copy -r "$root/deploy" "$vm:/tmp/"
+# The VM has no registry access to our image: ship it as an archive.
+image=cell-operator:vm-test
+docker build -q -t "$image" "$root" >/dev/null
+mkdir -p "$root/.cell"
+docker save "$image" -o "$root/.cell/operator.tar"
+"$limactl" copy "$root/.cell/operator.tar" "$vm:/tmp/operator.tar"
+cell_install() { vmsh sudo CELL_DOMAIN="$domain" OPERATOR_IMAGE="$image" OPERATOR_IMAGE_TAR=/tmp/operator.tar /tmp/deploy/install.sh; }
 
 log "install"
-vmsh sudo CELL_DOMAIN="$domain" /tmp/deploy/install.sh
+cell_install
 done_at=$(date +%s)
 echo "VM boot $((booted - start))s, install to login page $((done_at - booted))s, total $((done_at - start))s"
 
@@ -34,7 +41,7 @@ log "second run must change nothing"
 state() { kc get deploy,ds,helmcharts.helm.cattle.io,clusters.postgresql.cnpg.io,clusterissuers,certificates,crd -A \
   -o jsonpath='{range .items[*]}{.kind}/{.metadata.namespace}/{.metadata.name}={.metadata.generation}{"\n"}{end}' | sort; }
 before=$(state)
-vmsh sudo CELL_DOMAIN="$domain" /tmp/deploy/install.sh >/dev/null
+cell_install >/dev/null
 after=$(state)
 if [ "$before" != "$after" ]; then
   diff <(echo "$before") <(echo "$after") || true

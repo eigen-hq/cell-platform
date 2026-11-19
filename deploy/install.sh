@@ -4,7 +4,9 @@
 #   CELL_DOMAIN=cell.example.com CELL_TLS=acme CELL_ACME_EMAIL=ops@example.com ./install.sh
 #
 # Defaults: CELL_STORAGE=longhorn, CELL_TLS=selfsigned. All other settings as in
-# bootstrap.sh. Idempotent: a second run changes nothing.
+# bootstrap.sh. OPERATOR_IMAGE names the operator image; OPERATOR_IMAGE_TAR, if
+# set, is an image archive (docker save) imported first. Idempotent: a second
+# run changes nothing.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 source "$here/versions.env"
@@ -43,6 +45,18 @@ if [ "$(k3s --version 2>/dev/null | awk 'NR==1{print $3}')" != "$K3S_VERSION" ];
 fi
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 retry kubectl wait node --all --for=condition=Ready --timeout=10s >/dev/null
+
+log "Flux CLI $FLUX_VERSION"
+if [ "$(flux version --client 2>/dev/null | awk '{print $2}')" != "v$FLUX_VERSION" ]; then
+  arch=$(dpkg --print-architecture)
+  curl -fsSL "https://github.com/fluxcd/flux2/releases/download/v$FLUX_VERSION/flux_${FLUX_VERSION}_linux_$arch.tar.gz" |
+    tar xz -C /usr/local/bin flux
+fi
+
+if [ -n "${OPERATOR_IMAGE_TAR:-}" ]; then
+  log "operator image from $OPERATOR_IMAGE_TAR"
+  k3s ctr -n k8s.io images import "$OPERATOR_IMAGE_TAR" >/dev/null
+fi
 
 CELL_INGRESS_IP=${CELL_INGRESS_IP:-127.0.0.1} "$here/bootstrap.sh"
 log "cell installed in $(($(date +%s) - start))s"

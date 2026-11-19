@@ -1,0 +1,22 @@
+# Placeholder for a self-built app (e.g. from the office suite): a ready-made
+# container without own login. The platform puts it behind the identity's
+# login proxy and passes the user as X-authentik-* headers.
+apiVersion: cell.internal/v1alpha1
+kind: App
+metadata:
+  name: whoami
+spec:
+  title: Eigenbau-Platzhalter
+  version: "1.12.0"
+  source:
+    image:
+      repository: traefik/whoami
+      tag: "v{{ .app.version }}"
+  access:
+    subdomain: whoami
+    port: 80
+    auth:
+      mode: proxy
+  health:
+    path: /health
+    timeoutSeconds: 120

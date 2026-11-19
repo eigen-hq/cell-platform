@@ -1,0 +1,97 @@
+# Forgejo (Git hosting), the simple reference app: official Helm chart,
+# Postgres from the platform, login via OIDC with automatic sign-up.
+apiVersion: cell.internal/v1alpha1
+kind: App
+metadata:
+  name: forgejo
+spec:
+  title: Forgejo
+  version: "15.0.11"
+  source:
+    helm:
+      repo: oci://code.forgejo.org/forgejo-helm
+      chart: forgejo
+      version: "17.3.2"
+      values:
+        fullnameOverride: "{{ .app.name }}"
+        image:
+          tag: "{{ .app.version }}"
+        strategy:
+          type: Recreate
+        persistence:
+          enabled: true
+          size: 5Gi
+        # Trust the cell CA for the backchannel to the identity (Go reads
+        # every file in /etc/ssl/certs).
+        extraVolumes:
+          - name: cell-ca
+            configMap:
+              name: "{{ .cell.caConfigMap }}"
+        extraContainerVolumeMounts:
+          - name: cell-ca
+            mountPath: /etc/ssl/certs/cell-ca.crt
+            subPath: ca.crt
+            readOnly: true
+        extraInitVolumeMounts:
+          - name: cell-ca
+            mountPath: /etc/ssl/certs/cell-ca.crt
+            subPath: ca.crt
+            readOnly: true
+        gitea:
+          admin:
+            username: ""
+          oauth:
+            - name: authentik
+              provider: openidConnect
+              existingSecret: "{{ .auth.secretName }}"
+              autoDiscoverUrl: "{{ .auth.discoveryUrl }}"
+          additionalConfigFromEnvs:
+            - name: FORGEJO__DATABASE__PASSWD
+              valueFrom:
+                secretKeyRef:
+                  name: "{{ .database.secretName }}"
+                  key: password
+          config:
+            database:
+              DB_TYPE: postgres
+              HOST: "{{ .database.host }}:{{ .database.port }}"
+              NAME: "{{ .database.name }}"
+              USER: "{{ .database.user }}"
+              SSL_MODE: require
+            server:
+              DOMAIN: "{{ .access.host }}"
+              ROOT_URL: "{{ .access.url }}/"
+              DISABLE_SSH: true
+            service:
+              DISABLE_REGISTRATION: false
+              ALLOW_ONLY_EXTERNAL_REGISTRATION: true
+              SHOW_REGISTRATION_BUTTON: false
+            oauth2_client:
+              ENABLE_AUTO_REGISTRATION: true
+              ACCOUNT_LINKING: auto
+              USERNAME: nickname
+              OPENID_CONNECT_SCOPES: "openid email profile"
+            openid:
+              ENABLE_OPENID_SIGNIN: false
+            session:
+              # Sessions in the database survive pod restarts (chart default: memory).
+              PROVIDER: db
+              COOKIE_SECURE: true
+  needs:
+    database:
+      engine: postgres
+      size: 2Gi
+  access:
+    subdomain: git
+    port: 3000
+    service: "{{ .app.name }}-http"
+    auth:
+      mode: oidc
+      redirectPaths:
+        - /user/oauth2/authentik/callback
+      secretKeys:
+        clientId: key
+        clientSecret: secret
+  health:
+    path: /api/healthz
+    timeoutSeconds: 600

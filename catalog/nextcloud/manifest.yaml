@@ -1,0 +1,98 @@
+# Nextcloud, the hard reference app: plain image with real migrations,
+# Postgres and a data volume from the platform, login via the user_oidc app.
+# The app-specific steps after installation run as an image start hook.
+apiVersion: cell.internal/v1alpha1
+kind: App
+metadata:
+  name: nextcloud
+spec:
+  title: Nextcloud
+  version: "34.0.6"
+  source:
+    image:
+      repository: nextcloud
+      tag: "{{ .app.version }}-apache"
+      env:
+        - name: POSTGRES_HOST
+          value: "{{ .database.host }}"
+        - name: POSTGRES_DB
+          value: "{{ .database.name }}"
+        - name: POSTGRES_USER
+          value: "{{ .database.user }}"
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: "{{ .database.secretName }}"
+              key: password
+        - name: NEXTCLOUD_ADMIN_USER
+          value: admin
+        - name: NEXTCLOUD_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: "{{ .secrets.admin }}"
+              key: password
+        - name: NEXTCLOUD_TRUSTED_DOMAINS
+          value: "{{ .access.host }}"
+        - name: OVERWRITEPROTOCOL
+          value: https
+        - name: OVERWRITEHOST
+          value: "{{ .access.host }}"
+        - name: OVERWRITECLIURL
+          value: "{{ .access.url }}"
+        - name: TRUSTED_PROXIES
+          value: 10.0.0.0/8
+        - name: OIDC_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: "{{ .auth.secretName }}"
+              key: clientId
+        - name: OIDC_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: "{{ .auth.secretName }}"
+              key: clientSecret
+        - name: OIDC_DISCOVERY_URL
+          value: "{{ .auth.discoveryUrl }}"
+      files:
+        - path: /docker-entrypoint-hooks.d/before-starting/50-cell-login.sh
+          executable: true
+          content: |
+            #!/bin/sh
+            # Runs as www-data before every start; every step is idempotent.
+            set -eu
+            occ() { php /var/www/html/occ "$@"; }
+            # The identity is reached inside the cell (private address) and,
+            # in self-signed cells, needs the cell CA.
+            occ config:system:set allow_local_remote_servers --value=true --type=boolean
+            if [ -s /etc/cell/ca.crt ]; then
+              occ security:certificates:import /etc/cell/ca.crt
+            fi
+            occ app:list --output=json | grep -q '"user_oidc"' || occ app:install user_oidc
+            occ app:enable user_oidc
+            occ user_oidc:provider authentik \
+              --clientid="$OIDC_CLIENT_ID" --clientsecret="$OIDC_CLIENT_SECRET" \
+              --discoveryuri="$OIDC_DISCOVERY_URL" --scope="openid email profile" \
+              --unique-uid=0 --mapping-uid=preferred_username \
+              --mapping-display-name=name --mapping-email=email
+            # Single sign-on only: the login page goes straight to the identity.
+            occ config:app:set user_oidc allow_multiple_user_backends --value=0
+  needs:
+    database:
+      engine: postgres
+      size: 2Gi
+    volumes:
+      - name: data
+        size: 10Gi
+        mountPath: /var/www/html
+    secrets:
+      - admin
+  access:
+    subdomain: cloud
+    port: 80
+    auth:
+      mode: oidc
+      redirectPaths:
+        - /apps/user_oidc/code
+  health:
+    path: /status.php
+    timeoutSeconds: 900

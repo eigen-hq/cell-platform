@@ -6,11 +6,13 @@ Das Repo ist namensneutral gehalten. Der Produktname steht an genau einer Stelle
 
 ## Stand
 
-M0 ist abgeschlossen: Eine Zelle entsteht per Befehl, lokal (`make cell-up`) oder auf einer Ubuntu-VM (`deploy/install.sh`). Details und Messwerte in `docs/mvp-plan.md`.
+M0 und M1 sind abgeschlossen: Eine Zelle entsteht per Befehl, lokal (`make cell-up`) oder auf einer Ubuntu-VM (`deploy/install.sh`), und Apps werden allein über ihr Manifest installiert, mit Datenbank, Single Sign-on und Zertifikat. Details und Messwerte in `docs/mvp-plan.md`.
 
 ```
 make cell-up     # lokale Zelle (k3d), Login unter https://auth.cell.localhost
 make status      # Zustand der Basisdienste
+kubectl apply -f catalog/forgejo/manifest.yaml   # App installieren
+make test        # Unit- und Controller-Tests (envtest)
 make e2e         # Ende-zu-Ende-Tests gegen die lokale Zelle
 make vm-test     # Abnahme auf einer frischen Ubuntu-VM (Lima, lokal)
 make cell-down   # lokale Zelle löschen

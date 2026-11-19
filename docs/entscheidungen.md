@@ -21,6 +21,12 @@ Drei Listen: was feststeht, was als Annahme gilt, was offen ist. Neue Einträge 
 | E-14 | Volumes (A-06 bestätigt): Longhorn auf der VM mit CSI-Snapshots, eine Replik pro Volume. Geprüft auf Ubuntu 26.04.1 LTS. Die lokale Zelle nutzt `local-path` ohne Snapshots. |
 | E-15 | Ziel-VM (A-12 bestätigt): 4 vCPU, 8 GB reichen. Die leere Zelle belegt 3,4 GB und lässt 4,5 GB für Apps. Messung in `mvp-plan.md` unter M0. |
 | E-16 | VM-Abnahme läuft lokal in Lima (`make vm-test`), ohne Cloud-Konto. |
+| E-17 | Operator (A-03 bestätigt): Go mit controller-runtime und controller-gen, also den Kubebuilder-Bibliotheken ohne dessen Projektgerüst. Controller-Tests laufen mit envtest. |
+| E-18 | Helm-Anbindung (A-07 bestätigt): Flux source- und helm-controller. Der Operator schreibt `OCIRepository` oder `HelmRepository` und `HelmRelease`; ein Post-Renderer setzt `helm.sh/resource-policy: keep` auf alle PVCs der Charts, damit Daten das Deinstallieren überleben. |
+| E-19 | Referenz-Apps (A-09 bestätigt): Forgejo (Helm, OIDC), Nextcloud (Image, OIDC über `user_oidc` per Start-Hook), `traefik/whoami` als Eigenbau-Platzhalter (Image, Login-Proxy). Alle drei bestehen denselben Ende-zu-Ende-Test. |
+| E-20 | `App` ist cluster-weit, jede App hat den Namespace `app-<name>`. Entfernen behält die Daten (Volumes bleiben, Datenbank schläft, Namespace mit Label `retained`); erneutes Anlegen übernimmt sie. |
+| E-21 | Lokale Zelle: Pods erreichen Zellen-Hosts über eine CoreDNS-Umschreibung auf Traefik. libcurl (PHP, curl) löst `*.localhost` immer auf Loopback auf; deshalb bekommen Image-Apps in `*.localhost`-Zellen eine kleine Loopback-Brücke als Sidecar (Unterbefehl des Operator-Images). Zellen mit echter Domain brauchen sie nicht. |
+| E-22 | Vertrauen in die Zellen-CA: In jedem App-Namespace liegt die ConfigMap `cell-ca`. Image-Apps bekommen sie automatisch eingehängt, Helm-Apps über ihre Chart-Werte. |
 | E-13 | Zugangsdaten der Identität (DB-Passwort, Secret Key, Admin-Passwort, API-Token) erzeugt der Bootstrap einmalig und legt sie nur als Secrets in `cell-system` ab. |
 
 ## Annahmen
@@ -52,6 +58,8 @@ Vorschläge aus der Planung, noch nicht bestätigt. Sie dürfen genutzt werden; 
 | O-04 | Lizenz des Repos | Vor der ersten Veröffentlichung |
 | O-05 | Privates Netz pro Zelle („nur im Firmennetz erreichbar") | Nach dem MVP |
 | O-06 | Anbieter und Standort für die ersten gehosteten Zellen | Vor der ersten Demo mit Externen |
+| O-07 | Der Operator spricht authentik mit dem Bootstrap-Token (Admin-Rechte) an. Eigenes Dienstkonto mit engen Rechten | Vor der ersten Kundenzelle |
+| O-08 | Images und Chart-Quellen sind per Tag gepinnt, nicht per Digest; das Operator-Image hat noch keine Registry (VM bekommt es als Archiv) | Vor der ersten Kundenzelle |
 
 ## Versionen
 
@@ -67,7 +75,13 @@ Gepinnt in `deploy/versions.env` (einzige Quelle), geprüft am 19.11.2026 über 
 | authentik | 2026.8.5 (Chart) | braucht kein Redis mehr, nur Postgres |
 | Longhorn | 1.13.0 | nur VM |
 | external-snapshotter | v8.7.0 | k3s bringt keinen Snapshot-Controller mit |
-| Go | 1.27.4 | controller-runtime v0.25.3, client-go v0.37.2 |
+| Go | 1.27.4 | controller-runtime v0.25.3, client-go v0.37.2, controller-tools v0.23.0, envtest 1.37.0 |
+| Flux | 2.10.0 | nur source- und helm-controller |
+| Lima | 2.3.0 | nur `make vm-test` |
+| Operator-Image | golang:1.27.4-trixie, distroless static-debian13 | |
+| Forgejo | Chart 17.3.2, App 15.0.11 (LTS) | |
+| Nextcloud | 34.0.6-apache (`stable`), user_oidc 8.13.0 | |
+| traefik/whoami | v1.12.0 | Eigenbau-Platzhalter |
 
 ## Recherche-Notizen
 

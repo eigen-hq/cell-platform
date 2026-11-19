@@ -60,4 +60,33 @@ check "retry succeeds on the last attempt" "0" "$(retry succeed_on 3 2>/dev/null
 check "retry fails when every attempt fails" "1" "$(retry succeed_on 4 2>/dev/null && echo 0 || echo 1)"
 check "retry stops after the last attempt" "3" "$(wc -l <"$tmp/attempts" | tr -d ' ')"
 
+# build_image with fake docker and k3d: $FAKE_DOCKER is ok | fail.
+mkdir -p "$tmp/src/cmd" && echo 'package main' >"$tmp/src/cmd/main.go"
+cat >"$tmp/docker" <<'EOF'
+#!/usr/bin/env bash
+echo "docker $*" >>"$FAKE_LOG"
+case "$FAKE_DOCKER:$1" in
+  *:image) exit 1 ;;                       # never built before
+  fail:build) echo "build failed" >&2; exit 1 ;;
+  ok:build) exit 0 ;;
+  *:exec) exit 0 ;;                          # image not in the cell yet
+esac
+EOF
+cat >"$tmp/k3d" <<'EOF'
+#!/usr/bin/env bash
+echo "k3d $*" >>"$FAKE_LOG"
+[ "$FAKE_K3D" = ok ]
+EOF
+chmod +x "$tmp/docker" "$tmp/k3d"
+: >"$FAKE_LOG"
+out=$(FAKE_DOCKER=fail FAKE_K3D=ok build_image app op "$tmp/src" c cmd 2>/dev/null) && rc=0 || rc=$?
+check "build_image fails when the build fails" "1:" "$rc:$out"
+check "build_image does not import a failed build" "0" "$(grep -c '^k3d' "$FAKE_LOG" || true)"
+out=$(FAKE_DOCKER=ok FAKE_K3D=fail build_image app op "$tmp/src" c cmd 2>/dev/null) && rc=0 || rc=$?
+check "build_image fails when the import fails" "1:" "$rc:$out"
+out=$(FAKE_DOCKER=ok FAKE_K3D=ok build_image app op "$tmp/src" c cmd) && rc=0 || rc=$?
+check "build_image prints the hashed reference" "0:yes" "$rc:$([[ $out =~ ^app:[0-9a-f]{12}$ ]] && echo yes || echo "no ($out)")"
+out=$(FAKE_DOCKER=ok FAKE_K3D=ok build_image app op "$tmp/src" c missing-dir 2>/dev/null) && rc=0 || rc=$?
+check "build_image fails on missing sources" "1:" "$rc:$out"
+
 [ "$fails" -eq 0 ]

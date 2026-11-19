@@ -9,27 +9,41 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
+	goruntime "runtime"
 	"testing"
 
+	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
+
+	cellv1 "github.com/marcelheidebrecht/cell-platform/api/v1alpha1"
 )
 
 func repoRoot() string {
-	_, file, _, _ := runtime.Caller(0)
+	_, file, _, _ := goruntime.Caller(0)
 	return filepath.Join(filepath.Dir(file), "..", "..")
 }
 
 func kube(t *testing.T) client.Client {
 	t.Helper()
+	ctrllog.SetLogger(logr.Discard())
 	cfg, err := ctrl.GetConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := client.New(cfg, client.Options{})
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := cellv1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	c, err := client.New(cfg, client.Options{Scheme: scheme})
 	if err != nil {
 		t.Fatal(err)
 	}
