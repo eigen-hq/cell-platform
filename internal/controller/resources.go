@@ -198,7 +198,10 @@ func imageWorkload(app *cellv1.App, src cellv1.ImageSource, bridgeImage string) 
 		}})
 	}
 
-	pod := corev1.PodSpec{Containers: []corev1.Container{container}, Volumes: volumes}
+	// No service links: Kubernetes would set <SERVICE>_PORT=tcp://... for
+	// the app's own Service, which apps read as their own settings (Memos
+	// takes MEMOS_PORT as its port).
+	pod := corev1.PodSpec{Containers: []corev1.Container{container}, Volumes: volumes, EnableServiceLinks: ptr(false)}
 	if bridgeImage != "" {
 		pod.Containers = append(pod.Containers, corev1.Container{
 			Name:  "localhost-bridge",

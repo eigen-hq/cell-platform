@@ -398,6 +398,9 @@ func TestImageAppLifecycle(t *testing.T) {
 	if pod.Containers[0].Image != "example/notes:1.0" {
 		t.Errorf("image %s", pod.Containers[0].Image)
 	}
+	if pod.EnableServiceLinks == nil || *pod.EnableServiceLinks {
+		t.Error("service links would put NOTES_PORT=tcp://... into the app's env")
+	}
 	if len(pod.Containers) != 2 || pod.Containers[1].Image != "bridge:test" {
 		t.Error("local cell app without loopback bridge")
 	}
