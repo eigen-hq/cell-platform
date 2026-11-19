@@ -61,4 +61,4 @@ Eine Plattform, die beliebige self-hostbare Software pro Kunde in einer eigenen 
 - Kein VPN oder Mesh-Netz im MVP.
 - Keine Build-Pipeline für Eigenbau-Apps; im MVP kommen sie als fertige Container.
 - Keine Migrationswerkzeuge für Bestandskunden.
-- Keine Remote-Einrichtung und kein Push, solange das nicht ausdrücklich gewünscht ist.
+- Kein Push außer auf das vereinbarte Remote (E-09).

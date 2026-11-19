@@ -13,7 +13,12 @@ Drei Listen: was feststeht, was als Annahme gilt, was offen ist. Neue Einträge 
 | E-05 | Namensneutral. Der Produktname (derzeit „Eigen") steht nur hier und später in einer einzigen Konfigurationsvariable. Technische Bezeichner nutzen `cell`. |
 | E-06 | Fokus zuerst auf junge Unternehmen ohne bestehende IT. Self-Hosting beim Kunden bleibt eine Option. |
 | E-07 | Sprachmodelle zunächst über API-Keys des Kunden. |
-| E-08 | Vorerst kein Remote; das Repo bleibt lokal. |
+| E-08 | Vorerst kein Remote; das Repo bleibt lokal. Abgelöst durch E-09. |
+| E-09 | Remote ist ein privates GitHub-Repo `cell-platform`. Gearbeitet wird vorerst direkt auf `main`; jeder abgeschlossene Schritt wird gepusht. |
+| E-10 | Agenten-Laufzeit (O-01): eigener schlanker Dienst in Go. Leitlinie: Der Ops-Agent kann alles, was ein Administrator kann (Status, Logs, Ereignisse, Ressourcen lesen, Befehle in Containern ausführen, Konfiguration ändern, neu starten, zurückrollen). Diese Fähigkeiten stellt die Plattform-API bereit, damit jede Aktion protokolliert und freigabefähig bleibt; der Weg über die API ist keine Einschränkung des Umfangs. |
+| E-11 | Basisdienste installiert `deploy/bootstrap.sh` mit `kubectl` allein: Upstream-Manifeste (cert-manager, CloudNativePG) per Server-Side Apply, Helm-Charts (authentik, Longhorn) über den in k3s eingebauten Helm-Controller (`HelmChart`). Auf der VM ist damit nur k3s nötig. |
+| E-12 | Lokale Zelle: k3d, Domain `cell.localhost`, eigene Root-CA über cert-manager (ClusterIssuer `cell`). `*.localhost` löst jeder Browser ohne DNS-Eintrag auf; öffentliche Wildcard-Dienste wie sslip.io scheitern an DNS-Rebind-Schutz. Auf der VM: eigene Domain und Let's Encrypt (`CELL_TLS=acme`). |
+| E-13 | Zugangsdaten der Identität (DB-Passwort, Secret Key, Admin-Passwort, API-Token) erzeugt der Bootstrap einmalig und legt sie nur als Secrets in `cell-system` ab. |
 
 ## Annahmen
 
@@ -38,12 +43,28 @@ Vorschläge aus der Planung, noch nicht bestätigt. Sie dürfen genutzt werden; 
 
 | Nr. | Frage | Fällig |
 |---|---|---|
-| O-01 | Agenten-Laufzeit: eigener schlanker Dienst oder kagent; in welcher Sprache | Vor M4 |
+| O-01 | ~~Agenten-Laufzeit~~ entschieden, siehe E-10 | – |
 | O-02 | Objektspeicher in der Zelle: Garage oder SeaweedFS | Sobald eine App S3 braucht |
 | O-03 | Endgültige API-Gruppe. `cell.internal` ist ein Platzhalter | Vor der ersten Veröffentlichung |
 | O-04 | Lizenz des Repos | Vor der ersten Veröffentlichung |
 | O-05 | Privates Netz pro Zelle („nur im Firmennetz erreichbar") | Nach dem MVP |
 | O-06 | Anbieter und Standort für die ersten gehosteten Zellen | Vor der ersten Demo mit Externen |
+
+## Versionen
+
+Gepinnt in `deploy/versions.env` (einzige Quelle), geprüft am 19.11.2026 über GitHub-Releases, den k3s-Kanal `stable` und die Paketquellen.
+
+| Baustein | Version | Bemerkung |
+|---|---|---|
+| k3s | v1.37.2+k3s1 | Kanal `stable`; bringt Traefik v3.7 mit |
+| k3d | v5.9.0 | nur lokale Zelle |
+| kubectl | v1.37.2 | passend zu k3s |
+| cert-manager | v1.21.3 | |
+| CloudNativePG | 1.30.2 | |
+| authentik | 2026.8.5 (Chart) | braucht kein Redis mehr, nur Postgres |
+| Longhorn | 1.13.0 | nur VM |
+| external-snapshotter | v8.7.0 | k3s bringt keinen Snapshot-Controller mit |
+| Go | 1.27.4 | controller-runtime v0.25.3, client-go v0.37.2 |
 
 ## Recherche-Notizen
 
