@@ -58,3 +58,4 @@ lima: $(LIMACTL)
 
 vm-test: $(LIMACTL) ## M0 acceptance on a fresh Ubuntu VM (Lima, local)
 	test/vm/run.sh
+

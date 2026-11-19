@@ -18,6 +18,9 @@ Drei Listen: was feststeht, was als Annahme gilt, was offen ist. Neue Einträge 
 | E-10 | Agenten-Laufzeit (O-01): eigener schlanker Dienst in Go. Leitlinie: Der Ops-Agent kann alles, was ein Administrator kann (Status, Logs, Ereignisse, Ressourcen lesen, Befehle in Containern ausführen, Konfiguration ändern, neu starten, zurückrollen). Diese Fähigkeiten stellt die Plattform-API bereit, damit jede Aktion protokolliert und freigabefähig bleibt; der Weg über die API ist keine Einschränkung des Umfangs. |
 | E-11 | Basisdienste installiert `deploy/bootstrap.sh` mit `kubectl` allein: Upstream-Manifeste (cert-manager, CloudNativePG) per Server-Side Apply, Helm-Charts (authentik, Longhorn) über den in k3s eingebauten Helm-Controller (`HelmChart`). Auf der VM ist damit nur k3s nötig. |
 | E-12 | Lokale Zelle: k3d, Domain `cell.localhost`, eigene Root-CA über cert-manager (ClusterIssuer `cell`). `*.localhost` löst jeder Browser ohne DNS-Eintrag auf; öffentliche Wildcard-Dienste wie sslip.io scheitern an DNS-Rebind-Schutz. Auf der VM: eigene Domain und Let's Encrypt (`CELL_TLS=acme`). |
+| E-14 | Volumes (A-06 bestätigt): Longhorn auf der VM mit CSI-Snapshots, eine Replik pro Volume. Geprüft auf Ubuntu 26.04.1 LTS. Die lokale Zelle nutzt `local-path` ohne Snapshots. |
+| E-15 | Ziel-VM (A-12 bestätigt): 4 vCPU, 8 GB reichen. Die leere Zelle belegt 3,4 GB und lässt 4,5 GB für Apps. Messung in `mvp-plan.md` unter M0. |
+| E-16 | VM-Abnahme läuft lokal in Lima (`make vm-test`), ohne Cloud-Konto. |
 | E-13 | Zugangsdaten der Identität (DB-Passwort, Secret Key, Admin-Passwort, API-Token) erzeugt der Bootstrap einmalig und legt sie nur als Secrets in `cell-system` ab. |
 
 ## Annahmen

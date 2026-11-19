@@ -4,8 +4,8 @@ Erste Ausbaustufe der Plattform. Jeder Meilenstein endet mit etwas Vorführbarem
 
 ## Stand
 
-- Aktueller Meilenstein: **M0** (noch nicht begonnen)
-- Abgeschlossen: keiner
+- Aktueller Meilenstein: **M1**
+- Abgeschlossen: M0 (19.11.2026)
 
 ## Ziel-Demo
 
@@ -36,6 +36,17 @@ Akzeptanz:
 - Ressourcenbedarf der leeren Zelle ist gemessen und dokumentiert
 
 Zu klären in M0: Volume-Baustein (A-06) und Zielgröße der VM (A-12).
+
+Ergebnis (19.11.2026):
+
+| Prüfung | Wie | Ergebnis |
+|---|---|---|
+| Frische VM bis Login-Seite | `make vm-test`: Ubuntu 26.04.1 LTS in Lima, 4 vCPU, 8 GiB | 522 s gesamt (149 s VM-Start inkl. Image-Download, 373 s Installation) |
+| Idempotent | zweiter Lauf von `install.sh` bzw. `make cell-up`; Generationen und Ressourcen-Versionen unverändert | bestanden (`make vm-test`, `make e2e`) |
+| Snapshots | PVC auf Longhorn, `VolumeSnapshot` wird `readyToUse` | bestanden (`make vm-test`) |
+| Lokale Zelle | `make cell-up` aus dem Nichts, Images im Cache | 234 s |
+| Ressourcen leere Zelle (VM) | `free -m`, `kubectl top` nach 60 s Ruhe | 3,4 GB belegt, 4,5 GB verfügbar, 0,36 CPU im Leerlauf; authentik allein 965 MiB, Longhorn rund 450 MiB |
+| Ressourcen leere Zelle (lokal) | `kubectl top` | Pods 1,05 GiB, Knoten 2,6 GiB (ohne Longhorn) |
 
 ### M1 – App-Manifest und Operator
 

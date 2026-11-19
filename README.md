@@ -6,7 +6,15 @@ Das Repo ist namensneutral gehalten. Der Produktname steht an genau einer Stelle
 
 ## Stand
 
-Planungsstand, noch kein Code. Nächster Schritt: Meilenstein M0 in `docs/mvp-plan.md`.
+M0 ist abgeschlossen: Eine Zelle entsteht per Befehl, lokal (`make cell-up`) oder auf einer Ubuntu-VM (`deploy/install.sh`). Details und Messwerte in `docs/mvp-plan.md`.
+
+```
+make cell-up     # lokale Zelle (k3d), Login unter https://auth.cell.localhost
+make status      # Zustand der Basisdienste
+make e2e         # Ende-zu-Ende-Tests gegen die lokale Zelle
+make vm-test     # Abnahme auf einer frischen Ubuntu-VM (Lima, lokal)
+make cell-down   # lokale Zelle löschen
+```
 
 ## Lesereihenfolge
 
