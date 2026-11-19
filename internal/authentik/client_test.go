@@ -245,3 +245,61 @@ func TestFindPagesThroughUnfilteredLists(t *testing.T) {
 		t.Errorf("%d proxy providers, want 4", n)
 	}
 }
+
+func TestDuplicate(t *testing.T) {
+	for body, want := range map[string]bool{
+		`{"username":["This field must be unique."]}`:                   true,
+		`{"name":["group with this name already exists."]}`:             true,
+		`{"username":["Ensure this field has no more than 150 chars"]}`: false,
+	} {
+		if got := (&Error{Status: 400, Body: body}).Duplicate(); got != want {
+			t.Errorf("%s: %v", body, got)
+		}
+	}
+	if (&Error{Status: 500, Body: "already exists"}).Duplicate() {
+		t.Error("a server error is no duplicate")
+	}
+}
+
+// Replacing the groups of an application adds the new restriction before
+// the old one goes: a failure halfway never opens the application.
+func TestEnsureAccessNeverOpensOnFailure(t *testing.T) {
+	api := newFakeAPI()
+	api.objects["core/groups/"] = []map[string]any{{"pk": "g-staff", "name": "staff"}, {"pk": "g-finance", "name": "finance"}}
+	api.objects["core/applications/"] = []map[string]any{{"pk": "app-1", "slug": "notes"}}
+	api.objects["policies/bindings/"] = []map[string]any{{"pk": "b-1", "target": "app-1", "group": "g-staff"}}
+	failCreate := true
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if failCreate && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "policies/bindings/") {
+			http.Error(w, `{"detail":"boom"}`, http.StatusInternalServerError)
+			return
+		}
+		api.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+	c := &Client{BaseURL: srv.URL, Token: "t", HTTP: srv.Client()}
+	groupsOf := func() []string {
+		var out []string
+		for _, b := range api.objects["policies/bindings/"] {
+			out = append(out, fmt.Sprint(b["group"]))
+		}
+		return out
+	}
+
+	if err := c.EnsureAccess(context.Background(), "notes", []string{"finance"}); err == nil {
+		t.Fatal("failed binding not reported")
+	}
+	if got := groupsOf(); len(got) != 1 || got[0] != "g-staff" {
+		t.Errorf("after a failed change the app is restricted to %v, want the old group", got)
+	}
+	failCreate = false
+	if err := c.EnsureAccess(context.Background(), "notes", []string{"finance"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := groupsOf(); len(got) != 1 || got[0] != "g-finance" {
+		t.Errorf("bindings %v, want only finance", got)
+	}
+	if err := c.EnsureAccess(context.Background(), "notes", nil); err != nil || len(groupsOf()) != 0 {
+		t.Errorf("opening the app: %v, bindings %v", err, groupsOf())
+	}
+}

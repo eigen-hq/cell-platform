@@ -4,8 +4,8 @@ Erste Ausbaustufe der Plattform. Jeder Meilenstein endet mit etwas Vorführbarem
 
 ## Stand
 
-- Aktueller Meilenstein: **M3**
-- Abgeschlossen: M0, M1, M2 (19.11.2026)
+- Aktueller Meilenstein: **M4**
+- Abgeschlossen: M0, M1, M2, M3 (19.11.2026)
 
 ## Ziel-Demo
 
@@ -112,6 +112,16 @@ Umfang:
 Akzeptanz:
 - Der Ende-zu-Ende-Test aus M1 und M2 läuft ausschließlich über die API
 - Die OpenAPI-Datei ist aktuell und wird im Test geprüft
+
+Ergebnis (19.11.2026): Plattform-API `cell-api` (E-29), Freigaben nur über die API (E-30), Installieren, Entfernen und Wiederherstellen als Aktionen eines `ChangeRequest` (E-31).
+
+| Prüfung | Wie | Ergebnis |
+|---|---|---|
+| M1 und M2 nur über die API | `make e2e`: Installieren, Login, Entfernen und Neuinstallieren der drei Referenz-Apps, Backup und Restore, fehlerhaftes Update mit Rollback, Restore in eine frische Zelle (`make dr-test`), alles über `https://api.<domain>` mit Tokens der Identität und Freigabe durch einen Admin. `kubectl` spielt nur die Welt um die Zelle (Pods löschen, Testdaten schreiben) und schaut hinein, wo die API nichts zeigt (behaltener Namespace) | bestanden |
+| Freigaben | `make e2e`, `TestChangeApproval`: Agent schlägt vor, darf nicht freigeben; ein Cluster-Admin kann weder einen freigegebenen `ChangeRequest` anlegen noch an der API vorbei freigeben; der Admin lehnt über die API ab; der Ereignis-Stream meldet die Änderung | bestanden |
+| Zugriff | `make e2e`, `TestAccessGroups`: App auf eine Gruppe beschränkt, Mitglied kommt hinein, andere weist die Identität ab, nach dem Öffnen kommen alle hinein | bestanden |
+| OpenAPI-Datei aktuell | `make test`: jede Route steht in `api/openapi.yaml` und umgekehrt, jede Antwort der API-Tests passt zu ihrem Schema (keine zusätzlichen Felder erlaubt) | bestanden |
+| Steuerlogik | `make test`: Installieren, Entfernen mit und ohne Daten, Wiederherstellen als Änderung, Zugriffsgruppen, Validierung der Aktionen; Tokens (Zielgruppe, Ablehnung durch die Identität, Cache) | bestanden |
 
 ### M4 – Ops-Agent v0
 

@@ -128,7 +128,7 @@ Die Daten fremder Apps bleiben in den Apps. Zentral liegt nur, was allen gemeins
 
 ## Schnittstelle zur Oberfläche
 
-REST mit OpenAPI-Beschreibung, Anmeldung über Tokens der Identität.
+REST mit OpenAPI-Beschreibung (`api/openapi.yaml`), Anmeldung über Tokens der Identität. Rollen kommen aus Gruppen der Identität: Admins dürfen alles, Agenten lesen und schlagen Änderungen vor, alle anderen lesen. Jede Änderung an einer App entsteht als `ChangeRequest` ohne Entscheidung; ein Admin gibt sie in einem eigenen Aufruf frei (E-30).
 
 | Bereich | Zweck |
 |---|---|

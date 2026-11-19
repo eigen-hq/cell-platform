@@ -1,0 +1,118 @@
+# The platform API. Its account writes only ChangeRequests (proposals and
+# an admin's decision) and Backups; the operator alone changes apps.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cell-api
+  namespace: cell-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cell-api
+rules:
+  - apiGroups: [cell.internal]
+    resources: [apps, backups, restores]
+    verbs: [get, list, watch]
+  - apiGroups: [cell.internal]
+    resources: [backups]
+    verbs: [create]
+  - apiGroups: [cell.internal]
+    resources: [changerequests]
+    verbs: [get, list, watch, create, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cell-api
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cell-api
+subjects:
+  - kind: ServiceAccount
+    name: cell-api
+    namespace: cell-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cell-api
+  namespace: cell-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cell-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cell-api
+    spec:
+      serviceAccountName: cell-api
+      containers:
+        - name: api
+          image: ${OPERATOR_IMAGE}
+          imagePullPolicy: IfNotPresent
+          command: [/api]
+          env:
+            - name: AUTHENTIK_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: identity
+                  key: AUTHENTIK_BOOTSTRAP_TOKEN
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+          # Keep serving while the ingress stops sending requests to this
+          # pod; without it, a rollout drops requests.
+          lifecycle:
+            preStop:
+              sleep: {seconds: 5}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 128Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cell-api
+  namespace: cell-system
+spec:
+  selector:
+    app.kubernetes.io/name: cell-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cell-api
+  namespace: cell-system
+  annotations:
+    cert-manager.io/cluster-issuer: cell
+spec:
+  ingressClassName: traefik
+  tls:
+    - secretName: api-tls
+      hosts: [api.${CELL_DOMAIN}]
+  rules:
+    - host: api.${CELL_DOMAIN}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: cell-api
+                port: {name: http}

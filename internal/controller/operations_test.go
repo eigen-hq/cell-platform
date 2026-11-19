@@ -851,7 +851,7 @@ func TestRollbackAfterAddingVolume(t *testing.T) {
 
 func fakeClient(scheme *runtime.Scheme, objs ...client.Object) client.Client {
 	return fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).WithReturnManagedFields().
-		WithStatusSubresource(&cellv1.App{}, &cellv1.Restore{}).Build()
+		WithStatusSubresource(&cellv1.App{}, &cellv1.Restore{}, &cellv1.ChangeRequest{}).Build()
 }
 
 // Rolling back a change that added the first volume of a database-only
@@ -1782,6 +1782,26 @@ func TestRestoreStartWaitsForAppConfiguration(t *testing.T) {
 	}
 	if act.paused || act.phase != cellv1.PhaseRestoring {
 		t.Errorf("restore at start: paused %v, phase %s", act.paused, act.phase)
+	}
+}
+
+// A restore that succeeds after a failed update is the app's latest change:
+// the app does not keep the update's failure.
+func TestRestoreClearsFailedChange(t *testing.T) {
+	t1, t2 := metav1.NewTime(time.Now().Add(-time.Minute)), metav1.Now()
+	update := &cellv1.ChangeRequest{ObjectMeta: metav1.ObjectMeta{Name: "lark-update"},
+		Spec:   cellv1.ChangeRequestSpec{App: "lark"},
+		Status: cellv1.ChangeRequestStatus{Phase: cellv1.RunFailed, FinishedAt: &t1, AppliedGeneration: 2}}
+	restore := &cellv1.ChangeRequest{ObjectMeta: metav1.ObjectMeta{Name: "lark-restore"},
+		Spec:   cellv1.ChangeRequestSpec{App: "lark", Action: "restore", Backup: "lark-keep"},
+		Status: cellv1.ChangeRequestStatus{Phase: cellv1.RunSucceeded, FinishedAt: &t2, Restore: "lark-restore-restore"}}
+	ar := &AppReconciler{Client: fakeClient(k8s.Scheme(), update, restore)}
+	act, err := ar.activity(context.Background(), &cellv1.App{ObjectMeta: metav1.ObjectMeta{Name: "lark"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if act.failedChange != "" {
+		t.Errorf("app keeps %q after a successful restore", act.failedChange)
 	}
 }
 

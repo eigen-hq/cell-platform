@@ -59,6 +59,18 @@ spec:
             type: object
           spec:
             properties:
+              action:
+                default: update
+                description: |-
+                  Action: update applies Patch as a JSON merge patch on the App spec;
+                  install creates the app with Patch as its spec; remove deletes the
+                  app; restore brings back the data of Backup.
+                enum:
+                - update
+                - install
+                - remove
+                - restore
+                type: string
               app:
                 type: string
                 x-kubernetes-validations:
@@ -68,8 +80,9 @@ spec:
                 default:
                   required: true
                 description: |-
-                  Approval is required before anything changes (A-10). Approving or
-                  rejecting is the API's job; it records who decided.
+                  Approval is required before anything changes (A-10). Only the
+                  platform API decides, in a call of its own, and records who decided
+                  (admission policy cell-change-approval).
                 properties:
                   at:
                     format: date-time
@@ -85,8 +98,19 @@ spec:
                     default: true
                     type: boolean
                 type: object
+              backup:
+                description: |-
+                  Backup to restore (action restore), by name: approvers see what comes
+                  back, and the change's own backup cannot be mistaken for "latest".
+                type: string
+              deleteData:
+                description: |-
+                  DeleteData (action remove) also deletes the data the app leaves in
+                  the cell: volumes, database and secrets. Its backups stay.
+                type: boolean
               patch:
-                description: Patch is a JSON merge patch on the App spec.
+                description: 'Patch is a JSON merge patch on the App spec (install:
+                  the spec).'
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
               reason:
@@ -114,12 +138,28 @@ spec:
                 type: string
             required:
             - app
-            - patch
             - requester
             type: object
             x-kubernetes-validations:
             - message: patch is immutable
               rule: '!has(oldSelf.patch) || self.patch == oldSelf.patch'
+            - message: action is immutable
+              rule: self.action == oldSelf.action
+            - message: backup is immutable
+              rule: has(self.backup) == has(oldSelf.backup) && (!has(self.backup)
+                || self.backup == oldSelf.backup)
+            - message: deleteData is immutable
+              rule: (has(self.deleteData) && self.deleteData) == (has(oldSelf.deleteData)
+                && oldSelf.deleteData)
+            - message: install and update need a patch
+              rule: self.action in ['remove', 'restore'] || has(self.patch)
+            - message: backup is only for action restore
+              rule: self.action == 'restore' || !has(self.backup)
+            - message: restore needs the name of a backup
+              rule: self.action != 'restore' || (has(self.backup) && size(self.backup)
+                > 0 && self.backup != 'latest')
+            - message: deleteData is only for action remove
+              rule: self.action == 'remove' || !has(self.deleteData) || !self.deleteData
           status:
             properties:
               appUID:

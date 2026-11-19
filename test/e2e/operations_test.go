@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -13,11 +14,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	cellv1 "github.com/marcelheidebrecht/cell-platform/api/v1alpha1"
 )
 
 // kubectl runs the pinned kubectl against the local cell.
@@ -98,111 +95,52 @@ func (m marker) expect(value string) {
 	}
 }
 
-func waitRun[T client.Object](t *testing.T, obj T, timeout time.Duration, phase func(T) (cellv1.RunPhase, string), want cellv1.RunPhase) {
-	t.Helper()
-	waitFor(t, timeout, func() error {
-		if err := kube(t).Get(context.Background(), client.ObjectKeyFromObject(obj), obj); err != nil {
-			return err
-		}
-		p, msg := phase(obj)
-		if p == want {
-			return nil
-		}
-		if p == cellv1.RunFailed || (p != "" && want == cellv1.RunCompleted && p != cellv1.RunRunning && p != cellv1.RunPending) {
-			t.Fatalf("%s ended %s: %s", obj.GetName(), p, msg)
-		}
-		return fmt.Errorf("%s is %s: %s", obj.GetName(), p, msg)
-	})
-}
-
-func backupPhase(b *cellv1.Backup) (cellv1.RunPhase, string)   { return b.Status.Phase, b.Status.Message }
-func restorePhase(r *cellv1.Restore) (cellv1.RunPhase, string) { return r.Status.Phase, r.Status.Message }
-func changePhase(c *cellv1.ChangeRequest) (cellv1.RunPhase, string) {
-	return c.Status.Phase, c.Status.Message
-}
-
-func backupNow(t *testing.T, app string) *cellv1.Backup {
-	t.Helper()
-	b := &cellv1.Backup{
-		ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("%s-e2e-%d", app, time.Now().Unix())},
-		Spec:       cellv1.BackupSpec{App: app, Reason: "manual"},
-	}
-	if err := kube(t).Create(context.Background(), b); err != nil {
-		t.Fatal(err)
-	}
-	waitRun(t, b, 10*time.Minute, backupPhase, cellv1.RunCompleted)
-	return b
-}
-
-func restoreNow(t *testing.T, app, backup string) {
-	t.Helper()
-	rs := &cellv1.Restore{
-		ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("%s-e2e-%d", app, time.Now().Unix())},
-		Spec:       cellv1.RestoreSpec{App: app, Backup: backup},
-	}
-	if err := kube(t).Create(context.Background(), rs); err != nil {
-		t.Fatal(err)
-	}
-	waitRun(t, rs, 15*time.Minute, restorePhase, cellv1.RunCompleted)
-}
-
-// M2: back up, change data, restore: database and volume are as backed up.
+// M2 through the API (M3): back up, change data, restore: database and
+// volume are as backed up.
 func TestBackupAndRestore(t *testing.T) {
 	tc := newTestCell(t)
+	admin := tc.adminAPI(t)
 	for _, name := range []string{"forgejo", "nextcloud"} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			install(t, tc, loadManifest(t, name), 15*time.Minute)
+			admin.installed(t, name, 15*time.Minute)
 			m := marker{t: t, app: name}
 			m.write("before-backup")
-			b := backupNow(t, name)
+			b := admin.backup(t, name)
 			m.write("after-backup")
-			restoreNow(t, name, b.Name)
-			install(t, tc, loadManifest(t, name), 15*time.Minute)
+			admin.restore(t, name, b)
 			m.expect("before-backup")
 		})
 	}
 }
 
-// M2: an update that does not become healthy is rolled back automatically:
-// version and data are as before, and the change log says what happened.
+// M2 through the API (M3): an update that does not become healthy is rolled
+// back automatically: version and data are as before, and the change log
+// says what happened.
 func TestFailedUpdateRollsBack(t *testing.T) {
 	tc := newTestCell(t)
-	ctx := context.Background()
-	install(t, tc, loadManifest(t, "forgejo"), 15*time.Minute)
+	admin := tc.adminAPI(t)
+	admin.installed(t, "forgejo", 15*time.Minute)
 	m := marker{t: t, app: "forgejo"}
 	m.write("before-update")
 
-	cr := &cellv1.ChangeRequest{
-		ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("forgejo-broken-update-%d", time.Now().Unix())},
-		Spec: cellv1.ChangeRequestSpec{
-			App:       "forgejo",
-			Requester: cellv1.Requester{Kind: "Human", Name: "e2e"},
-			Reason:    "update to a version that does not exist",
-			Risk:      "medium",
-			Patch:     &apiextensionsv1.JSON{Raw: []byte(`{"version":"15.0.999","health":{"timeoutSeconds":90}}`)},
-			Approval:  cellv1.Approval{Required: true, Decision: "Approved", By: "e2e"},
-		},
+	change := admin.propose(t, admin, http.MethodPatch, "/v0/apps/forgejo", map[string]any{
+		"patch":  map[string]any{"version": "15.0.999", "health": map[string]any{"timeoutSeconds": 90}},
+		"reason": "update to a version that does not exist",
+	})
+	cr := admin.waitChange(t, change, 20*time.Minute, "RolledBack")
+	if field(cr, "backup") == nil || field(cr, "restore") == nil {
+		t.Errorf("change log incomplete: %v", cr)
 	}
-	if err := tc.kube.Create(ctx, cr); err != nil {
-		t.Fatal(err)
-	}
-	waitRun(t, cr, 20*time.Minute, changePhase, cellv1.RunRolledBack)
-	if cr.Status.Backup == "" || cr.Status.Restore == "" || cr.Status.PreviousSpec == nil {
-		t.Errorf("change log incomplete: %+v", cr.Status)
-	}
-	t.Logf("change log: %s", cr.Status.Message)
+	t.Logf("change log: %s", field(cr, "message"))
 
-	var app cellv1.App
 	waitFor(t, 5*time.Minute, func() error {
-		if err := tc.kube.Get(ctx, client.ObjectKey{Name: "forgejo"}, &app); err != nil {
-			return err
-		}
-		if app.Spec.Version != "15.0.11" || app.Status.Version != "15.0.11" || app.Status.Phase != cellv1.PhaseNeedsAttention {
-			return fmt.Errorf("app %s/%s %s", app.Spec.Version, app.Status.Version, app.Status.Phase)
+		app := admin.do(t, http.MethodGet, "/v0/apps/forgejo", nil, http.StatusOK)
+		if field(app, "version") != "15.0.11" || field(app, "runningVersion") != "15.0.11" || field(app, "phase") != "NeedsAttention" {
+			return fmt.Errorf("app %v/%v %v", field(app, "version"), field(app, "runningVersion"), field(app, "phase"))
 		}
 		return nil
 	})
-	install(t, tc, loadManifest(t, "forgejo"), 10*time.Minute)
+	admin.installed(t, "forgejo", 10*time.Minute)
 	m.expect("before-update")
 }

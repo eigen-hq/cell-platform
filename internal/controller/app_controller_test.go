@@ -41,7 +41,7 @@ import (
 
 var (
 	k8s     client.Client
-	ident   = &fakeIdentity{oidc: map[string]authentik.OIDC{}, proxy: map[string]authentik.Proxy{}}
+	ident   = &fakeIdentity{oidc: map[string]authentik.OIDC{}, proxy: map[string]authentik.Proxy{}, access: map[string][]string{}}
 	healthy sync.Map // app name -> bool
 	skew    atomic.Int64
 	// outpostReady plays authentik's outpost serving proxy apps.
@@ -52,7 +52,25 @@ type fakeIdentity struct {
 	mu      sync.Mutex
 	oidc    map[string]authentik.OIDC
 	proxy   map[string]authentik.Proxy
+	access  map[string][]string
 	deleted []string
+}
+
+func (f *fakeIdentity) EnsureAccess(_ context.Context, slug string, groups []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	_, oidc := f.oidc[slug]
+	_, proxy := f.proxy[slug]
+	if !oidc && !proxy {
+		return fmt.Errorf("application %q: %w", slug, authentik.ErrNotFound)
+	}
+	for _, g := range groups {
+		if g == "missing" {
+			return fmt.Errorf("group %q: %w", g, authentik.ErrNotFound)
+		}
+	}
+	f.access[slug] = groups
+	return nil
 }
 
 func (f *fakeIdentity) EnsureOIDC(_ context.Context, o authentik.OIDC) error {

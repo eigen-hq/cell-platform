@@ -6,17 +6,26 @@ Das Repo ist namensneutral gehalten. Der Produktname steht an genau einer Stelle
 
 ## Stand
 
-M0 bis M2 sind abgeschlossen: Eine Zelle entsteht per Befehl, lokal (`make cell-up`) oder auf einer Ubuntu-VM (`deploy/install.sh`). Apps werden allein über ihr Manifest installiert, mit Datenbank, Single Sign-on und Zertifikat. Sie werden außerhalb der Zelle gesichert, lassen sich wiederherstellen (auch in eine neue Zelle), und Änderungen laufen als `ChangeRequest` mit Backup, Health-Check und automatischem Rollback. Details und Messwerte in `docs/mvp-plan.md`.
+M0 bis M3 sind abgeschlossen: Eine Zelle entsteht per Befehl, lokal (`make cell-up`) oder auf einer Ubuntu-VM (`deploy/install.sh`). Apps werden allein über ihr Manifest installiert, mit Datenbank, Single Sign-on und Zertifikat. Sie werden außerhalb der Zelle gesichert, lassen sich wiederherstellen (auch in eine neue Zelle), und Änderungen laufen mit Backup, Health-Check und automatischem Rollback. Alles das geht über die Plattform-API unter `https://api.<domain>`; jede Änderung wartet dort auf die Freigabe eines Admins. Details und Messwerte in `docs/mvp-plan.md`, der Vertrag der API in `api/openapi.yaml`.
 
 ```
 make cell-up     # lokale Zelle (k3d), Login unter https://auth.cell.localhost
 make status      # Zustand der Basisdienste
-kubectl apply -f catalog/forgejo/manifest.yaml   # App installieren
-make test        # Unit- und Controller-Tests (envtest)
-make e2e         # Ende-zu-Ende-Tests gegen die lokale Zelle
+make test        # Unit-, API- und Controller-Tests (envtest)
+make e2e         # Ende-zu-Ende-Tests gegen die lokale Zelle, über die API
 make dr-test     # Restore in eine frisch aufgebaute Zelle (löscht die lokale Zelle)
 make vm-test     # Abnahme auf einer frischen Ubuntu-VM (Lima, lokal)
 make cell-down   # lokale Zelle löschen
+```
+
+Die API spricht man mit einem Token der Identität an. Ein Admin (Gruppe `cell-admins`, anfangs `akadmin`) legt in authentik ein App-Passwort an, danach:
+
+```
+curl -d grant_type=client_credentials -d client_id=cell-api -d username=akadmin \
+     -d password=<App-Passwort> -d 'scope=openid profile' https://auth.cell.localhost/application/o/token/
+curl -H 'Authorization: Bearer <access_token>' https://api.cell.localhost/v0/apps
+curl -H 'Authorization: Bearer <access_token>' -d '{"catalog":"forgejo"}' https://api.cell.localhost/v0/apps
+curl -H 'Authorization: Bearer <access_token>' -X POST https://api.cell.localhost/v0/changes/<name>/approve
 ```
 
 ## Lesereihenfolge

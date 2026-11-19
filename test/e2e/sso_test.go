@@ -125,6 +125,17 @@ func (tc *testCell) browser(t *testing.T) *http.Client {
 // It returns the response the app finally serves.
 func (tc *testCell) login(t *testing.T, b *http.Client, start, username, password string) *http.Response {
 	t.Helper()
+	resp, denied := tc.tryLogin(t, b, start, username, password)
+	if denied != "" {
+		t.Fatalf("the identity turned %s away: %s", username, denied)
+	}
+	return resp
+}
+
+// tryLogin is login that returns the identity's reason instead of the
+// app's response when the identity turns the user away.
+func (tc *testCell) tryLogin(t *testing.T, b *http.Client, start, username, password string) (*http.Response, string) {
+	t.Helper()
 	resp, err := b.Get(start)
 	if err != nil {
 		t.Fatal(err)
@@ -134,38 +145,61 @@ func (tc *testCell) login(t *testing.T, b *http.Client, start, username, passwor
 	if u.Host != tc.cfg.Host("auth") || !strings.HasPrefix(u.Path, "/if/flow/") {
 		t.Fatalf("%s did not lead to the login page but to %s (HTTP %d)", start, u, resp.StatusCode)
 	}
-	slug := strings.Trim(strings.TrimPrefix(u.Path, "/if/flow/"), "/")
-	executor := "https://" + u.Host + "/api/v3/flows/executor/" + slug + "/?query=" + url.QueryEscape(u.RawQuery)
-
-	var answer map[string]any
-	for step := 0; step < 10; step++ {
-		var ch map[string]any
-		if answer == nil {
-			ch = tc.flowCall(t, b, http.MethodGet, executor, nil)
-		} else {
-			ch = tc.flowCall(t, b, http.MethodPost, executor, answer)
-		}
-		switch ch["component"] {
-		case "ak-stage-identification":
-			answer = map[string]any{"component": ch["component"], "uid_field": username}
-			if ch["password_fields"] == true {
-				answer["password"] = password
+	// Login, then the app's authorization flow, which may deny access.
+	for flow := 0; flow < 3; flow++ {
+		slug := strings.Trim(strings.TrimPrefix(u.Path, "/if/flow/"), "/")
+		executor := "https://" + u.Host + "/api/v3/flows/executor/" + slug + "/?query=" + url.QueryEscape(u.RawQuery)
+		var answer map[string]any
+		for step := 0; ; step++ {
+			if step == 10 {
+				t.Fatal("login flow did not finish")
 			}
-		case "ak-stage-password":
-			answer = map[string]any{"component": ch["component"], "password": password}
-		case "xak-flow-redirect":
-			to, _ := url.Parse(fmt.Sprint(ch["to"]))
-			resp, err := b.Get(u.ResolveReference(to).String())
-			if err != nil {
-				t.Fatal(err)
+			var ch map[string]any
+			if answer == nil {
+				ch = tc.flowCall(t, b, http.MethodGet, executor, nil)
+			} else {
+				ch = tc.flowCall(t, b, http.MethodPost, executor, answer)
 			}
-			return resp
-		default:
-			t.Fatalf("unexpected login stage: %v", ch)
+			switch ch["component"] {
+			case "ak-stage-identification":
+				answer = map[string]any{"component": ch["component"], "uid_field": username}
+				if ch["password_fields"] == true {
+					answer["password"] = password
+				}
+				continue
+			case "ak-stage-password":
+				answer = map[string]any{"component": ch["component"], "password": password}
+				continue
+			case "ak-stage-access-denied":
+				return nil, fmt.Sprint(ch["error_message"])
+			case "xak-flow-redirect":
+				to, _ := url.Parse(fmt.Sprint(ch["to"]))
+				resp, err = b.Get(u.ResolveReference(to).String())
+				if err != nil {
+					t.Fatal(err)
+				}
+			default:
+				t.Fatalf("unexpected login stage: %v", ch)
+			}
+			break
 		}
+		next := resp.Request.URL
+		if next.Host != tc.cfg.Host("auth") {
+			return resp, ""
+		}
+		if !strings.HasPrefix(next.Path, "/if/flow/") {
+			// The identity answers itself, e.g. its access denied page.
+			page := readBody(t, resp)
+			if i := strings.Index(strings.ToLower(page), "denied"); i >= 0 {
+				return nil, "the identity denied access at " + next.Path
+			}
+			t.Fatalf("login ended at the identity's %s: %.300s", next.Path, page)
+		}
+		resp.Body.Close()
+		u = next
 	}
-	t.Fatal("login flow did not finish")
-	return nil
+	t.Fatal("login went through too many flows")
+	return nil, ""
 }
 
 func (tc *testCell) flowCall(t *testing.T, b *http.Client, method, u string, body any) map[string]any {

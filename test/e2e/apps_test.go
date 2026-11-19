@@ -15,9 +15,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	apimeta "k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 
@@ -94,21 +91,22 @@ var referenceApps = []referenceApp{
 	},
 }
 
-// M1: every reference app passes the same test. Installing it from its
-// manifest makes it reachable under its subdomain with single sign-on,
-// deleting its pods heals by itself, and removing it keeps the data so a
-// reinstall picks it up.
+// M1 through the API (M3): every reference app passes the same test.
+// Installing it from the catalog makes it reachable under its subdomain
+// with single sign-on, deleting its pods heals by itself, and removing it
+// keeps the data so a reinstall picks it up.
 func TestReferenceApps(t *testing.T) {
 	tc := newTestCell(t)
+	admin := tc.adminAPI(t)
 	const user, password = "e2e-user", "e2e-Passw0rd-not-secret"
-	tc.user(t, user, password)
+	admin.account(t, user, password)
 	for _, ra := range referenceApps {
 		t.Run(ra.name, func(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
-			app := loadManifest(t, ra.name)
-			install(t, tc, app, ra.timeout)
-			base := "https://" + tc.cfg.Host(app.Spec.Access.Subdomain)
+			admin.installed(t, ra.name, ra.timeout)
+			app := field(admin.do(t, http.MethodGet, "/v0/apps/"+ra.name, nil, http.StatusOK), "url").(string)
+			base := strings.TrimSuffix(app, "/")
 
 			b := tc.browser(t)
 			landed := tc.login(t, b, base+ra.loginPath, user, password)
@@ -118,7 +116,8 @@ func TestReferenceApps(t *testing.T) {
 					got, user, landed.Request.URL, landed.StatusCode, page)
 			}
 
-			ns := "app-" + app.Name
+			// A crash, played by deleting the app's pods.
+			ns := "app-" + ra.name
 			var pods corev1.PodList
 			if err := tc.kube.List(ctx, &pods, client.InNamespace(ns)); err != nil {
 				t.Fatal(err)
@@ -142,16 +141,10 @@ func TestReferenceApps(t *testing.T) {
 				return nil
 			})
 
-			if err := tc.kube.Delete(ctx, app); err != nil {
-				t.Fatal(err)
-			}
-			waitFor(t, 3*time.Minute, func() error {
-				err := tc.kube.Get(ctx, client.ObjectKey{Name: app.Name}, &cellv1.App{})
-				if apierrors.IsNotFound(err) {
-					return nil
-				}
-				return fmt.Errorf("app still exists: %v", err)
-			})
+			change := admin.propose(t, admin, http.MethodDelete, "/v0/apps/"+ra.name+"?reason=e2e", nil)
+			admin.waitChange(t, change, 10*time.Minute, "Succeeded")
+			admin.do(t, http.MethodGet, "/v0/apps/"+ra.name, nil, http.StatusNotFound)
+			// The data stays in the cell: not visible through the API.
 			var nsObj corev1.Namespace
 			if err := tc.kube.Get(ctx, client.ObjectKey{Name: ns}, &nsObj); err != nil || nsObj.Labels[cellv1.LabelRetained] != "true" {
 				t.Fatalf("namespace not retained: %v %v", err, nsObj.Labels)
@@ -160,11 +153,11 @@ func TestReferenceApps(t *testing.T) {
 			if err := tc.kube.List(ctx, &pvcs, client.InNamespace(ns)); err != nil {
 				t.Fatal(err)
 			}
-			if wantData(app) && len(pvcs.Items) == 0 {
+			if wantData(loadManifest(t, ra.name)) && len(pvcs.Items) == 0 {
 				t.Fatal("volumes removed with the app")
 			}
 
-			install(t, tc, loadManifest(t, ra.name), ra.timeout)
+			admin.installed(t, ra.name, ra.timeout)
 			b = tc.browser(t)
 			readBody(t, tc.login(t, b, base+ra.loginPath, user, password))
 			if got := ra.whoAmI(t, b, base); got != user {
@@ -189,28 +182,6 @@ func loadManifest(t *testing.T, name string) *cellv1.App {
 		t.Fatal(err)
 	}
 	return &app
-}
-
-// install creates the app (or leaves an existing one) and waits until Ready.
-func install(t *testing.T, tc *testCell, app *cellv1.App, timeout time.Duration) {
-	t.Helper()
-	ctx := context.Background()
-	if err := tc.kube.Create(ctx, app); err != nil && !apierrors.IsAlreadyExists(err) {
-		t.Fatal(err)
-	}
-	waitFor(t, timeout, func() error {
-		var a cellv1.App
-		if err := tc.kube.Get(ctx, client.ObjectKey{Name: app.Name}, &a); err != nil {
-			return err
-		}
-		// Healthy for its current spec; NeedsAttention after an earlier
-		// failed change still counts as running.
-		c := apimeta.FindStatusCondition(a.Status.Conditions, "Ready")
-		if c == nil || c.Status != metav1.ConditionTrue || c.ObservedGeneration != a.Generation {
-			return fmt.Errorf("%s is %s: %+v", app.Name, a.Status.Phase, a.Status.Conditions)
-		}
-		return nil
-	})
 }
 
 func waitFor(t *testing.T, timeout time.Duration, f func() error) {

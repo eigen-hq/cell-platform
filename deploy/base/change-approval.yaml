@@ -1,0 +1,33 @@
+# A change is recorded without a decision, and only the platform API
+# records the decision, once, in a call of its own (A-10). This holds for
+# every account, cluster admins included.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: cell-change-approval
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [cell.internal]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE]
+        resources: [changerequests]
+  variables:
+    - name: api
+      expression: "request.userInfo.username == 'system:serviceaccount:cell-system:cell-api'"
+  validations:
+    - expression: "request.operation != 'CREATE' || (!has(object.spec.approval.decision) && object.spec.approval.required)"
+      message: "a change is recorded without a decision and always needs approval; an admin decides through the platform API"
+    - expression: >-
+        request.operation != 'UPDATE' || object.spec.approval == oldObject.spec.approval ||
+        (variables.api && !has(oldObject.spec.approval.decision) && object.spec.approval.required)
+      message: "only the platform API records the decision on a change, once"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: cell-change-approval
+spec:
+  policyName: cell-change-approval
+  validationActions: [Deny]

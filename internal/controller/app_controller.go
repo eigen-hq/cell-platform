@@ -63,6 +63,8 @@ type Identity interface {
 	EnsureProxy(ctx context.Context, p authentik.Proxy) error
 	ProxyClientID(ctx context.Context, slug string) (string, error)
 	Delete(ctx context.Context, slug string) error
+	// EnsureAccess limits the app to members of groups (none: everyone).
+	EnsureAccess(ctx context.Context, slug string, groups []string) error
 }
 
 type AppReconciler struct {
@@ -496,6 +498,11 @@ func (r *AppReconciler) ensureLogin(ctx context.Context, app *cellv1.App, cfg ce
 			Slug: app.Name, Title: app.Spec.Title, ExternalHost: "https://" + host, AuthentikURL: authURL,
 		}); err != nil {
 			return err
+		}
+	}
+	if mode != "none" {
+		if err := r.Identity.EnsureAccess(ctx, app.Name, app.Spec.Access.Groups); err != nil {
+			return fmt.Errorf("access groups: %w", err)
 		}
 	}
 	r.loginSynced.Store(app.Name, loginSync{generation: app.Generation, at: r.now()})

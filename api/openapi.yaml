@@ -1,0 +1,501 @@
+openapi: 3.0.3
+info:
+  title: Cell Platform API
+  version: 0.1.0
+  description: |
+    The only door into a cell for the UI, the CLI and agents. Everything
+    that changes an app (install, update, access, restore, remove) becomes
+    a change request; the list of them is the change log. A change waits
+    until an admin approves it in a call of its own, then runs as backup,
+    change, health check and, if the app does not become healthy, rollback.
+
+    Authentication: a bearer token from the cell's identity. Get one at
+    `https://auth.<cell domain>/application/o/token/` with
+    `grant_type=client_credentials`, `client_id=cell-api`, `username`, an
+    app password (`POST /v0/users/{name}/tokens`) as `password` and
+    `scope=openid profile`.
+
+    Roles come from identity groups: members of `cell-admins` may do
+    everything, members of `cell-agents` read everything and propose
+    changes, every other user reads the catalog, the apps and the change
+    log.
+servers:
+  - url: https://api.cell.localhost
+security:
+  - bearer: []
+paths:
+  /healthz:
+    get:
+      operationId: healthz
+      security: []
+      responses:
+        "200": {description: The API is up., content: {text/plain: {schema: {type: string}}}}
+  /openapi.yaml:
+    get:
+      operationId: openapi
+      security: []
+      responses:
+        "200": {description: This document., content: {application/yaml: {schema: {type: string}}}}
+  /v0/whoami:
+    get:
+      operationId: whoami
+      responses:
+        "200": {description: The caller., content: {application/json: {schema: {$ref: "#/components/schemas/Caller"}}}}
+        "401": {$ref: "#/components/responses/Error"}
+  /v0/catalog:
+    get:
+      operationId: listCatalog
+      responses:
+        "200":
+          description: Apps that can be installed.
+          content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/CatalogEntry"}}}}
+        "401": {$ref: "#/components/responses/Error"}
+  /v0/catalog/{name}:
+    parameters: [{$ref: "#/components/parameters/name"}]
+    get:
+      operationId: getCatalogEntry
+      responses:
+        "200":
+          description: A catalog entry with its manifest.
+          content: {application/json: {schema: {$ref: "#/components/schemas/CatalogEntry"}}}
+        "401": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+  /v0/apps:
+    get:
+      operationId: listApps
+      responses:
+        "200":
+          description: Installed apps.
+          content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/App"}}}}
+        "401": {$ref: "#/components/responses/Error"}
+    post:
+      operationId: installApp
+      description: Proposes to install an app from the catalog.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/InstallRequest"}}}
+      responses:
+        "202": {$ref: "#/components/responses/Change"}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /v0/apps/{name}:
+    parameters: [{$ref: "#/components/parameters/name"}]
+    get:
+      operationId: getApp
+      responses:
+        "200": {description: The app., content: {application/json: {schema: {$ref: "#/components/schemas/App"}}}}
+        "401": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+    patch:
+      operationId: updateApp
+      description: Proposes a JSON merge patch on the app's manifest, for example a new version.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/UpdateRequest"}}}
+      responses:
+        "202": {$ref: "#/components/responses/Change"}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+    delete:
+      operationId: removeApp
+      description: |
+        Proposes to remove the app after a backup. Its data stays in the cell
+        for a reinstall, unless deleteData is true; its backups stay in the
+        bucket either way.
+      parameters:
+        - {name: deleteData, in: query, schema: {type: boolean, default: false}}
+        - {name: reason, in: query, schema: {type: string}}
+      responses:
+        "202": {$ref: "#/components/responses/Change"}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+  /v0/apps/{name}/backups:
+    parameters: [{$ref: "#/components/parameters/name"}]
+    get:
+      operationId: listBackups
+      responses:
+        "200":
+          description: Backups of the app, newest first.
+          content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/Backup"}}}}
+        "401": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+    post:
+      operationId: createBackup
+      description: Starts a backup now (admins; it changes nothing, so it needs no approval).
+      responses:
+        "201": {description: Backup started., content: {application/json: {schema: {$ref: "#/components/schemas/Backup"}}}}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /v0/apps/{name}/restore:
+    parameters: [{$ref: "#/components/parameters/name"}]
+    post:
+      operationId: restoreApp
+      description: Proposes to bring back the data of a backup; the current state is backed up first.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/RestoreRequest"}}}
+      responses:
+        "202": {$ref: "#/components/responses/Change"}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+  /v0/apps/{name}/access:
+    parameters: [{$ref: "#/components/parameters/name"}]
+    get:
+      operationId: getAccess
+      responses:
+        "200": {description: Who may use the app., content: {application/json: {schema: {$ref: "#/components/schemas/Access"}}}}
+        "401": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+    put:
+      operationId: setAccess
+      description: Proposes to limit the app to members of the given groups (empty means every user).
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/Access"}}}
+      responses:
+        "202": {$ref: "#/components/responses/Change"}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+  /v0/users:
+    get:
+      operationId: listUsers
+      responses:
+        "200":
+          description: People and agent accounts.
+          content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/User"}}}}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+    post:
+      operationId: createUser
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/UserRequest"}}}
+      responses:
+        "201": {description: Created., content: {application/json: {schema: {$ref: "#/components/schemas/User"}}}}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /v0/users/{name}/tokens:
+    parameters: [{$ref: "#/components/parameters/name"}]
+    post:
+      operationId: createUserToken
+      description: Creates an app password for API logins; it is shown only in this answer.
+      responses:
+        "201": {description: Created., content: {application/json: {schema: {$ref: "#/components/schemas/Token"}}}}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+  /v0/groups:
+    get:
+      operationId: listGroups
+      responses:
+        "200":
+          description: Groups with their members.
+          content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/Group"}}}}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+    post:
+      operationId: createGroup
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/GroupRequest"}}}
+      responses:
+        "201": {description: Created., content: {application/json: {schema: {$ref: "#/components/schemas/Group"}}}}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /v0/groups/{name}/members:
+    parameters: [{$ref: "#/components/parameters/name"}]
+    put:
+      operationId: setGroupMembers
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/Members"}}}
+      responses:
+        "200": {description: The group., content: {application/json: {schema: {$ref: "#/components/schemas/Group"}}}}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+  /v0/changes:
+    get:
+      operationId: listChanges
+      parameters:
+        - {name: app, in: query, schema: {type: string}}
+      responses:
+        "200":
+          description: The change log, newest first.
+          content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/ChangeRequest"}}}}
+        "401": {$ref: "#/components/responses/Error"}
+  /v0/changes/{name}:
+    parameters: [{$ref: "#/components/parameters/change"}]
+    get:
+      operationId: getChange
+      responses:
+        "200": {description: The change., content: {application/json: {schema: {$ref: "#/components/schemas/ChangeRequest"}}}}
+        "401": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+  /v0/changes/{name}/approve:
+    parameters: [{$ref: "#/components/parameters/change"}]
+    post:
+      operationId: approveChange
+      responses:
+        "200": {description: The change., content: {application/json: {schema: {$ref: "#/components/schemas/ChangeRequest"}}}}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /v0/changes/{name}/reject:
+    parameters: [{$ref: "#/components/parameters/change"}]
+    post:
+      operationId: rejectChange
+      responses:
+        "200": {description: The change., content: {application/json: {schema: {$ref: "#/components/schemas/ChangeRequest"}}}}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /v0/events:
+    get:
+      operationId: events
+      description: |
+        Server-sent events: one JSON `Event` per change of an app, backup,
+        restore or change request. The stream ends when a watch ends;
+        reconnect and read the current state again.
+      responses:
+        "200": {description: Event stream., content: {text/event-stream: {schema: {type: string}}}}
+        "401": {$ref: "#/components/responses/Error"}
+components:
+  securitySchemes:
+    bearer: {type: http, scheme: bearer, bearerFormat: JWT}
+  parameters:
+    name:
+      name: name
+      in: path
+      required: true
+      schema: {type: string, pattern: "^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$", maxLength: 63}
+    change:
+      name: name
+      in: path
+      required: true
+      schema: {type: string, maxLength: 253}
+  responses:
+    Error:
+      description: An error.
+      content: {application/json: {schema: {$ref: "#/components/schemas/Error"}}}
+    Change:
+      description: The change was recorded and waits for approval; follow it at /v0/changes/{name}.
+      content: {application/json: {schema: {$ref: "#/components/schemas/ChangeRequest"}}}
+  schemas:
+    Error:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error: {type: string}
+    Caller:
+      type: object
+      additionalProperties: false
+      required: [username, role, groups]
+      properties:
+        username: {type: string}
+        role: {type: string, enum: [admin, agent, member]}
+        groups: {type: array, items: {type: string}}
+    CatalogEntry:
+      type: object
+      additionalProperties: false
+      required: [name, title, version, source, auth, subdomain]
+      properties:
+        name: {type: string}
+        title: {type: string}
+        version: {type: string}
+        source: {type: string, enum: [helm, image]}
+        auth: {type: string, enum: [oidc, proxy, none]}
+        subdomain: {type: string}
+        manifest: {type: object, description: The app manifest (App spec)., additionalProperties: true}
+    Condition:
+      type: object
+      additionalProperties: false
+      required: [type, status]
+      properties:
+        type: {type: string}
+        status: {type: string}
+        reason: {type: string}
+        message: {type: string}
+    App:
+      type: object
+      additionalProperties: false
+      required: [name, version, phase, groups, lastBackup, conditions, spec]
+      properties:
+        name: {type: string}
+        title: {type: string}
+        version: {type: string, description: Version the manifest asks for.}
+        runningVersion: {type: string, description: Version of the last passed health check.}
+        phase:
+          type: string
+          enum: ["", Installing, Ready, Updating, RollingBack, Restoring, NeedsAttention, Removing]
+          description: Empty right after the app was created.
+        url: {type: string}
+        groups: {type: array, items: {type: string}, description: Groups who may use the app; empty means everyone.}
+        lastBackup:
+          type: object
+          nullable: true
+          additionalProperties: false
+          required: [name, at]
+          properties:
+            name: {type: string}
+            at: {type: string, format: date-time}
+        conditions: {type: array, items: {$ref: "#/components/schemas/Condition"}}
+        spec: {type: object, additionalProperties: true, description: The app manifest (App spec).}
+    InstallRequest:
+      type: object
+      additionalProperties: false
+      required: [catalog]
+      properties:
+        catalog: {type: string, description: Catalog entry to install.}
+        name: {type: string, description: "Name of the app (default: the catalog name)."}
+        subdomain: {type: string}
+        groups: {type: array, items: {type: string}, description: Groups who may use the app (empty means everyone).}
+        reason: {type: string}
+    UpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [patch]
+      properties:
+        patch: {type: object, additionalProperties: true, description: JSON merge patch on the app's manifest.}
+        reason: {type: string}
+        risk: {type: string, enum: [low, medium, high]}
+    RestoreRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        backup: {type: string, description: "Backup name; default: the newest completed backup of the app in this cell."}
+        reason: {type: string}
+    Access:
+      type: object
+      additionalProperties: false
+      required: [groups]
+      properties:
+        groups: {type: array, items: {type: string}}
+        reason: {type: string}
+    ChangeRequest:
+      type: object
+      additionalProperties: false
+      required: [name, app, action, requester, reason, risk, patch, approval, phase, createdAt, startedAt, finishedAt]
+      properties:
+        name: {type: string}
+        app: {type: string}
+        action: {type: string, enum: [install, update, remove, restore]}
+        requester:
+          type: object
+          additionalProperties: false
+          required: [kind, name]
+          properties:
+            kind: {type: string, enum: [Human, Agent, Operator]}
+            name: {type: string}
+        reason: {type: string}
+        risk: {type: string, enum: [low, medium, high]}
+        patch: {type: object, nullable: true, additionalProperties: true, description: "update: JSON merge patch; install: the manifest."}
+        restores: {type: string, description: "restore: the backup that comes back."}
+        deleteData: {type: boolean, description: "remove: the app's data in the cell goes too."}
+        approval:
+          type: object
+          additionalProperties: false
+          required: [required, at]
+          properties:
+            required: {type: boolean}
+            decision: {type: string, enum: [Approved, Rejected]}
+            by: {type: string}
+            at: {type: string, format: date-time, nullable: true}
+        phase:
+          type: string
+          enum: ["", Pending, WaitingForApproval, Running, Succeeded, RolledBack, Failed, Rejected]
+          description: Empty right after the change was recorded.
+        message: {type: string}
+        createdAt: {type: string, format: date-time}
+        startedAt: {type: string, format: date-time, nullable: true}
+        finishedAt: {type: string, format: date-time, nullable: true}
+        backup: {type: string, description: "Backup taken before the change, or none."}
+        restore: {type: string, description: Restore used for a rollback or restore.}
+    Backup:
+      type: object
+      additionalProperties: false
+      required: [name, app, phase, createdAt, completedAt]
+      properties:
+        name: {type: string}
+        app: {type: string}
+        reason: {type: string}
+        phase: {type: string, enum: ["", Pending, Running, Completed, Failed]}
+        message: {type: string}
+        createdAt: {type: string, format: date-time}
+        completedAt: {type: string, format: date-time, nullable: true}
+    User:
+      type: object
+      additionalProperties: false
+      required: [username, name, groups]
+      properties:
+        username: {type: string}
+        name: {type: string}
+        email: {type: string}
+        groups: {type: array, items: {type: string}}
+    UserRequest:
+      type: object
+      additionalProperties: false
+      required: [username, name]
+      properties:
+        username: {type: string, pattern: "^[a-z0-9][a-z0-9._-]{1,62}$"}
+        name: {type: string}
+        email: {type: string}
+        password: {type: string, description: Initial password for web logins.}
+        groups: {type: array, items: {type: string}}
+    Token:
+      type: object
+      additionalProperties: false
+      required: [token]
+      properties:
+        token: {type: string}
+    Group:
+      type: object
+      additionalProperties: false
+      required: [name, members]
+      properties:
+        name: {type: string}
+        members: {type: array, items: {type: string}}
+    GroupRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: {type: string, pattern: "^[a-z0-9][a-z0-9._-]{1,62}$"}
+    Members:
+      type: object
+      additionalProperties: false
+      required: [users]
+      properties:
+        users: {type: array, items: {type: string}}
+    Event:
+      type: object
+      additionalProperties: false
+      required: [type, kind, name]
+      properties:
+        type: {type: string, enum: [ADDED, MODIFIED, DELETED]}
+        kind: {type: string, enum: [App, ChangeRequest, Backup, Restore]}
+        name: {type: string}
+        app: {type: string}
+        phase: {type: string}
+        message: {type: string}

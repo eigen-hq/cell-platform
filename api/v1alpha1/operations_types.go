@@ -158,21 +158,41 @@ type ChangeRequest struct {
 }
 
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.patch) || self.patch == oldSelf.patch",message="patch is immutable"
+// +kubebuilder:validation:XValidation:rule="self.action == oldSelf.action",message="action is immutable"
+// +kubebuilder:validation:XValidation:rule="has(self.backup) == has(oldSelf.backup) && (!has(self.backup) || self.backup == oldSelf.backup)",message="backup is immutable"
+// +kubebuilder:validation:XValidation:rule="(has(self.deleteData) && self.deleteData) == (has(oldSelf.deleteData) && oldSelf.deleteData)",message="deleteData is immutable"
+// +kubebuilder:validation:XValidation:rule="self.action in ['remove', 'restore'] || has(self.patch)",message="install and update need a patch"
+// +kubebuilder:validation:XValidation:rule="self.action == 'restore' || !has(self.backup)",message="backup is only for action restore"
+// +kubebuilder:validation:XValidation:rule="self.action != 'restore' || (has(self.backup) && size(self.backup) > 0 && self.backup != 'latest')",message="restore needs the name of a backup"
+// +kubebuilder:validation:XValidation:rule="self.action == 'remove' || !has(self.deleteData) || !self.deleteData",message="deleteData is only for action remove"
 type ChangeRequestSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="app is immutable"
-	App       string    `json:"app"`
-	Requester Requester `json:"requester"`
-	Reason    string    `json:"reason,omitempty"`
+	App string `json:"app"`
+	// Action: update applies Patch as a JSON merge patch on the App spec;
+	// install creates the app with Patch as its spec; remove deletes the
+	// app; restore brings back the data of Backup.
+	// +kubebuilder:validation:Enum=update;install;remove;restore
+	// +kubebuilder:default=update
+	Action string `json:"action,omitempty"`
+	// Backup to restore (action restore), by name: approvers see what comes
+	// back, and the change's own backup cannot be mistaken for "latest".
+	Backup string `json:"backup,omitempty"`
+	// DeleteData (action remove) also deletes the data the app leaves in
+	// the cell: volumes, database and secrets. Its backups stay.
+	DeleteData bool      `json:"deleteData,omitempty"`
+	Requester  Requester `json:"requester"`
+	Reason     string    `json:"reason,omitempty"`
 	// +kubebuilder:validation:Enum=low;medium;high
 	// +kubebuilder:default=medium
 	Risk string `json:"risk,omitempty"`
-	// Patch is a JSON merge patch on the App spec.
+	// Patch is a JSON merge patch on the App spec (install: the spec).
 	// +kubebuilder:pruning:PreserveUnknownFields
 	// +kubebuilder:validation:Schemaless
 	// +kubebuilder:validation:Type=object
-	Patch *apiextensionsv1.JSON `json:"patch"`
-	// Approval is required before anything changes (A-10). Approving or
-	// rejecting is the API's job; it records who decided.
+	Patch *apiextensionsv1.JSON `json:"patch,omitempty"`
+	// Approval is required before anything changes (A-10). Only the
+	// platform API decides, in a call of its own, and records who decided
+	// (admission policy cell-change-approval).
 	// +kubebuilder:default={"required":true}
 	Approval Approval `json:"approval,omitempty"`
 }

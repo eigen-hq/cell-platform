@@ -151,6 +151,16 @@ func finished(p cellv1.RunPhase) bool {
 
 func (r *AppReconciler) activity(ctx context.Context, app *cellv1.App) (activity, error) {
 	var a activity
+	var changes cellv1.ChangeRequestList
+	if err := r.List(ctx, &changes); err != nil {
+		return a, err
+	}
+	// Restores asked for by a change are rollbacks, unless the change's
+	// action is to restore.
+	restoreChange := map[string]bool{}
+	for _, cr := range changes.Items {
+		restoreChange[cr.Name] = cr.Spec.Action == "restore"
+	}
 	var restores cellv1.RestoreList
 	if err := r.List(ctx, &restores); err != nil {
 		return a, err
@@ -176,7 +186,7 @@ func (r *AppReconciler) activity(ctx context.Context, app *cellv1.App) (activity
 			continue
 		}
 		a.phase = cellv1.PhaseRestoring
-		if rs.Spec.Change != "" {
+		if rs.Spec.Change != "" && !restoreChange[rs.Spec.Change] {
 			a.phase = cellv1.PhaseRollingBack
 		}
 		// Once the data is back, the app is configured for its current spec
@@ -195,10 +205,6 @@ func (r *AppReconciler) activity(ctx context.Context, app *cellv1.App) (activity
 		a.reason = fmt.Sprintf("restore %s failed while replacing data (%s); the app stays stopped until a restore succeeds or %s is deleted",
 			rs.Name, rs.Status.Message, rs.Name)
 	}
-	var changes cellv1.ChangeRequestList
-	if err := r.List(ctx, &changes); err != nil {
-		return a, err
-	}
 	var latest *cellv1.ChangeRequest
 	for i := range changes.Items {
 		cr := &changes.Items[i]
@@ -208,11 +214,16 @@ func (r *AppReconciler) activity(ctx context.Context, app *cellv1.App) (activity
 		}
 		switch {
 		case cr.Status.Phase == cellv1.RunRunning && a.phase == "":
-			a.phase = cellv1.PhaseUpdating
-			if cr.Status.Restore != "" {
+			switch {
+			case cr.Spec.Action == "restore":
+				a.phase = cellv1.PhaseRestoring
+			case cr.Status.Restore != "":
 				a.phase = cellv1.PhaseRollingBack
+			default:
+				a.phase = cellv1.PhaseUpdating
 			}
-		case finished(cr.Status.Phase) && cr.Status.FinishedAt != nil && cr.Status.AppliedGeneration > 0:
+		// Changes that touched the app: applied a spec or restored data.
+		case finished(cr.Status.Phase) && cr.Status.FinishedAt != nil && (cr.Status.AppliedGeneration > 0 || cr.Status.Restore != ""):
 			if latest == nil || cr.Status.FinishedAt.After(latest.Status.FinishedAt.Time) {
 				latest = cr
 			}

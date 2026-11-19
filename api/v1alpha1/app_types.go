@@ -17,6 +17,7 @@ import (
 // +kubebuilder:printcolumn:name="Version",type=string,JSONPath=`.status.version`
 // +kubebuilder:printcolumn:name="URL",type=string,JSONPath=`.status.url`
 // +kubebuilder:validation:XValidation:rule="self.metadata.name.matches('^[a-z]([a-z0-9-]{0,38}[a-z0-9])?$')",message="name must be a DNS label of at most 40 characters"
+// +kubebuilder:validation:XValidation:rule="!self.metadata.name.startsWith('cell-')",message="names starting with cell- belong to the platform (its own clients in the identity)"
 type App struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -116,6 +117,8 @@ type Volume struct {
 	MountPath string `json:"mountPath,omitempty"`
 }
 
+// +kubebuilder:validation:XValidation:rule="!has(self.groups) || size(self.groups) == 0 || self.auth.mode != 'none'",message="groups need a login (auth mode oidc or proxy)"
+// +kubebuilder:validation:XValidation:rule="!(self.subdomain in ['auth', 'api'])",message="subdomains auth and api belong to the cell (identity and platform API)"
 type Access struct {
 	// Subdomain of the cell domain the app is reachable at.
 	// +kubebuilder:validation:Pattern=`^[a-z]([a-z0-9-]*[a-z0-9])?$`
@@ -124,6 +127,10 @@ type Access struct {
 	// Service to route to; default: the app name. May use placeholders.
 	Service string `json:"service,omitempty"`
 	Auth    Auth   `json:"auth"`
+	// Groups of the identity whose members may use the app; empty means
+	// every user of the cell.
+	// +kubebuilder:validation:MaxItems=32
+	Groups []string `json:"groups,omitempty"`
 }
 
 // +kubebuilder:validation:XValidation:rule="self.mode == oldSelf.mode",message="changing the login mode is not supported; remove and reinstall the app"

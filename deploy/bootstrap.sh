@@ -10,7 +10,7 @@
 #   CELL_ACME_SERVER   default: Let's Encrypt production
 #   CELL_INGRESS_IP    address the ingress answers on (default 127.0.0.1)
 #   CELL_STORAGE       local-path (default) | longhorn
-#   OPERATOR_IMAGE     operator image, already present on the node (required)
+#   OPERATOR_IMAGE     operator and API image, already present on the node (required)
 #   BRIDGE_IMAGE       loopback bridge image, needed for *.localhost cells
 #   CELL_BACKUP_S3_ENDPOINT, CELL_BACKUP_S3_BUCKET, CELL_BACKUP_S3_REGION,
 #   CELL_BACKUP_S3_ACCESS_KEY, CELL_BACKUP_S3_SECRET_KEY, CELL_BACKUP_PASSWORD
@@ -166,4 +166,9 @@ log "operator $OPERATOR_IMAGE"
 kubectl apply --server-side -f "$here/crd/" >/dev/null
 apply operator.yaml
 kubectl -n cell-system rollout status deploy/cell-operator --timeout=5m >/dev/null
+
+log "platform API https://api.$CELL_DOMAIN"
+apply change-approval.yaml
+apply api.yaml
+kubectl -n cell-system rollout status deploy/cell-api --timeout=5m >/dev/null
 log "cell ready"
