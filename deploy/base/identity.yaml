@@ -1,0 +1,47 @@
+# Identity: authentik on its own CloudNativePG database.
+# Credentials are created once by bootstrap.sh (secrets identity-db-credentials
+# and identity) and never leave the cell.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: identity-db
+  namespace: cell-system
+spec:
+  instances: 1
+  storage:
+    size: 2Gi
+  bootstrap:
+    initdb:
+      database: authentik
+      owner: authentik
+      secret:
+        name: identity-db-credentials
+---
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: authentik
+  namespace: kube-system
+spec:
+  repo: https://charts.goauthentik.io
+  chart: authentik
+  version: ${AUTHENTIK_CHART_VERSION}
+  targetNamespace: cell-system
+  valuesContent: |
+    authentik:
+      existingSecret:
+        secretName: identity
+    postgresql:
+      enabled: false
+    server:
+      ingress:
+        enabled: true
+        ingressClassName: traefik
+        annotations:
+          cert-manager.io/cluster-issuer: cell
+        hosts:
+          - auth.${CELL_DOMAIN}
+        tls:
+          - secretName: auth-tls
+            hosts:
+              - auth.${CELL_DOMAIN}

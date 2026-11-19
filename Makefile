@@ -1,0 +1,49 @@
+# Single entry point. Pinned versions live in deploy/versions.env.
+include deploy/versions.env
+
+SHELL := /usr/bin/env bash
+OS := $(shell uname -s | tr A-Z a-z)
+ARCH := $(shell uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+BIN := $(CURDIR)/bin
+export PATH := $(BIN):$(PATH)
+export CELL_NAME ?= cell
+export KUBECONFIG := $(CURDIR)/.cell/kubeconfig
+
+K3D := $(BIN)/k3d-$(K3D_VERSION)
+KUBECTL := $(BIN)/kubectl-$(KUBECTL_VERSION)
+
+.PHONY: help tools cell-up cell-down status test e2e demo
+
+help:
+	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
+
+$(K3D):
+	@mkdir -p $(BIN)
+	curl -fsSL -o $@ https://github.com/k3d-io/k3d/releases/download/$(K3D_VERSION)/k3d-$(OS)-$(ARCH)
+	chmod +x $@
+
+$(KUBECTL):
+	@mkdir -p $(BIN)
+	curl -fsSL -o $@ https://dl.k8s.io/release/$(KUBECTL_VERSION)/bin/$(OS)/$(ARCH)/kubectl
+	chmod +x $@
+
+tools: $(K3D) $(KUBECTL) ## Download pinned CLI tools into bin/
+	@ln -sf $(notdir $(K3D)) $(BIN)/k3d
+	@ln -sf $(notdir $(KUBECTL)) $(BIN)/kubectl
+
+cell-up: tools ## Start the local cell (k3d) with all base services
+	deploy/local-up.sh
+
+cell-down: tools ## Delete the local cell
+	k3d cluster delete $(CELL_NAME)
+	rm -f $(KUBECONFIG)
+
+status: ## Show the state of the cell base services
+	go run ./cmd/cellctl status
+
+test: ## Unit and controller tests
+	go vet ./...
+	go test ./...
+
+e2e: ## End-to-end tests against the local cell
+	go test -tags e2e -count=1 -timeout 30m ./test/e2e/...

@@ -1,0 +1,26 @@
+# VM cells: Longhorn as default StorageClass with CSI snapshots.
+# Single node, so one replica per volume.
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: longhorn
+  namespace: kube-system
+spec:
+  repo: https://charts.longhorn.io
+  chart: longhorn
+  version: ${LONGHORN_VERSION}
+  targetNamespace: longhorn-system
+  createNamespace: true
+  valuesContent: |
+    persistence:
+      defaultClass: true
+      defaultClassReplicaCount: 1
+    defaultSettings:
+      defaultReplicaCount: 1
+    longhornUI:
+      replicas: 1
+    csi:
+      attacherReplicaCount: 1
+      provisionerReplicaCount: 1
+      resizerReplicaCount: 1
+      snapshotterReplicaCount: 1
