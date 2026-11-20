@@ -90,6 +90,14 @@ func gatewayConfig(cfg cell.Config, apps []cellv1.App) (string, error) {
 		}
 		rules = append(rules, rule)
 	}
+	// The gateway passes the client's headers on to the app. Apps behind
+	// the login proxy may trust its headers, so the gateway sets them from
+	// the token: the username, the rest removed. The token itself stays at
+	// the gateway (it checks it before any transformation).
+	remove := []string{"authorization"}
+	for _, h := range proxyHeaders[1:] {
+		remove = append(remove, strings.ToLower(h))
+	}
 	identity := "/application/o/" + GatewayClient + "/"
 	conf := map[string]any{
 		"gateways": map[string]any{"default": map[string]any{"port": 3000}},
@@ -111,6 +119,10 @@ func gatewayConfig(cfg cell.Config, apps []cellv1.App) (string, error) {
 					"audiences": []string{GatewayClient},
 					"jwks":      map[string]any{"url": "http://" + authentikSvc + "." + cell.SystemNamespace + ".svc.cluster.local" + identity + "jwks/"},
 				},
+				"transformations": map[string]any{"request": map[string]any{
+					"set":    map[string]string{strings.ToLower(proxyHeaders[0]): "jwt.preferred_username"},
+					"remove": remove,
+				}},
 				"mcpAuthorization": map[string]any{"rules": rules},
 			},
 		}},

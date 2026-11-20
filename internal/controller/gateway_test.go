@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -59,6 +60,12 @@ func TestGatewayConfig(t *testing.T) {
 					Audiences    []string
 					JWKS         struct{ URL string }
 				} `json:"jwtAuth"`
+				Transformations struct {
+					Request struct {
+						Set    map[string]string
+						Remove []string
+					}
+				}
 				MCPAuthorization struct{ Rules []string } `json:"mcpAuthorization"`
 			}
 		}
@@ -87,6 +94,13 @@ func TestGatewayConfig(t *testing.T) {
 	if jwt.Mode != "strict" || jwt.Issuer != "https://auth.cell.test/application/o/cell-mcp/" || len(jwt.Audiences) != 1 || jwt.Audiences[0] != "cell-mcp" ||
 		jwt.JWKS.URL != "http://authentik-server.cell-system.svc.cluster.local/application/o/cell-mcp/jwks/" {
 		t.Errorf("jwt: %+v", jwt)
+	}
+
+	// Headers of the login proxy come from the token, never the client.
+	tr := route.Policies.Transformations.Request
+	if len(tr.Set) != 1 || tr.Set["x-authentik-username"] != "jwt.preferred_username" ||
+		!slices.Equal(tr.Remove, []string{"authorization", "x-authentik-groups", "x-authentik-email", "x-authentik-name", "x-authentik-uid"}) {
+		t.Errorf("transformations: %+v", tr)
 	}
 
 	// The rules as the gateway runs them: any rule that holds allows.

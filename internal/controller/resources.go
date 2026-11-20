@@ -344,11 +344,9 @@ func ingress(app *cellv1.App, host, svc string) []client.Object {
 		"apiVersion": "traefik.io/v1alpha1", "kind": "Middleware",
 		"metadata": map[string]any{"name": authMiddle, "namespace": Namespace(app.Name), "labels": toAny(labels(app))},
 		"spec": map[string]any{"forwardAuth": map[string]any{
-			"address":            "http://" + authentikSvc + "." + cell.SystemNamespace + ".svc.cluster.local/outpost.goauthentik.io/auth/traefik",
-			"trustForwardHeader": true,
-			"authResponseHeaders": []any{
-				"X-authentik-username", "X-authentik-groups", "X-authentik-email", "X-authentik-name", "X-authentik-uid",
-			},
+			"address":             "http://" + authentikSvc + "." + cell.SystemNamespace + ".svc.cluster.local/outpost.goauthentik.io/auth/traefik",
+			"trustForwardHeader":  true,
+			"authResponseHeaders": toAnySlice(proxyHeaders),
 		}},
 	}})
 	outpost := &networkingv1.Ingress{
@@ -363,5 +361,17 @@ func ingress(app *cellv1.App, host, svc string) []client.Object {
 }
 
 func outpostIngress(app *cellv1.App) string { return "outpost-" + app.Name }
+
+// proxyHeaders name the user the login proxy let in (auth mode proxy).
+// Apps may trust them; the MCP gateway sets them as well.
+var proxyHeaders = []string{"X-authentik-username", "X-authentik-groups", "X-authentik-email", "X-authentik-name", "X-authentik-uid"}
+
+func toAnySlice(s []string) []any {
+	out := make([]any, len(s))
+	for i, v := range s {
+		out[i] = v
+	}
+	return out
+}
 
 func ptr[T any](v T) *T { return &v }
