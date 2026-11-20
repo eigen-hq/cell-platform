@@ -115,6 +115,7 @@ func TestReferenceApps(t *testing.T) {
 				t.Fatalf("logged in as %q, want %q; login ended at %s (HTTP %d): %.300s",
 					got, user, landed.Request.URL, landed.StatusCode, page)
 			}
+			t.Logf("%s runs at %s, %s logged in with single sign-on", ra.name, base, user)
 
 			// A crash, played by deleting the app's pods.
 			ns := "app-" + ra.name
@@ -140,6 +141,7 @@ func TestReferenceApps(t *testing.T) {
 				}
 				return nil
 			})
+			t.Logf("%s is back after its pods were deleted", ra.name)
 
 			change := admin.propose(t, admin, http.MethodDelete, "/v0/apps/"+ra.name+"?reason=e2e", nil)
 			admin.waitChange(t, change, 10*time.Minute, "Succeeded")
@@ -163,6 +165,7 @@ func TestReferenceApps(t *testing.T) {
 			if got := ra.whoAmI(t, b, base); got != user {
 				t.Fatalf("after reinstall: logged in as %q", got)
 			}
+			t.Logf("%s removed (data kept in the cell) and reinstalled, login works again", ra.name)
 		})
 	}
 }

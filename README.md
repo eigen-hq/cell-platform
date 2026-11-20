@@ -14,6 +14,7 @@ make cell-up     # lokale Zelle (k3d), Login unter https://auth.cell.localhost
 make status      # Zustand der Basisdienste
 make test        # Unit-, API- und Controller-Tests (envtest)
 make e2e         # Ende-zu-Ende-Tests gegen die lokale Zelle, über die API
+make demo        # Ziel-Demo Schritt für Schritt gegen die lokale Zelle, danach selbst ausprobieren
 make dr-test     # Restore in eine frisch aufgebaute Zelle (löscht die lokale Zelle)
 make vm-test     # Abnahme auf einer frischen Ubuntu-VM (Lima, lokal)
 make cell-down   # lokale Zelle löschen

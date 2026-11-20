@@ -5,7 +5,8 @@ Erste Ausbaustufe der Plattform. Jeder Meilenstein endet mit etwas Vorführbarem
 ## Stand
 
 - Alle Meilensteine abgeschlossen: M0 bis M4 (19.11.2026), M5 (20.11.2026)
-- Als Nächstes: `make demo` (Ziel-Demo) und die offenen Entscheidungen in `entscheidungen.md`
+- `make demo` führt die Ziel-Demo gegen die lokale Zelle vor (Schritte 2 bis 6, je ein Ende-zu-Ende-Test mit Protokoll); Schritt 1 auf einer frischen VM ist `make vm-test`
+- Als Nächstes: die offenen Entscheidungen in `entscheidungen.md`
 
 ## Ziel-Demo
 

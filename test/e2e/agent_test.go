@@ -145,6 +145,7 @@ func TestAgentRepairsApp(t *testing.T) {
 	if err := tc.kube.Update(ctx, &app); err != nil {
 		t.Fatal(err)
 	}
+	t.Log("app ailing (whoami) installed, then WHOAMI_PORT_NUMBER=8080 set past the platform")
 
 	var task string
 	waitFor(t, 5*time.Minute, func() error {
@@ -187,10 +188,12 @@ func TestAgentRepairsApp(t *testing.T) {
 		}
 		return agenttest.Turn{}, fmt.Errorf("turn %d", c.Turn)
 	})
+	t.Logf("the operator handed ailing to the agent: task %s", task)
 	if err := a.Take(ctx, task); err != nil {
 		t.Fatal(err)
 	}
 	done := admin.do(t, http.MethodGet, "/v0/tasks/"+task, nil, http.StatusOK)
+	t.Logf("agent (scripted model) read %v and answered: %v", calls(done), field(done, "result"))
 	got := calls(done)
 	slices.Sort(got[:min(2, len(got))])
 	if field(done, "phase") != "Succeeded" || field(done, "assignee") != "cell-agent" ||
@@ -208,6 +211,7 @@ func TestAgentRepairsApp(t *testing.T) {
 		app := admin.do(t, http.MethodGet, "/v0/apps/ailing", nil, http.StatusOK)
 		return check(field(app, "phase") == "Ready", "ailing is %v: %v", field(app, "phase"), field(app, "conditions"))
 	})
+	t.Logf("admin approved %s, ailing is healthy again", change)
 }
 
 // M4 acceptance, scenario B: the agent packages an app that is not in the
@@ -283,6 +287,7 @@ func TestAgentPackagesApp(t *testing.T) {
 	}
 	admin.do(t, http.MethodPost, "/v0/changes/"+change+"/approve", nil, http.StatusOK)
 	admin.waitChange(t, change, 10*time.Minute, "Succeeded")
+	t.Logf("agent packaged memos from its Compose file (first try refused by the dry run); admin approved %s, memos is installed", change)
 }
 
 // The API's account checks apps with dry runs but cannot create them: the

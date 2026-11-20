@@ -59,6 +59,9 @@ test: ## Unit and controller tests (envtest)
 e2e: ## End-to-end tests against the local cell
 	go test -tags e2e -count=1 -timeout 60m ./test/e2e/...
 
+demo: cell-up ## Target demo on the local cell, step by step (docs/mvp-plan.md)
+	test/demo.sh
+
 dr-test: ## Restore an app into a freshly recreated local cell (destroys the cell)
 	go test -tags 'e2e dr' -count=1 -timeout 60m -run TestRestoreIntoFreshCell -v ./test/e2e/...
 

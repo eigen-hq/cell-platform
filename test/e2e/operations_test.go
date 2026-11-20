@@ -123,6 +123,7 @@ func TestFailedUpdateRollsBack(t *testing.T) {
 	admin.installed(t, "forgejo", 15*time.Minute)
 	m := marker{t: t, app: "forgejo"}
 	m.write("before-update")
+	t.Log("forgejo: marker written to database and volume, update to 15.0.999 (does not exist) approved")
 
 	change := admin.propose(t, admin, http.MethodPatch, "/v0/apps/forgejo", map[string]any{
 		"patch":  map[string]any{"version": "15.0.999", "health": map[string]any{"timeoutSeconds": 90}},
@@ -143,4 +144,5 @@ func TestFailedUpdateRollsBack(t *testing.T) {
 	})
 	admin.installed(t, "forgejo", 10*time.Minute)
 	m.expect("before-update")
+	t.Log("forgejo runs 15.0.11 again, with the marker from before the update")
 }

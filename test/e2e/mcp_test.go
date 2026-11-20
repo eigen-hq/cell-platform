@@ -37,6 +37,8 @@ func TestMCPGateway(t *testing.T) {
 		}
 		return nil
 	})
+	_, msg := tc.mcp(t, memberToken, "tools/list", nil)
+	t.Logf("through https://%s/mcp a member of e2e-mcp-team sees %d tools of notes and journal, e.g. %s", tc.cfg.Host("mcp"), len(toolNames(msg)), call)
 	code, msg := tc.mcp(t, outsiderToken, "tools/list", nil)
 	names := toolNames(msg)
 	if code != http.StatusOK || !slices.Contains(names, list) {
@@ -47,6 +49,7 @@ func TestMCPGateway(t *testing.T) {
 			t.Errorf("outsider sees %s", n)
 		}
 	}
+	t.Logf("an account outside the group sees %d tools, all of notes", len(names))
 
 	// A call to an app the account may not use does not reach the app.
 	code, msg = tc.mcp(t, outsiderToken, "tools/call", map[string]any{"name": call, "arguments": map[string]any{}})
