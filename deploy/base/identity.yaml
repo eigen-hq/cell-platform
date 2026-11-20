@@ -34,6 +34,12 @@ spec:
     postgresql:
       enabled: false
     server:
+      # Gunicorn restarts a worker every 1000 requests by default. That drops
+      # the embedded outpost's websocket, which reconnects only after 300 s
+      # and misses updates until then: a new proxy app waited that long.
+      env:
+        - name: AUTHENTIK_WEB__MAX_REQUESTS
+          value: "0"
       ingress:
         enabled: true
         ingressClassName: traefik
