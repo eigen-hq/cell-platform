@@ -69,7 +69,7 @@ func run(log *slog.Logger) error {
 
 	// The identity side of the API: its login client and the role groups.
 	if err := retry(ctx, log, "identity setup", func() error {
-		if err := identity.EnsureAPIClient(ctx, apiClient); err != nil {
+		if err := identity.EnsureAPIClient(ctx, apiClient, "Platform API"); err != nil {
 			return err
 		}
 		if err := identity.EnsureGroup(ctx, cellapi.GroupAdmins, "akadmin"); err != nil {

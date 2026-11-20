@@ -1,0 +1,86 @@
+# The MCP gateway (agentgateway): one endpoint for the tools of all apps.
+# The operator writes its configuration (ConfigMap cell-mcp) from the apps'
+# manifests; the gateway reloads it when it changes. It runs stateless and
+# needs no session key: its warnings about writing one into the read-only
+# configuration are expected.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cell-mcp
+  namespace: cell-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cell-mcp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cell-mcp
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: gateway
+          image: cr.agentgateway.dev/agentgateway:${AGENTGATEWAY_VERSION}
+          args: [-f, /config/config.yaml]
+          ports:
+            - name: http
+              containerPort: 3000
+            - name: ready
+              containerPort: 15021
+          readinessProbe:
+            httpGet: {path: /healthz/ready, port: ready}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+      volumes:
+        # Mounted as a directory: kubelet updates it in place, a subPath
+        # mount would never change.
+        - name: config
+          configMap:
+            name: cell-mcp
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cell-mcp
+  namespace: cell-system
+spec:
+  selector:
+    app.kubernetes.io/name: cell-mcp
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cell-mcp
+  namespace: cell-system
+  annotations:
+    cert-manager.io/cluster-issuer: cell
+spec:
+  ingressClassName: traefik
+  tls:
+    - secretName: mcp-tls
+      hosts: [mcp.${CELL_DOMAIN}]
+  rules:
+    - host: mcp.${CELL_DOMAIN}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: cell-mcp
+                port: {name: http}

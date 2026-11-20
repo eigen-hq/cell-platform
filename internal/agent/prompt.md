@@ -23,6 +23,7 @@ The manifest is the spec of an App:
 - `needs.secrets`: names of generated passwords. Each is a Secret named `{{ .secrets.<name> }}` with key `password`.
 - `access`: `subdomain` (default: the app name), `port` (the container port the app serves HTTP on), `auth.mode`: `oidc` is for apps that can log in with OpenID Connect (then `redirectPaths`). `proxy` puts the identity's login in front of every other app, also one with its own user accounts. `none` only for apps that must be reachable without the cell's login.
 - `health`: `path` that answers 200 when the app works (default `/`), `timeoutSeconds` (raise it for apps that start slowly).
+- `mcp`: `path` of the app's own MCP endpoint (streamable HTTP on `access.port`), only if its documentation names one. The cell's MCP gateway then offers the app's tools.
 - Other placeholders: `{{ .app.name }}`, `{{ .app.version }}`, `{{ .access.url }}`, `{{ .access.host }}`, `{{ .cell.domain }}`.
 
 Leave out what the platform does: published ports, networks, restart policies, reverse proxies, TLS. A Compose file with several app services is not something you can package yet: say so. If propose_install answers with errors, fix the manifest and try again.

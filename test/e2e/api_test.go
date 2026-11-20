@@ -103,7 +103,15 @@ func (a *apiClient) bearer(t *testing.T) string {
 	if a.token != "" && time.Since(a.at) < 45*time.Minute {
 		return a.token
 	}
-	form := url.Values{"grant_type": {"client_credentials"}, "client_id": {"cell-api"},
+	a.token, a.at = a.login(t, "cell-api"), time.Now()
+	return a.token
+}
+
+// login gets a token for one of the identity's clients: cell-api for the
+// platform API, cell-mcp for the MCP gateway.
+func (a *apiClient) login(t *testing.T, client string) string {
+	t.Helper()
+	form := url.Values{"grant_type": {"client_credentials"}, "client_id": {client},
 		"username": {a.username}, "password": {a.password}, "scope": {"openid profile"}}
 	resp, err := a.tc.akHTTP.PostForm("https://"+a.tc.cfg.Host("auth")+"/application/o/token/", form)
 	if err != nil {
@@ -114,10 +122,9 @@ func (a *apiClient) bearer(t *testing.T) string {
 		AccessToken string `json:"access_token"`
 	}
 	if err := json.Unmarshal([]byte(data), &tok); err != nil || tok.AccessToken == "" {
-		t.Fatalf("token for %s: HTTP %d %s", a.username, resp.StatusCode, data)
+		t.Fatalf("token for %s from %s: HTTP %d %s", a.username, client, resp.StatusCode, data)
 	}
-	a.token, a.at = tok.AccessToken, time.Now()
-	return a.token
+	return tok.AccessToken
 }
 
 // call sends a request to the API and returns status and decoded body.
@@ -205,8 +212,14 @@ func (a *apiClient) waitChange(t *testing.T, name string, timeout time.Duration,
 // approved change if missing, healthy on its current manifest either way.
 func (a *apiClient) installed(t *testing.T, name string, timeout time.Duration) {
 	t.Helper()
+	a.installedAs(t, name, map[string]any{"catalog": name}, timeout)
+}
+
+// installedAs is installed with the install request to use if it is missing.
+func (a *apiClient) installedAs(t *testing.T, name string, install map[string]any, timeout time.Duration) {
+	t.Helper()
 	if code, _ := a.call(t, http.MethodGet, "/v0/apps/"+name, nil); code == http.StatusNotFound {
-		change := a.propose(t, a, http.MethodPost, "/v0/apps", map[string]any{"catalog": name})
+		change := a.propose(t, a, http.MethodPost, "/v0/apps", install)
 		a.waitChange(t, change, timeout, "Succeeded")
 		return
 	}

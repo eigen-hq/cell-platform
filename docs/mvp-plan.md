@@ -4,8 +4,8 @@ Erste Ausbaustufe der Plattform. Jeder Meilenstein endet mit etwas Vorführbarem
 
 ## Stand
 
-- Aktueller Meilenstein: **M5**
-- Abgeschlossen: M0, M1, M2, M3, M4 (19.11.2026)
+- Alle Meilensteine abgeschlossen: M0 bis M4 (19.11.2026), M5 (20.11.2026)
+- Als Nächstes: `make demo` (Ziel-Demo) und die offenen Entscheidungen in `entscheidungen.md`
 
 ## Ziel-Demo
 
@@ -163,6 +163,15 @@ Umfang:
 Akzeptanz:
 - Ein MCP-Client sieht über einen Endpunkt die Tools von mindestens zwei installierten Apps
 - Ein Konto ohne Zugriff auf eine App sieht deren Tools nicht
+
+Ergebnis (20.11.2026): agentgateway als MCP-Gateway, konfiguriert vom Operator aus den Manifesten (E-36), Feld `mcp` im Manifest, Memos im Katalog als erste App mit eigenem MCP-Endpunkt. Aufrufe von Memos-Werkzeugen beantwortet Memos mit seinem Anmeldefehler, weil das Gateway kein Memos-Token hat (O-18); Apps ohne eigenen Endpunkt sind O-19, die Grenzen von v0 O-20.
+
+| Prüfung | Wie | Ergebnis |
+|---|---|---|
+| Werkzeuge zweier Apps über einen Endpunkt | `make e2e`, `TestMCPGateway`: zwei Memos aus dem Katalog (`notes` für alle, `journal` nur für eine Gruppe); ein Konto der Gruppe sieht über `https://mcp.<domain>/mcp` die Werkzeuge beider, mit dem App-Namen vorn; sein Aufruf erreicht die App | bestanden |
+| Ohne Zugriff keine Werkzeuge | dieselbe Prüfung: ein Konto außerhalb der Gruppe sieht nur `notes_*`, sein Aufruf eines `journal_*`-Werkzeugs wird abgewiesen; ohne Token oder mit einem Token der API antwortet das Gateway 401, ein Token des Gateways gilt nicht an der API | bestanden |
+| Zugriffsregeln | `make test`, `TestGatewayConfig`: die Regeln mit cel-go ausgewertet, auch mit Gruppennamen, die selbst CEL enthalten; Apps ohne `mcp`, noch nie gesunde und gelöschte Apps fehlen | bestanden |
+| Speicher | Gateway im Leerlauf, lokale Zelle | 11 MiB |
 
 ## Bewusst nicht im MVP
 

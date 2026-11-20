@@ -31,7 +31,7 @@ source "$here/versions.env"
 : "${OPERATOR_IMAGE:?OPERATOR_IMAGE must be set}"
 export BRIDGE_IMAGE=${BRIDGE_IMAGE:-}
 case $CELL_DOMAIN in *.localhost | localhost) [ -n "$BRIDGE_IMAGE" ] || die "BRIDGE_IMAGE must be set for *.localhost cells" ;; esac
-export CELL_DOMAIN AUTHENTIK_CHART_VERSION LONGHORN_VERSION OPERATOR_IMAGE RESTIC_VERSION
+export CELL_DOMAIN AUTHENTIK_CHART_VERSION LONGHORN_VERSION OPERATOR_IMAGE RESTIC_VERSION AGENTGATEWAY_VERSION
 export CELL_TLS=${CELL_TLS:-selfsigned}
 export CELL_ACME_EMAIL=${CELL_ACME_EMAIL:-}
 export CELL_ACME_SERVER=${CELL_ACME_SERVER:-https://acme-v02.api.letsencrypt.org/directory}
@@ -188,4 +188,9 @@ apply agent.yaml
 case $llm in *unchanged*) ;; *) kubectl -n cell-system rollout restart deploy/cell-agent >/dev/null ;; esac
 # Up only once the operator created the agent's account (Secret cell-agent).
 kubectl -n cell-system rollout status deploy/cell-agent --timeout=5m >/dev/null
+
+log "MCP gateway https://mcp.$CELL_DOMAIN/mcp"
+apply mcp.yaml
+# Up once the operator wrote its configuration (ConfigMap cell-mcp).
+kubectl -n cell-system rollout status deploy/cell-mcp --timeout=5m >/dev/null
 log "cell ready"

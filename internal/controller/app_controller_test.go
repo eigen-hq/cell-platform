@@ -365,6 +365,7 @@ func TestImageAppLifecycle(t *testing.T) {
 			Access: cellv1.Access{Subdomain: "notes", Port: 8080, Auth: cellv1.Auth{Mode: "oidc", RedirectPaths: []string{"/cb"}}},
 			Health: cellv1.Health{Path: "/health", TimeoutSeconds: 300},
 			Backup: cellv1.BackupPolicy{Schedule: "none"}, // a running backup would hold the removal
+			MCP:    &cellv1.MCP{Path: "/mcp"},
 		},
 	}
 	if err := k8s.Create(ctx, app); err != nil {
@@ -421,6 +422,9 @@ func TestImageAppLifecycle(t *testing.T) {
 	phase(t, "notes", cellv1.PhaseInstalling)
 	issued(t, "notes", "notes.cell.localhost")
 	ready := phase(t, "notes", cellv1.PhaseReady)
+	if ready.Status.MCPEndpoint != "http://notes.app-notes.svc.cluster.local:8080/mcp" {
+		t.Errorf("MCP endpoint %q", ready.Status.MCPEndpoint)
+	}
 	if ready.Status.URL != "https://notes.cell.localhost" || ready.Status.Version != "1.0" {
 		t.Errorf("status %+v", ready.Status)
 	}

@@ -36,6 +36,17 @@ type AppSpec struct {
 	Access  Access       `json:"access"`
 	Health  Health       `json:"health,omitempty"`
 	Backup  BackupPolicy `json:"backup,omitempty"`
+	// MCP is the app's MCP endpoint, if it has one. The cell's gateway
+	// offers its tools to the accounts that may use the app.
+	MCP *MCP `json:"mcp,omitempty"`
+}
+
+// MCP names an endpoint on the app's port that speaks the Model Context
+// Protocol over streamable HTTP.
+type MCP struct {
+	// Path of the endpoint, e.g. /mcp.
+	// +kubebuilder:validation:Pattern=`^/[A-Za-z0-9._~/-]*$`
+	Path string `json:"path"`
 }
 
 // BackupPolicy says how often the platform backs the app up outside the
@@ -118,7 +129,7 @@ type Volume struct {
 }
 
 // +kubebuilder:validation:XValidation:rule="!has(self.groups) || size(self.groups) == 0 || self.auth.mode != 'none'",message="groups need a login (auth mode oidc or proxy)"
-// +kubebuilder:validation:XValidation:rule="!(self.subdomain in ['auth', 'api'])",message="subdomains auth and api belong to the cell (identity and platform API)"
+// +kubebuilder:validation:XValidation:rule="!(self.subdomain in ['auth', 'api', 'mcp'])",message="subdomains auth, api and mcp belong to the cell (identity, platform API and MCP gateway)"
 type Access struct {
 	// Subdomain of the cell domain the app is reachable at.
 	// +kubebuilder:validation:Pattern=`^[a-z]([a-z0-9-]*[a-z0-9])?$`
@@ -186,6 +197,9 @@ type AppStatus struct {
 	// workloads for (for Helm apps: and Flux applied) since the app was last
 	// paused; 0 while paused.
 	WorkloadGeneration int64 `json:"workloadGeneration,omitempty"`
+	// MCPEndpoint is where the cell's gateway reaches the app's MCP
+	// endpoint; set once the app's service is up.
+	MCPEndpoint string `json:"mcpEndpoint,omitempty"`
 	// +listType=map
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`

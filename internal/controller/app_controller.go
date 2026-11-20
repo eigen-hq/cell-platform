@@ -359,6 +359,10 @@ func (r *AppReconciler) install(ctx context.Context, app *cellv1.App, target *ba
 	if err := r.probe(ctx, url, host); err != nil {
 		return false, "health check: " + err.Error(), nil
 	}
+	app.Status.MCPEndpoint = ""
+	if app.Spec.MCP != nil {
+		app.Status.MCPEndpoint = fmt.Sprintf("http://%s.%s.svc.cluster.local:%d%s", svc, ns, app.Spec.Access.Port, app.Spec.MCP.Path)
+	}
 	if app.Spec.Access.Auth.Mode == "proxy" {
 		clientID, err := r.Identity.ProxyClientID(ctx, app.Name)
 		if err != nil {

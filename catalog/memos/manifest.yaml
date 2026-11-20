@@ -1,0 +1,30 @@
+# Memos (notes): one container with its own accounts, behind the identity's
+# login proxy. Its built-in MCP endpoint goes to the cell's MCP gateway.
+# Tool calls that read or write notes need a Memos token, which the
+# gateway does not have yet (O-18): the tools are listed, calls answer
+# with Memos' "authentication required".
+apiVersion: cell.internal/v1alpha1
+kind: App
+metadata:
+  name: memos
+spec:
+  title: Memos
+  version: "26.11.1"
+  source:
+    image:
+      repository: neosmemo/memos
+  needs:
+    volumes:
+      - name: data
+        size: 1Gi
+        mountPath: /var/opt/memos
+  access:
+    subdomain: memos
+    port: 5230
+    auth:
+      mode: proxy
+  health:
+    path: /healthz
+    timeoutSeconds: 300
+  mcp:
+    path: /mcp

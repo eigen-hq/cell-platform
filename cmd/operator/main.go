@@ -67,14 +67,18 @@ func run() error {
 	if err := r.SetupWithManager(mgr); err != nil {
 		return err
 	}
-	// The ops agent's account; the identity may still be starting.
+	// The ops agent's account and the MCP gateway's login client; the
+	// identity may still be starting.
 	if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
 		for {
 			err := controller.EnsureAgentAccount(ctx, mgr.GetClient(), identity)
 			if err == nil {
+				err = identity.EnsureAPIClient(ctx, controller.GatewayClient, "MCP gateway")
+			}
+			if err == nil {
 				return nil
 			}
-			ctrl.Log.Info("waiting to set up the agent's account", "error", err.Error())
+			ctrl.Log.Info("waiting to set up the agent's account and the gateway's client", "error", err.Error())
 			select {
 			case <-ctx.Done():
 				return nil
@@ -95,6 +99,9 @@ func run() error {
 		return err
 	}
 	if err := (&controller.ChangeReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
+		return err
+	}
+	if err := (&controller.GatewayReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
 		return err
 	}
 	if err := mgr.AddHealthzCheck("ping", healthz.Ping); err != nil {

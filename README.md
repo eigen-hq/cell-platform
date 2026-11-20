@@ -6,7 +6,7 @@ Das Repo ist namensneutral gehalten. Der Produktname steht an genau einer Stelle
 
 ## Stand
 
-M0 bis M4 sind abgeschlossen: Eine Zelle entsteht per Befehl, lokal (`make cell-up`) oder auf einer Ubuntu-VM (`deploy/install.sh`). Apps werden allein über ihr Manifest installiert, mit Datenbank, Single Sign-on und Zertifikat. Sie werden außerhalb der Zelle gesichert, lassen sich wiederherstellen (auch in eine neue Zelle), und Änderungen laufen mit Backup, Health-Check und automatischem Rollback. Alles das geht über die Plattform-API unter `https://api.<domain>`; jede Änderung wartet dort auf die Freigabe eines Admins. Der Ops-Agent diagnostiziert Apps, die Aufmerksamkeit brauchen, und paketiert Apps aus Compose-Dateien; er arbeitet nur über die API und schlägt Änderungen zur Freigabe vor. Details und Messwerte in `docs/mvp-plan.md`, der Vertrag der API in `api/openapi.yaml`.
+M0 bis M5 sind abgeschlossen: Eine Zelle entsteht per Befehl, lokal (`make cell-up`) oder auf einer Ubuntu-VM (`deploy/install.sh`). Apps werden allein über ihr Manifest installiert, mit Datenbank, Single Sign-on und Zertifikat. Sie werden außerhalb der Zelle gesichert, lassen sich wiederherstellen (auch in eine neue Zelle), und Änderungen laufen mit Backup, Health-Check und automatischem Rollback. Alles das geht über die Plattform-API unter `https://api.<domain>`; jede Änderung wartet dort auf die Freigabe eines Admins. Der Ops-Agent diagnostiziert Apps, die Aufmerksamkeit brauchen, und paketiert Apps aus Compose-Dateien; er arbeitet nur über die API und schlägt Änderungen zur Freigabe vor. Das MCP-Gateway unter `https://mcp.<domain>/mcp` bündelt die Werkzeuge aller Apps mit MCP-Endpunkt und zeigt jedem Konto nur die Werkzeuge der Apps, die es nutzen darf. Details und Messwerte in `docs/mvp-plan.md`, der Vertrag der API in `api/openapi.yaml`.
 
 ```
 make cell-up     # lokale Zelle (k3d), Login unter https://auth.cell.localhost
@@ -27,6 +27,12 @@ curl -d grant_type=client_credentials -d client_id=cell-api -d username=akadmin 
 curl -H 'Authorization: Bearer <access_token>' https://api.cell.localhost/v0/apps
 curl -H 'Authorization: Bearer <access_token>' -d '{"catalog":"forgejo"}' https://api.cell.localhost/v0/apps
 curl -H 'Authorization: Bearer <access_token>' -X POST https://api.cell.localhost/v0/changes/<name>/approve
+```
+
+Für das MCP-Gateway holt man das Token genauso, nur mit `client_id=cell-mcp`, und trägt es im MCP-Client als Header ein, zum Beispiel:
+
+```
+claude mcp add --transport http cell https://mcp.cell.localhost/mcp --header 'Authorization: Bearer <access_token>'
 ```
 
 ## Lesereihenfolge

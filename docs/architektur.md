@@ -63,7 +63,7 @@ Eine Zelle ist eine VM mit k3s und allem, was ein Kunde braucht. Sie ist in sich
 | Objektspeicher | S3 für Apps, die ihn brauchen | Offen, erst bei Bedarf |
 | Backup | Tägliche Sicherung außerhalb der Zelle, Restore | Volume-Backups und Datenbank-Archiv in einen S3-Bucket |
 | Plattform-API | Einzige Tür für UI, CLI und Agenten | Eigenentwicklung, dünne Schicht über den Ressourcen |
-| MCP-Gateway | Ein Endpunkt für die Tools aller Apps, mit Rechteprüfung | agentgateway (Annahme) |
+| MCP-Gateway | Ein Endpunkt für die Tools aller Apps, mit Rechteprüfung | agentgateway, Konfiguration vom Operator (E-36) |
 | Ops-Agenten | Diagnose, Upgrades mit Migrationen, Paketierung | Eigenentwicklung in Go, Sprachmodell über den Schlüssel des Kunden (E-32, E-33) |
 
 ## Eigene Ressourcen
@@ -143,7 +143,7 @@ REST mit OpenAPI-Beschreibung (`api/openapi.yaml`), Anmeldung über Tokens der I
 | `/tasks` | Aufgaben für Agenten mit ihren Schritten (Admins und Agenten; Antworten können Logs zitieren) |
 | `/events` | Live-Ereignisse als Stream |
 
-Dazu der eine MCP-Endpunkt des Gateways für die Agenten in der Oberfläche.
+Dazu der eine MCP-Endpunkt des Gateways für die Agenten in der Oberfläche: `https://mcp.<domain>/mcp`, mit Tokens der Identität für den Client `cell-mcp` (E-36).
 
 ## Sicherheit im MVP
 

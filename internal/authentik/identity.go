@@ -274,7 +274,7 @@ func (c *Client) EnsureGroup(ctx context.Context, name string, members ...string
 // EnsureAPIClient registers the platform API as an OAuth2 client that
 // issues JWTs to users who log in with username and app password
 // (client credentials grant). Its issuer is <authentik>/application/o/<slug>/.
-func (c *Client) EnsureAPIClient(ctx context.Context, slug string) error {
+func (c *Client) EnsureAPIClient(ctx context.Context, slug, title string) error {
 	authz, invalidation, err := c.flows(ctx)
 	if err != nil {
 		return err
@@ -305,7 +305,7 @@ func (c *Client) EnsureAPIClient(ctx context.Context, slug string) error {
 	if err != nil {
 		return err
 	}
-	return c.ensureApplication(ctx, slug, "Platform API", "", providerPK)
+	return c.ensureApplication(ctx, slug, title, "", providerPK)
 }
 
 // EnsureAccess limits an application to members of the given groups. No

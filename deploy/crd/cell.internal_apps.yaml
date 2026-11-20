@@ -118,9 +118,9 @@ spec:
                 - message: groups need a login (auth mode oidc or proxy)
                   rule: '!has(self.groups) || size(self.groups) == 0 || self.auth.mode
                     != ''none'''
-                - message: subdomains auth and api belong to the cell (identity and
-                    platform API)
-                  rule: '!(self.subdomain in [''auth'', ''api''])'
+                - message: subdomains auth, api and mcp belong to the cell (identity,
+                    platform API and MCP gateway)
+                  rule: '!(self.subdomain in [''auth'', ''api'', ''mcp''])'
               backup:
                 description: |-
                   BackupPolicy says how often the platform backs the app up outside the
@@ -147,6 +147,18 @@ spec:
                       attention.
                     format: int32
                     type: integer
+                type: object
+              mcp:
+                description: |-
+                  MCP is the app's MCP endpoint, if it has one. The cell's gateway
+                  offers its tools to the accounts that may use the app.
+                properties:
+                  path:
+                    description: Path of the endpoint, e.g. /mcp.
+                    pattern: ^/[A-Za-z0-9._~/-]*$
+                    type: string
+                required:
+                - path
                 type: object
               needs:
                 description: Needs are shared services the platform provides.
@@ -517,6 +529,11 @@ spec:
                 - at
                 - name
                 type: object
+              mcpEndpoint:
+                description: |-
+                  MCPEndpoint is where the cell's gateway reaches the app's MCP
+                  endpoint; set once the app's service is up.
+                type: string
               observedGeneration:
                 format: int64
                 type: integer
