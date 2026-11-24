@@ -1,31 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-
-function env(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`${name} is not set`);
-  return v;
-}
-
-// Every error in the console's own pages fails the test: CSP refusals show
-// up only there. The identity's pages are not ours to judge.
-function watchErrors(page: Page, origin: string): string[] {
-  const errors: string[] = [];
-  page.on("console", (m) => m.type() === "error" && m.location().url.startsWith(origin) && errors.push(m.text()));
-  page.on("pageerror", (e) => page.url().startsWith(origin) && errors.push(e.message));
-  return errors;
-}
-
-async function signIn(page: Page, username: string, password: string) {
-  await page.goto("/");
-  await page.waitForURL(/\/if\/flow\//);
-  // authentik asks for the name, then the password, each as its own step.
-  const uid = page.locator('input[name="uidField"]');
-  await uid.fill(username);
-  await uid.press("Enter");
-  const pw = page.getByRole("textbox", { name: "Password" });
-  await pw.fill(password);
-  await pw.press("Enter");
-}
+import { expect, test } from "@playwright/test";
+import { env, signIn, watchErrors } from "./helpers";
 
 test("an admin signs in and sees the console", async ({ page, baseURL }) => {
   const errors = watchErrors(page, baseURL!);

@@ -10,9 +10,13 @@
   import Button from "./lib/ui/Button.svelte";
   import Notice from "./lib/ui/Notice.svelte";
   import Home from "./views/Home.svelte";
+  import Machines from "./views/Machines.svelte";
 
   const cell = location.hostname.replace(/^console\./, "");
-  const views = [{ href: "/", label: "Home" }];
+  const views = [
+    { href: "/", label: "Home" },
+    { href: "/machines", label: "Machines" },
+  ];
 
   let screen = $state<{ kind: "loading" } | { kind: "error"; message: string } | { kind: "refused"; me: Caller } | { kind: "ready"; me: Caller }>({ kind: "loading" });
   let path = $state(location.pathname);
@@ -33,6 +37,7 @@
     (async () => {
       try {
         await finishSignIn();
+        path = location.pathname; // the login came back to the page it left
         if (!token()) await signIn();
         const me = must(await api.GET("/v0/whoami"));
         screen = me.role === "admin" ? { kind: "ready", me } : { kind: "refused", me };
@@ -72,7 +77,11 @@
         </button>
       {/snippet}
     </TopBar>
-    <Home {me} {cell} />
+    {#if path === "/machines"}
+      <Machines {cell} />
+    {:else}
+      <Home {me} {cell} />
+    {/if}
   </div>
 {/if}
 

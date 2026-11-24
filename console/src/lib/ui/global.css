@@ -20,7 +20,8 @@ body {
   font: 400 16px/1.5 var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
-/* One grain over everything, as on every surface of the brand. */
+/* One grain over everything, as on every surface of the brand, kept faint:
+   at full strength it made the page restless. */
 body::after {
   content: "";
   position: fixed;
@@ -28,6 +29,7 @@ body::after {
   z-index: 100;
   pointer-events: none;
   background: var(--grain-layer);
+  opacity: 0.3;
 }
 button {
   font: inherit;
