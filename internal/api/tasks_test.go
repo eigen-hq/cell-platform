@@ -38,7 +38,7 @@ func (h *harness) steps(task string) []string {
 	return calls
 }
 
-// M4: agents work only in tasks they claimed, and the API records every
+// Agents work only in tasks they claimed, and the API records every
 // call of theirs as a step before it serves it; changes they propose name
 // the task.
 func TestAgentsWorkInTasks(t *testing.T) {
@@ -242,7 +242,7 @@ func TestDiagnosisReads(t *testing.T) {
 	}
 }
 
-// M4: an app from elsewhere (an agent packaged it) installs from its
+// An app from elsewhere (an agent packaged it) installs from its
 // manifest. The cluster checks it first, with a dry run, so a wrong
 // manifest is refused before anyone approves it.
 func TestInstallFromManifest(t *testing.T) {

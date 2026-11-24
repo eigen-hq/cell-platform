@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The target demo (docs/mvp-plan.md) against the local cell. Every step is
+# The demo (docs/stand.md) against the local cell. Every step is
 # an end-to-end test that works through the platform API like a user; the
 # output keeps what each step did. Step 1 (fresh VM, one command) is
 # make vm-test; locally it is make cell-up, which make demo runs first.

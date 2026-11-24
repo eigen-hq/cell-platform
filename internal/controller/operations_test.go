@@ -182,7 +182,7 @@ func readyDataApp(t *testing.T, name string) *cellv1.App {
 	return phase(t, name, cellv1.PhaseReady)
 }
 
-// M2: a ready app is backed up at once (schedule), database first, then
+// A ready app is backed up at once (schedule), database first, then
 // its volumes, and the app records the backup.
 func TestScheduledBackup(t *testing.T) {
 	ctx := context.Background()
@@ -245,7 +245,7 @@ func TestScheduledBackup(t *testing.T) {
 	})
 }
 
-// M2: a change waits for approval, takes a backup, and succeeds once the
+// A change waits for approval, takes a backup, and succeeds once the
 // app is healthy with it. A change that keeps the app unhealthy is rolled
 // back: previous spec, data restored from the backup, change log entry.
 func TestChangeRequests(t *testing.T) {

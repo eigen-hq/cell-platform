@@ -1,6 +1,6 @@
 # Architektur
 
-Zielbild für den MVP. Bausteine mit dem Vermerk „Annahme" sind Vorschläge und in `entscheidungen.md` begründet.
+Aufbau der Plattform. Bausteine mit dem Vermerk „Annahme" sind Vorschläge und in `entscheidungen.md` begründet.
 
 ## Leitprinzipien
 
@@ -9,7 +9,7 @@ Zielbild für den MVP. Bausteine mit dem Vermerk „Annahme" sind Vorschläge un
 3. **Agenten nur über die API.** Sie schlagen Änderungen am gewünschten Zustand vor; ausgeführt wird immer vom Operator.
 4. **Jede Änderung ist umkehrbar und protokolliert.** Snapshot, Änderung, Health-Check, bei Fehler Rollback.
 5. **Eine Zelle pro Kunde.** Dasselbe Paket läuft in unserer Cloud und auf Kundenservern.
-6. **Komponieren statt neu bauen.** Eigener Code nur für Operator, API und Agenten.
+6. **Komponieren statt neu bauen.** Eigener Code nur für Operator, API, Agenten und Konsole.
 
 ## Überblick
 
@@ -48,7 +48,7 @@ Eine Zelle ist eine VM mit k3s und allem, was ein Kunde braucht. Sie ist in sich
 
 - Kunden sind auf VM-Ebene getrennt. Das ist wichtig, weil Eigenbau-Apps fremder Code sind.
 - Der gehostete und der selbst betriebene Fall sind technisch identisch.
-- Ein zentraler Dienst über alle Zellen (Flotte, Abrechnung) kommt nach dem MVP und ändert die Zelle nicht.
+- Ein zentraler Dienst über alle Zellen (Flotte, Abrechnung) ist noch nicht gebaut und ändert die Zelle nicht.
 
 ## Bausteine
 
@@ -59,7 +59,7 @@ Eine Zelle ist eine VM mit k3s und allem, was ein Kunde braucht. Sie ist in sich
 | App-Operator | Manifest lesen, Zustand herstellen und halten | Eigenentwicklung, Go mit Kubebuilder (Annahme) |
 | Identität | Ein Konto für alle Apps, Gruppen, Agenten-Konten | authentik (Annahme) |
 | Datenbanken | Eine Postgres-Datenbank je App, fortlaufende Sicherung | CloudNativePG (Annahme) |
-| Volumes | Dateien der Apps, Snapshots vor Änderungen | Longhorn (Annahme, in M0 prüfen) |
+| Volumes | Dateien der Apps, Snapshots vor Änderungen | Longhorn (Annahme, auf echter VM geprüft) |
 | Objektspeicher | S3 für Apps, die ihn brauchen | Offen, erst bei Bedarf |
 | Backup | Tägliche Sicherung außerhalb der Zelle, Restore | Volume-Backups und Datenbank-Archiv in einen S3-Bucket |
 | Plattform-API | Einzige Tür für UI, CLI und Agenten | Eigenentwicklung, dünne Schicht über den Ressourcen |
@@ -75,7 +75,7 @@ Alle in der API-Gruppe `cell.internal`.
 - **`Backup`** und **`Restore`**: eine Sicherung bzw. Wiederherstellung einer App.
 - **`Task`**: eine Aufgabe für einen Agenten (Diagnose oder Paketierung) mit jedem API-Aufruf des Agenten als Schritt und seiner Antwort. Zusammen mit den `ChangeRequest`s, die sie nennen, gehört sie zum Änderungsprotokoll (E-34).
 
-Der Katalog ist im MVP ein Ordner im Repo (`catalog/<app>/manifest.yaml`), keine eigene Ressource.
+Der Katalog ist ein Ordner im Repo (`catalog/<app>/manifest.yaml`), keine eigene Ressource.
 
 ## Abläufe
 
@@ -114,18 +114,18 @@ Agenten sind Konten in der Identität mit eigenen Rechten. Ihre Werkzeuge sind a
 | Stufe | Beispiele | Regel |
 |---|---|---|
 | 0 Lesen | Status, Logs, Ereignisse, Metriken | Immer erlaubt |
-| 1 Umkehrbar | Neustart, Konfigurationsänderung, Update mit Snapshot | Im MVP mit Freigabe; später pro Zelle auf automatisch schaltbar |
+| 1 Umkehrbar | Neustart, Konfigurationsänderung, Update mit Snapshot | Mit Freigabe; pro Zelle auf automatisch schaltbar ist noch nicht gebaut |
 | 2 Riskant | Daten löschen, Restore über den aktuellen Stand, Deinstallation | Immer mit Freigabe durch einen Menschen |
 
 Das Sprachmodell kommt über einen API-Key des Kunden und ist austauschbar.
 
 ## Integration und Daten
 
-Die Daten fremder Apps bleiben in den Apps. Zentral liegt nur, was allen gemeinsam ist, in drei Ausbaustufen:
+Die Daten fremder Apps bleiben in den Apps. Zentral liegt nur, was allen gemeinsam ist, in drei Schichten:
 
-1. **Identität und Organisation** (MVP): Konten, Gruppen und Rollen für Menschen und Agenten.
-2. **Tool-Verzeichnis** (MVP, minimal): Jede App nennt im Manifest ihren MCP-Endpunkt. Das Gateway bündelt alle Endpunkte und prüft bei jedem Aufruf die Rechte des aufrufenden Kontos.
-3. **Kontext-Index** (nach dem MVP): Metadaten und Verweise auf Dokumente, Tickets und Personen über alle Apps hinweg. Apps aus eigener Entwicklung können direkt in Datenbank und Speicher der Plattform schreiben; fremde Apps werden indexiert.
+1. **Identität und Organisation** (gebaut): Konten, Gruppen und Rollen für Menschen und Agenten.
+2. **Tool-Verzeichnis** (gebaut, minimal): Jede App nennt im Manifest ihren MCP-Endpunkt. Das Gateway bündelt alle Endpunkte und prüft bei jedem Aufruf die Rechte des aufrufenden Kontos.
+3. **Kontext-Index** (noch nicht gebaut): Metadaten und Verweise auf Dokumente, Tickets und Personen über alle Apps hinweg. Apps aus eigener Entwicklung können direkt in Datenbank und Speicher der Plattform schreiben; fremde Apps werden indexiert.
 
 ## Schnittstelle zur Oberfläche
 
@@ -145,13 +145,13 @@ REST mit OpenAPI-Beschreibung (`api/openapi.yaml`), Anmeldung über Tokens der I
 
 Dazu der eine MCP-Endpunkt des Gateways für die Agenten in der Oberfläche: `https://mcp.<domain>/mcp`, mit Tokens der Identität für den Client `cell-mcp` (E-36).
 
-## Sicherheit im MVP
+## Sicherheit
 
 - Jede App liegt hinter dem Login der Identität. Apps ohne eigenes Login bekommen einen vorgeschalteten Login-Proxy.
 - Zugangsdaten entstehen in der Zelle und liegen dort als Secrets.
 - Der Agenten-Dienst hat keine Cluster-Rechte, nur ein API-Konto.
-- „Nur im Firmennetz erreichbar" (VPN oder Mesh pro Zelle) ist Stufe 2.
+- „Nur im Firmennetz erreichbar" (VPN oder Mesh pro Zelle) ist noch nicht gebaut (O-05).
 
-## Nach dem MVP
+## Noch nicht gebaut
 
-Zentraler Dienst für Flotte und Abrechnung, mehrere Knoten pro Zelle, privates Netz, Kontext-Index, Build-Pipeline für Eigenbau-Apps, Migration von Bestandskunden, Betrieb offener Sprachmodelle in der Zelle.
+Zellen über mehrere Rechner und Standorte (O-23), VPN oder Mesh zwischen Standorten und für Menschen (O-05, O-24), zentraler Dienst für Flotte und Abrechnung, Kontext-Index, Build-Pipeline für Eigenbau-Apps, Migration von Bestandskunden, Betrieb offener Sprachmodelle in der Zelle.

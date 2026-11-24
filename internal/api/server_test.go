@@ -277,7 +277,7 @@ func field(v any, path ...string) any {
 
 // --- contract ---------------------------------------------------------------
 
-// M3: the OpenAPI file is the contract. Every route is documented, every
+// The OpenAPI file is the contract. Every route is documented, every
 // documented operation is served, and every answer in these tests matches
 // its schema (see harness.validate).
 func TestRoutesMatchOpenAPI(t *testing.T) {
@@ -343,7 +343,7 @@ func TestRoleOf(t *testing.T) {
 
 // --- apps and changes -------------------------------------------------------
 
-// M3: changes go through the API and wait for an admin's decision in a
+// Changes go through the API and wait for an admin's decision in a
 // call of its own; the requester cannot set the approval.
 func TestInstallWaitsForApproval(t *testing.T) {
 	h := newHarness(t)
@@ -654,7 +654,7 @@ func jwt(claims map[string]any) string {
 	return "eyJhbGciOiJSUzI1NiJ9." + base64.RawURLEncoding.EncodeToString(raw) + ".c2lnbmF0dXJl"
 }
 
-// M3: a token counts only if the identity accepts it and it was issued for
+// A token counts only if the identity accepts it and it was issued for
 // the API's client; the answer is cached briefly.
 func TestTokens(t *testing.T) {
 	calls := 0

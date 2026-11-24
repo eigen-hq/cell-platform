@@ -95,7 +95,7 @@ func (m marker) expect(value string) {
 	}
 }
 
-// M2 through the API (M3): back up, change data, restore: database and
+// Through the API: back up, change data, restore: database and
 // volume are as backed up.
 func TestBackupAndRestore(t *testing.T) {
 	tc := newTestCell(t)
@@ -114,7 +114,7 @@ func TestBackupAndRestore(t *testing.T) {
 	}
 }
 
-// M2 through the API (M3): an update that does not become healthy is rolled
+// Through the API: an update that does not become healthy is rolled
 // back automatically: version and data are as before, and the change log
 // says what happened.
 func TestFailedUpdateRollsBack(t *testing.T) {

@@ -59,7 +59,7 @@ test: ## Unit and controller tests (envtest)
 e2e: ## End-to-end tests against the local cell
 	go test -tags e2e -count=1 -timeout 60m ./test/e2e/...
 
-demo: cell-up ## Target demo on the local cell, step by step (docs/mvp-plan.md)
+demo: cell-up ## Target demo on the local cell, step by step (docs/stand.md)
 	test/demo.sh
 
 dr-test: ## Restore an app into a freshly recreated local cell (destroys the cell)
@@ -73,7 +73,7 @@ $(LIMACTL):
 
 lima: $(LIMACTL)
 
-vm-test: $(LIMACTL) ## M0 acceptance on a fresh Ubuntu VM (Lima, local)
+vm-test: $(LIMACTL) ## Cell check on a fresh Ubuntu VM (Lima, local)
 	test/vm/run.sh
 
 generate: ## Regenerate deepcopy code and CRDs from api/

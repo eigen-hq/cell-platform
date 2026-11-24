@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// M2 acceptance through the API (M3): an app is restored into a fresh cell
+// Through the API: an app is restored into a fresh cell
 // from its backup, with complete data. Destroys and recreates the local
 // cell; the backup bucket next to it survives, like a bucket at a
 // provider. Run: make dr-test.

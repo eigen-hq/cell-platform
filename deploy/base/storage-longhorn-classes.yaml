@@ -1,5 +1,5 @@
 # In-cluster snapshots of Longhorn volumes (type snap; off-cell backups are a
-# separate concern, see M2).
+# separate concern, see E-23 to E-28).
 apiVersion: snapshot.storage.k8s.io/v1
 kind: VolumeSnapshotClass
 metadata:

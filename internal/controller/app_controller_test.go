@@ -339,7 +339,7 @@ func gone(t *testing.T, objs ...client.Object) {
 	}
 }
 
-// M1: an image app with database, volume, generated secret, OIDC login and
+// An image app with database, volume, generated secret, OIDC login and
 // files comes up from its manifest alone, and removal keeps its data.
 func TestImageAppLifecycle(t *testing.T) {
 	ctx := context.Background()
@@ -520,7 +520,7 @@ func TestImageAppLifecycle(t *testing.T) {
 	ident.mu.Unlock()
 }
 
-// M1: a Helm app becomes a Flux OCIRepository and HelmRelease with filled
+// A Helm app becomes a Flux OCIRepository and HelmRelease with filled
 // values, and its chart's volumes are kept on uninstall.
 func TestHelmApp(t *testing.T) {
 	ctx := context.Background()
@@ -658,7 +658,7 @@ func TestSecretKeyNamesMustDiffer(t *testing.T) {
 	}
 }
 
-// M1: an app without own login sits behind authentik forward auth.
+// An app without own login sits behind authentik forward auth.
 func TestProxyApp(t *testing.T) {
 	ctx := context.Background()
 	app := &cellv1.App{
@@ -720,7 +720,7 @@ func TestProxyApp(t *testing.T) {
 	gone(t, outpost)
 }
 
-// M1: an app that stays unhealthy past its timeout needs attention.
+// An app that stays unhealthy past its timeout needs attention.
 func TestNeedsAttention(t *testing.T) {
 	ctx := context.Background()
 	app := &cellv1.App{

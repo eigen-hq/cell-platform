@@ -62,12 +62,12 @@ func run(t *testing.T, name string, args ...string) string {
 	return string(out)
 }
 
-// M0: every base service is healthy and the login page answers.
+// Every base service is healthy and the login page answers.
 func TestCellStatus(t *testing.T) {
 	t.Log(run(t, "go", "run", "./cmd/cellctl", "status"))
 }
 
-// M0: running the bootstrap a second time changes nothing.
+// Running the bootstrap a second time changes nothing.
 func TestBootstrapIdempotent(t *testing.T) {
 	c := kube(t)
 	before := desiredState(t, c)

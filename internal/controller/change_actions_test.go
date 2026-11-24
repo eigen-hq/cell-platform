@@ -55,7 +55,7 @@ func rawJSON(t *testing.T, v any) *apiextensionsv1.JSON {
 	return &apiextensionsv1.JSON{Raw: raw}
 }
 
-// M3: installing is a change: it waits for approval, creates the app held
+// Installing is a change: it waits for approval, creates the app held
 // by the change, and ends with the app's first health check. A second
 // install of the same name fails. Removing without deleteData keeps the
 // namespace for a reinstall.
@@ -121,7 +121,7 @@ func TestInstallAndRemoveChanges(t *testing.T) {
 	}
 }
 
-// M3: removing with deleteData backs the app up, removes it and then
+// Removing with deleteData backs the app up, removes it and then
 // deletes the namespace with its data.
 func TestRemoveChangeDeletesData(t *testing.T) {
 	ctx := context.Background()
@@ -185,7 +185,7 @@ func TestWaitingForHostIsNoError(t *testing.T) {
 	}
 }
 
-// M3: an app never takes over a host another app has: a second app on the
+// An app never takes over a host another app has: a second app on the
 // same subdomain stops before it sets anything up, an app moving onto a
 // taken host stops while the other keeps it, and a reservation no cache
 // shows yet (another app claimed the host a moment ago) counts too. Hosts
@@ -455,7 +455,7 @@ func TestRestoreChangeEndsWhenUnhealthy(t *testing.T) {
 	})
 }
 
-// M3: a restore is a change: the current state is backed up first, then
+// A restore is a change: the current state is backed up first, then
 // the named backup comes back under the change's hold.
 func TestRestoreChange(t *testing.T) {
 	ctx := context.Background()
@@ -519,7 +519,7 @@ func TestRestoreChange(t *testing.T) {
 	phase(t, "vault", cellv1.PhaseReady)
 }
 
-// M3: only listed groups may use an app; a group the identity does not
+// Only listed groups may use an app; a group the identity does not
 // know keeps the app from becoming ready.
 func TestAccessGroups(t *testing.T) {
 	ctx := context.Background()

@@ -21,7 +21,7 @@ import (
 	"github.com/marcelheidebrecht/cell-platform/internal/cell"
 )
 
-// M0 security: the deployed cell CA only vouches for names in the cell domain.
+// Security: the deployed cell CA only vouches for names in the cell domain.
 func TestCellCAConstraints(t *testing.T) {
 	ctx := context.Background()
 	c := kube(t)

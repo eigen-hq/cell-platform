@@ -115,7 +115,7 @@ func want(cond bool, format string, args ...any) error {
 	return fmt.Errorf(format, args...)
 }
 
-// M4 scenario A: the agent gathers evidence through the API, proposes the
+// Scenario A: the agent gathers evidence through the API, proposes the
 // repair as a change linked to its task, and answers; the task holds every
 // call it made.
 func TestDiagnose(t *testing.T) {
@@ -180,7 +180,7 @@ func TestDiagnose(t *testing.T) {
 	}
 }
 
-// M4 scenario B: the agent packages a Compose file; the API refuses its
+// Scenario B: the agent packages a Compose file; the API refuses its
 // first manifest and the agent fixes it.
 func TestPackage(t *testing.T) {
 	compose := "services:\n  memo:\n    image: example/memo:0.25.3\n    ports: [\"5230:5230\"]\n    volumes: [\"./data:/var/opt/memo\"]\n"

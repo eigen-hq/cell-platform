@@ -14,7 +14,7 @@ import (
 	"github.com/marcelheidebrecht/cell-platform/internal/cell"
 )
 
-// M5: the gateway offers an app's tools to the accounts that may use the
+// The gateway offers an app's tools to the accounts that may use the
 // app, and to no one else, whatever its groups are called.
 func TestGatewayConfig(t *testing.T) {
 	mcpApp := func(name, endpoint string, groups ...string) cellv1.App {

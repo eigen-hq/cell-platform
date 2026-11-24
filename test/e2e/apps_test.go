@@ -91,7 +91,7 @@ var referenceApps = []referenceApp{
 	},
 }
 
-// M1 through the API (M3): every reference app passes the same test.
+// Through the API: every reference app passes the same test.
 // Installing it from the catalog makes it reachable under its subdomain
 // with single sign-on, deleting its pods heals by itself, and removing it
 // keeps the data so a reinstall picks it up.

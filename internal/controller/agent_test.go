@@ -14,7 +14,7 @@ import (
 	cellv1 "github.com/marcelheidebrecht/cell-platform/api/v1alpha1"
 )
 
-// M4: an app that needs attention gets one diagnose task for the ops agent
+// An app that needs attention gets one diagnose task for the ops agent
 // each time it gets there, not one per reconcile.
 func TestAskAgent(t *testing.T) {
 	ctx := context.Background()

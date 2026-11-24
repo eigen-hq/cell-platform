@@ -263,7 +263,7 @@ func (a *apiClient) restore(t *testing.T, app, backup string) {
 	a.waitChange(t, change, 20*time.Minute, "Succeeded")
 }
 
-// M3: approvals. Agents propose, only admins decide, and nobody, not even a
+// Approvals. Agents propose, only admins decide, and nobody, not even a
 // cluster admin, records a decision past the API. The event stream reports
 // the change.
 func TestChangeApproval(t *testing.T) {
@@ -369,7 +369,7 @@ func (tc *testCell) stream(t *testing.T, a *apiClient) (func(func(map[string]any
 	}, nil
 }
 
-// M3: who may use an app is set through the API; others are turned away
+// Who may use an app is set through the API; others are turned away
 // at the login.
 func TestAccessGroups(t *testing.T) {
 	tc := newTestCell(t)

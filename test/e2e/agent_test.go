@@ -120,7 +120,7 @@ func check(cond bool, format string, args ...any) error {
 	return fmt.Errorf(format, args...)
 }
 
-// M4 acceptance, scenario A: a wrong configuration value makes an app
+// Scenario A: a wrong configuration value makes an app
 // unhealthy. The operator asks the agent, the agent finds the cause in the
 // logs through the API and proposes the repair, an admin approves, the app
 // is healthy again. Every step of the agent is in its task.
@@ -214,7 +214,7 @@ func TestAgentRepairsApp(t *testing.T) {
 	t.Logf("admin approved %s, ailing is healthy again", change)
 }
 
-// M4 acceptance, scenario B: the agent packages an app that is not in the
+// Scenario B: the agent packages an app that is not in the
 // catalog from its Compose file; the operator installs the manifest without
 // rework. The manifest is the scripted model's; what is real is that the
 // API checks it and the cell runs it.

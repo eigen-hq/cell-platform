@@ -1,6 +1,6 @@
 # App-Manifest
 
-Stand v1alpha1 (M1, an den drei Referenz-Apps geschärft). Das Manifest ist die zentrale Abstraktion der Plattform: Eine App beschreibt, was sie braucht, und die Plattform stellt es bereit. Die Go-Typen liegen in `api/v1alpha1/app_types.go`, die CRD in `deploy/crd/`.
+Stand v1alpha1 (an den drei Referenz-Apps geschärft). Das Manifest ist die zentrale Abstraktion der Plattform: Eine App beschreibt, was sie braucht, und die Plattform stellt es bereit. Die Go-Typen liegen in `api/v1alpha1/app_types.go`, die CRD in `deploy/crd/`.
 
 Vorbild ist das Manifest von Cloudron, bei dem Datenbank, Login und Mail als geteilte Dienste der Plattform angefordert werden.
 
@@ -11,7 +11,7 @@ Vorbild ist das Manifest von Cloudron, bei dem Datenbank, Login und Mail als get
 - Die Plattform setzt die konkreten Werte beim Installieren ein (Platzhalter).
 - Der Kunde gibt nur an, was nur er wissen kann, zum Beispiel die gewünschte Subdomain.
 
-Ein Katalog-Manifest (`catalog/<app>/manifest.yaml`) ist selbst eine `App`. Installieren heißt im MVP: dieses Objekt anlegen, gegebenenfalls mit geänderter Subdomain.
+Ein Katalog-Manifest (`catalog/<app>/manifest.yaml`) ist selbst eine `App`. Installieren heißt: dieses Objekt anlegen, gegebenenfalls mit geänderter Subdomain.
 
 ## Beispiel
 
@@ -153,8 +153,8 @@ Das Löschen einer `App` entfernt Workload, Ingress und Login-Client. Die Daten 
 - **Integriert**: gepflegtes Manifest mit Login, geprüften Updates und, wo vorhanden, MCP. Das kuratierte Standard-Set.
 - **Generisch**: Manifest aus einer Compose-Datei abgeleitet (Charts: O-15), vom Ops-Agenten erzeugt und über `POST /v0/apps` mit `manifest` installiert. Läuft mit Subdomain, Backup und Neustart, aber ohne Garantie für Login und Updates.
 
-## Antworten auf die offenen Punkte aus M1
+## Antworten auf die offenen Punkte der ersten Fassung
 
 - **App-spezifische Schritte nach der Installation**: als Dateien im Manifest (`source.image.files`), meist als Start-Hook des Images, der bei jedem Start idempotent läuft (Nextcloud: `user_oidc` installieren und Provider anlegen). Bei Charts über deren eigene Mechanismen (Forgejo legt die OAuth-Quelle im Init-Container an).
 - **Platzhalter oder Übersetzungsstück**: Platzhalter reichen für alle drei Apps. Nötig waren zwei kleine Ergänzungen: `secretKeys` (Charts erwarten eigene Schlüsselnamen) und Platzhalter in `access.service` (Service-Name hängt am Release-Namen).
-- **Apps aus mehreren Containern ohne Chart**: noch offen; bis eine solche App kommt, ist der Weg ein Helm-Chart. Kandidat für die Paketierung in M4.
+- **Apps aus mehreren Containern ohne Chart**: noch offen; bis eine solche App kommt, ist der Weg ein Helm-Chart. Kandidat für die Paketierung durch den Agenten.

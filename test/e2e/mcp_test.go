@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// M5: an MCP client sees the tools of two installed apps through the one
+// An MCP client sees the tools of two installed apps through the one
 // endpoint of the cell's gateway. An account without access to an app sees
 // none of its tools and cannot call them. The apps are two Memos from the
 // catalog, one for everyone, one for a group.

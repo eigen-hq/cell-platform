@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# M0 acceptance on a real VM, run locally with Lima (no cloud account needed):
+# Cell check on a real VM, run locally with Lima (no cloud account needed):
 #   - fresh Ubuntu LTS VM (A-12 size) to reachable login page, timed
 #   - second install run changes nothing
 #   - Longhorn volumes with snapshots work

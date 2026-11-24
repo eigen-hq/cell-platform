@@ -8,7 +8,7 @@ Drei Listen: was feststeht, was als Annahme gilt, was offen ist. Neue Einträge 
 |---|---|
 | E-01 | Deterministisch zuerst. Agenten übernehmen nur, was sich nicht in Regeln fassen lässt. |
 | E-02 | Gehostet wird jede self-hostbare Software, auch Eigenbau des Kunden. Paketform ist der Container. |
-| E-03 | Oberfläche, Office-Suite und zentrale UI liegen in anderen Repos. Dieses Repo liefert Plattform, Plattform-API und MCP-Gateway. |
+| E-03 | ~~Oberfläche~~ (siehe E-38), Office-Suite und zentrale UI liegen in anderen Repos. Dieses Repo liefert Plattform, Plattform-API und MCP-Gateway. |
 | E-04 | Die zentrale Datenschicht hält Metadaten, nicht die Daten der Tools. |
 | E-05 | Namensneutral. Der Produktname (derzeit „Eigen") steht nur hier und später in einer einzigen Konfigurationsvariable. Technische Bezeichner nutzen `cell`. |
 | E-06 | Fokus zuerst auf junge Unternehmen ohne bestehende IT. Self-Hosting beim Kunden bleibt eine Option. |
@@ -19,7 +19,7 @@ Drei Listen: was feststeht, was als Annahme gilt, was offen ist. Neue Einträge 
 | E-11 | Basisdienste installiert `deploy/bootstrap.sh` mit `kubectl` allein: Upstream-Manifeste (cert-manager, CloudNativePG) per Server-Side Apply, Helm-Charts (authentik, Longhorn) über den in k3s eingebauten Helm-Controller (`HelmChart`). Auf der VM ist damit nur k3s nötig. |
 | E-12 | Lokale Zelle: k3d, Domain `cell.localhost`, eigene Root-CA über cert-manager (ClusterIssuer `cell`). `*.localhost` löst jeder Browser ohne DNS-Eintrag auf; öffentliche Wildcard-Dienste wie sslip.io scheitern an DNS-Rebind-Schutz. Auf der VM: eigene Domain und Let's Encrypt (`CELL_TLS=acme`). |
 | E-14 | Volumes (A-06 bestätigt): Longhorn auf der VM mit CSI-Snapshots, eine Replik pro Volume. Geprüft auf Ubuntu 26.04.1 LTS. Die lokale Zelle nutzt `local-path` ohne Snapshots. |
-| E-15 | Ziel-VM (A-12 bestätigt): 4 vCPU, 8 GB reichen. Die leere Zelle belegt 3,4 GB und lässt 4,5 GB für Apps. Messung in `mvp-plan.md` unter M0. |
+| E-15 | Ziel-VM (A-12 bestätigt): 4 vCPU, 8 GB reichen. Die leere Zelle belegt 3,4 GB und lässt 4,5 GB für Apps. Messung in `stand.md` unter „Zelle per Befehl". |
 | E-16 | VM-Abnahme läuft lokal in Lima (`make vm-test`), ohne Cloud-Konto. |
 | E-17 | Operator (A-03 bestätigt): Go mit controller-runtime und controller-gen, also den Kubebuilder-Bibliotheken ohne dessen Projektgerüst. Controller-Tests laufen mit envtest. |
 | E-18 | Helm-Anbindung (A-07 bestätigt): Flux source- und helm-controller. Der Operator schreibt `OCIRepository` oder `HelmRepository` und `HelmRelease`; ein Post-Renderer setzt `helm.sh/resource-policy: keep` auf alle PVCs der Charts, damit Daten das Deinstallieren überleben. |
@@ -42,6 +42,8 @@ Drei Listen: was feststeht, was als Annahme gilt, was offen ist. Neue Einträge 
 | E-35 | Installation aus einem Manifest (`POST /v0/apps` mit `manifest` statt `catalog`), zum Beispiel von einem Agenten paketiert: hohes Risiko, das Manifest wird vor der Freigabe vom Cluster geprüft (Dry-Run des `App`-Objekts, also Schema und CEL-Regeln). Das Konto der API darf `App`s dafür anlegen, die Admission-Policy `cell-api-dry-run` lässt aber nur Dry-Runs zu; angelegt wird weiterhin nur vom Operator nach Freigabe (E-30). |
 | E-36 | MCP-Gateway (A-08 bestätigt): agentgateway v1.7.0 als einzelner Dienst `cell-mcp` in `cell-system` unter `https://mcp.<domain>/mcp`, ohne den Kubernetes-Controller von agentgateway (keine Gateway-API-Ressourcen, ein Baustein weniger). Seine Konfiguration (ConfigMap `cell-mcp`) schreibt der Operator aus den Apps mit `mcp`: ein Ziel je App, sobald sie gesund war, Werkzeugnamen immer mit dem App-Namen vorn, zustandslos (ein Neustart verliert nichts), eine ausgefallene App fällt aus der Liste, statt die anderen mitzureißen. Tokens müssen von der Identität für den Client `cell-mcp` stammen (Signatur und Zielgruppe geprüft); Tokens der API gelten nicht und umgekehrt. Zugriff wie beim Login der App: Mitglieder von `access.groups`, ohne Gruppen alle Konten. Werkzeuge anderer Apps fehlen in der Liste, Aufrufe darauf lehnt das Gateway ab. Das Token des Nutzers geht nicht an die App. Andere Kopfzeilen des Clients reicht agentgateway weiter; die des Login-Proxys (`X-authentik-*`), denen Proxy-Apps vertrauen dürfen, setzt das Gateway deshalb selbst: den Nutzernamen aus dem Token, die übrigen entfernt es. So gibt sich kein Client einer App gegenüber als jemand anderes aus. |
 | E-13 | Zugangsdaten der Identität (DB-Passwort, Secret Key, Admin-Passwort, API-Token) erzeugt der Bootstrap einmalig und legt sie nur als Secrets in `cell-system` ab. |
+| E-37 | Kein MVP und keine Meilensteine. Entwickelt wird nach Bedarf; was läuft, steht mit Nachweis in `stand.md`. Bisherige Ausschlüsse (mehrere Knoten, VPN, Build-Pipeline, Oberfläche) gelten nicht mehr. |
+| E-38 | Die Konsole (Verwaltungsoberfläche der Zelle) entsteht in diesem Repo. Office-Suite und zentrale UI bleiben in anderen Repos (E-03). |
 
 ## Annahmen
 
@@ -54,13 +56,13 @@ Vorschläge aus der Planung, noch nicht bestätigt. Sie dürfen genutzt werden; 
 | A-03 | Operator in Go mit Kubebuilder | Standard im Kubernetes-Umfeld, beste Bibliotheken | Python (leichter zu lesen, schwächeres Ökosystem) |
 | A-04 | Identität: authentik | Deckt OIDC, SAML, LDAP und Login-Proxy ab, also auch Apps ohne modernes Login | Keycloak, Zitadel |
 | A-05 | Datenbanken: CloudNativePG, Sicherung über das Barman-Cloud-Plugin | Eine Datenbank je App mit einheitlichem Backup | Datenbank pro App im eigenen Container |
-| A-06 | Volumes mit Snapshots: Longhorn | Snapshots und Auslagerung in einen S3-Bucket in einem Baustein | ZFS-LocalPV; in M0 auf echter VM vergleichen |
+| A-06 | Volumes mit Snapshots: Longhorn | Snapshots und Auslagerung in einen S3-Bucket in einem Baustein | ZFS-LocalPV; auf echter VM vergleichen |
 | A-07 | Helm-Installationen über den Helm-Controller von Flux | Upgrade und Rollback sind dort ausgereift | Helm-Bibliothek direkt im Operator |
 | A-08 | MCP-Gateway: agentgateway | Offen lizenziert, spricht MCP, läuft auf Kubernetes | Eigenes schlankes Gateway |
-| A-09 | Referenz-Apps: Forgejo (einfach), Nextcloud (Härtetest mit echten Migrationen), ein Eigenbau-Container als Platzhalter für eine App aus der Office-Suite | Drei bewusst verschiedene Fälle | GitLab als Härtetest (braucht deutlich mehr Ressourcen, eher nach M2) |
-| A-10 | Im MVP braucht jede schreibende Agenten-Aktion eine Freigabe | Vertrauen in Agenten ist eine ungeprüfte Hypothese | Umkehrbare Aktionen automatisch |
+| A-09 | Referenz-Apps: Forgejo (einfach), Nextcloud (Härtetest mit echten Migrationen), ein Eigenbau-Container als Platzhalter für eine App aus der Office-Suite | Drei bewusst verschiedene Fälle | GitLab als Härtetest (braucht deutlich mehr Ressourcen) |
+| A-10 | Vorerst braucht jede schreibende Agenten-Aktion eine Freigabe | Vertrauen in Agenten ist eine ungeprüfte Hypothese | Umkehrbare Aktionen automatisch |
 | A-11 | Doku auf Deutsch; Code, Bezeichner und Commits auf Englisch | Arbeitssprache des Teams | Alles auf Englisch, spätestens bei Veröffentlichung |
-| A-12 | Ziel-VM: 4 vCPU, 8 GB RAM, Ubuntu LTS | Startwert; in M0 messen | Größer oder kleiner nach Messung |
+| A-12 | Ziel-VM: 4 vCPU, 8 GB RAM, Ubuntu LTS | Startwert; messen | Größer oder kleiner nach Messung |
 
 ## Offen
 
@@ -70,16 +72,16 @@ Vorschläge aus der Planung, noch nicht bestätigt. Sie dürfen genutzt werden; 
 | O-02 | Objektspeicher in der Zelle: Garage oder SeaweedFS | Sobald eine App S3 braucht |
 | O-03 | Endgültige API-Gruppe. `cell.internal` ist ein Platzhalter | Vor der ersten Veröffentlichung |
 | O-04 | Lizenz des Repos | Vor der ersten Veröffentlichung |
-| O-05 | Privates Netz pro Zelle („nur im Firmennetz erreichbar") | Nach dem MVP |
+| O-05 | Privates Netz pro Zelle („nur im Firmennetz erreichbar") | Mit der Konsole (Freigabe je App) |
 | O-06 | Anbieter und Standort für die ersten gehosteten Zellen | Vor der ersten Demo mit Externen |
 | O-07 | Operator und Plattform-API sprechen authentik mit dem Bootstrap-Token (Admin-Rechte) an. Eigenes Dienstkonto mit engen Rechten | Vor der ersten Kundenzelle |
 | O-09 | Update-Regel im Manifest (`update.auto`): noch nicht umgesetzt, es fehlt eine Quelle für neue Versionen. Updates laufen über `ChangeRequest` | Mit der Katalogpflege |
 | O-10 | App-konsistente Backups (Hooks wie Wartungsmodus vor dem Backup); bisher werden laufende Apps gesichert, Datenbank und Volumes kurz nacheinander | Vor der ersten Kundenzelle |
 | O-08 | Images und Chart-Quellen sind per Tag gepinnt, nicht per Digest; das Operator-Image hat noch keine Registry (VM bekommt es als Archiv) | Vor der ersten Kundenzelle |
 | O-12 | Vier-Augen-Prinzip für Menschen: Ein Admin darf derzeit die eigene Änderung freigeben (mit eigenem Aufruf, protokolliert). Alternative: Freigabe nur durch einen anderen Admin, dann braucht jede Zelle zwei | Vor der ersten Kundenzelle |
-| O-13 | Agenten verwalten keine Nutzer und Gruppen (das hat keinen Freigabe-Ablauf); Zugriff auf Apps können sie über `access` vorschlagen. M4 brauchte es nicht | Sobald ein Agent es braucht |
-| O-14 | Befehle in Containern ausführen und Apps neu starten (E-10) gibt es in der API noch nicht; M4 kam ohne aus. Offen, wie sie freigegeben und protokolliert werden (ein Neustart ändert keinen gewünschten Zustand) | Wenn eine Diagnose es braucht |
-| O-15 | Paketieren aus Helm-Charts: Der Agent kann Charts nicht lesen (Werte, README), nur Compose-Dateien aus der Aufgabe. Braucht einen API-Aufruf, der einen Chart abruft | Nach dem MVP |
+| O-13 | Agenten verwalten keine Nutzer und Gruppen (das hat keinen Freigabe-Ablauf); Zugriff auf Apps können sie über `access` vorschlagen. Der Ops-Agent brauchte es bisher nicht | Sobald ein Agent es braucht |
+| O-14 | Befehle in Containern ausführen und Apps neu starten (E-10) gibt es in der API noch nicht; der Ops-Agent kam bisher ohne aus. Offen, wie sie freigegeben und protokolliert werden (ein Neustart ändert keinen gewünschten Zustand) | Wenn eine Diagnose es braucht |
+| O-15 | Paketieren aus Helm-Charts: Der Agent kann Charts nicht lesen (Werte, README), nur Compose-Dateien aus der Aufgabe. Braucht einen API-Aufruf, der einen Chart abruft | Wenn eine Katalog-App nur als Chart vorliegt |
 | O-16 | Abnahme mit echtem Modell: Die Tests nutzen ein Ersatzmodell mit festem Ablauf. Ein Lauf mit Claude kostet Geld und schickt Logs und Manifeste an den Anbieter, braucht also Schlüssel und Zustimmung des Kunden | Vor der Demo |
 | O-17 | Datenschutz: Was der Agent liest (Logs, Ereignisse, Manifeste) geht an den Modellanbieter. Für Kunden mit Auflagen: Verarbeitung in der EU, Cloud-Anbieter mit Auftragsverarbeitung oder ein eigenes Modell (dann E-33 ändern) | Vor der ersten Kundenzelle |
 | O-11 | Die Backup-Zugangsdaten gelten für die ganze Zelle und liegen als Secret `backup-s3` in jedem App-Namespace (das CloudNativePG-Plugin braucht sie dort). Eine kompromittierte App mit Lesezugriff auf Secrets ihres Namespace, oder ein Manifest, das das Secret einbindet, könnte die Backups aller Apps der Zelle lesen oder löschen. Optionen: Zugangsdaten je App mit Rechten nur auf `<prefix>/apps/<app>/` (hängt am Anbieter, O-06), restic-Passwort je App aus dem Zellen-Schlüssel abgeleitet, Bucket mit Objektsperre gegen Löschen | Vor der ersten Kundenzelle |
@@ -88,6 +90,11 @@ Vorschläge aus der Planung, noch nicht bestätigt. Sie dürfen genutzt werden; 
 | O-20 | Grenzen des Gateways v0: Gruppenänderungen und gesperrte Konten wirken erst mit dem nächsten Token (authentik stellt Tokens für eine Stunde aus; das Gateway prüft die Signatur, fragt die Identität nicht wie die API). Konfigurationsänderungen erreichen das Gateway nach etwa einer Minute (Kubelet). Eine Zelle ohne MCP-Apps beantwortet die Werkzeugliste mit einem Fehler. Kürzere Tokens oder ein Abgleich bei der Identität beheben das Erste | Vor der ersten Kundenzelle |
 | O-21 | Login-Proxy: Der eingebettete Outpost von authentik erfährt von neuen Proxy-Apps über eine Websocket-Verbindung; bricht sie ab, verbindet er sich erst nach 300 s neu und bedient neue Hosts so lange nicht. Häufigster Abbruch war, dass gunicorn alle 1000 Anfragen einen Worker neu startet; das ist abgeschaltet (`AUTHENTIK_WEB__MAX_REQUESTS=0`). Bleibt ein Abbruch durch andere Ursachen: Apps mit kurzer Frist (whoami: 120 s) scheitern dann bei der Installation und bleiben zur Diagnose stehen. Abhilfe: Wartezeit auf den Outpost nicht auf die Frist der App anrechnen | Vor der ersten Kundenzelle |
 | O-22 | Netz in der Zelle: Jeder Pod erreicht die Dienste aller Apps direkt, am Login-Proxy und am Gateway vorbei. Eine kompromittierte App könnte einer Proxy-App also Kopfzeilen des Login-Proxys vorspielen. Abhilfe: NetworkPolicies, nach denen App-Dienste nur Traefik, das Gateway und den Operator (Health-Checks) annehmen | Vor der ersten Kundenzelle |
+| O-23 | Zelle über mehrere Rechner und Standorte: Wie verteilt sich eine Zelle (ein k3s-Cluster über Standorte oder ein Cluster je Standort), und was wird aus Trennung auf VM-Ebene (A-02), Volumes (A-06) und Backups, die von einem Knoten ausgehen | Vor dem ersten Code dafür |
+| O-24 | VPN oder Mesh: Verbindung zwischen Standorten einer Zelle und Zugang für Menschen ins Firmennetz; Baustein und Verhältnis zu O-05 | Mit O-23 |
+| O-25 | Gemeinsame Anmeldung von Konsole und Office-Oberfläche: dieselbe Identität der Zelle, eigener Client je Oberfläche oder ein gemeinsamer | Wenn die Office-Oberfläche angebunden wird |
+| O-26 | Office-Oberfläche in der Zelle: als App aus dem Katalog oder als Teil der Plattform; wie Nutzer zwischen beiden Oberflächen wechseln | Wenn die Office-Oberfläche angebunden wird |
+| O-27 | Was die Office-Oberfläche von der Plattform braucht: Plattform-API, Tool-Gateway, Ereignisse; welche Rechte ihr Konto hat | Wenn die Office-Oberfläche angebunden wird |
 
 ## Versionen
 
