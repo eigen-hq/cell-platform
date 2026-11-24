@@ -127,7 +127,7 @@ Stand 20.11.2026: agentgateway als MCP-Gateway, konfiguriert vom Operator aus de
 
 Admins melden sich im Browser an der Konsole der Zelle an.
 
-Stand 24.11.2026: Konsole in Svelte unter `https://console.<domain>`, ausgeliefert von `cell-api` (E-39), eigener Login-Client mit PKCE, nur für `cell-admins` (E-40), Aussehen aus Design-Tokens in zwei Tönen, Nacht und Papier (E-41). Bisher Anmeldung, Grundgerüst, die Rechner und die Apps der Zelle; die übrigen Ansichten folgen mit den Features im Backlog.
+Stand 24.11.2026: Konsole in Svelte unter `https://console.<domain>`, ausgeliefert von `cell-api` (E-39), eigener Login-Client mit PKCE, nur für `cell-admins` (E-40), Aussehen aus Design-Tokens in zwei Tönen, Nacht und Papier (E-41). Bisher Anmeldung, Grundgerüst, Freigaben, die Apps und die Rechner der Zelle; die übrigen Ansichten folgen mit den Features im Backlog.
 
 | Prüfung | Wie | Ergebnis |
 |---|---|---|
@@ -137,7 +137,8 @@ Stand 24.11.2026: Konsole in Svelte unter `https://console.<domain>`, ausgeliefe
 | Auslieferung | `make test`, `TestConsole`: Konsole nur auf ihrem Host, `/v0/` bleibt dort die API, unbekannte API-Pfade bleiben JSON-Fehler, fehlende Dateien unter `/assets/` 404 statt der Seite, Kopfzeilen (CSP, Cache); `TestLogin` gegen `api/openapi.yaml`; die Subdomain `console` kann keine App belegen (envtest) | bestanden |
 | Rechner | `make e2e`, `TestConsoleLogin` (Playwright, `machines.spec.ts`): Ansicht „Machines" nach dem Figma-Entwurf „16 Cell": Kennzahlen, Bild der Verbindungen (Menschen per https, Rechner per WireGuard), je Rechner Apps, Prozessor, Speicher und Platte (Messwerte aus `metrics.k8s.io`, Platte aus Longhorn); „Add machine" zeigt den Beitrittsbefehl, auf der lokalen Zelle den Grund, warum keiner möglich ist; eine Anmeldung, die auf `/machines` beginnt, kehrt dorthin zurück | erste Fassung bestanden; überarbeitete Fassung wartet auf den täglichen Lauf |
 | Apps | `make e2e`, `TestConsoleLogin` (Playwright, `apps.spec.ts`): Ansicht „Apps" nach „06 Apps": installierte Apps mit Zustand, Gruppen, letzter Sicherung und Adresse; Katalog mit „Install" (Änderung wartet auf Freigabe); eine App öffnet sich im Drawer nach „07 Drawer - app" unter `/apps/<name>`: Version, Zugriff ändern, Sicherungen mit „Back up now" und „Bring back", Ereignisse, „Let Ops diagnose it", Entfernen mit Rückfrage. Angesehen mit nachgestellten API-Antworten in beiden Tönen | wartet auf den täglichen Lauf |
-| Hilfsfunktionen | `make test` (`npm run check`): Zeitangaben wie „12 min ago" (`console/unit/`, `node --test`) | bestanden |
+| Freigaben | `make e2e`, `TestConsoleLogin` (Playwright, `approvals.spec.ts`): Ansicht „Approvals" nach „02 Approvals": jede wartende Änderung als Ticket mit Antragsteller (Mensch oder Agent), Satz zur Änderung, Bild von Antragsteller, App und Gruppen, Grund, Risiko, Schutz während des Laufs, Schritten nach dem Ja und Patch zum Aufklappen; Approve und Decline (mit Rückfrage); daneben die Admins aus `cell-admins` und was ein Ja braucht. Angesehen mit nachgestellten API-Antworten | wartet auf den täglichen Lauf |
+| Hilfsfunktionen | `make test` (`npm run check`): Zeitangaben wie „12 min ago", Sätze und Gruppen einer Änderung (`console/unit/`, `node --test`) | bestanden |
 | Tokens | `make test`, `TestTokens`: Tokens der Konsole gelten an der API, Tokens des MCP-Gateways und von Apps nicht | bestanden |
 | Typen und Vertrag | `make test` prüft die Konsole mit `svelte-check`, die API-Typen kommen aus `api/openapi.yaml` | bestanden |
 | Größe | Produktions-Build | JavaScript 71 KB (28 KB gzip), CSS 15 KB, Schriften 54 KB |

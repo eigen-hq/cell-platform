@@ -80,5 +80,22 @@
     "leaf": {
       "$value": "{brand.pastel.leaf}"
     }
+  },
+  "slip": {
+    "$type": "color",
+    "bg": {
+      "$type": "gradient",
+      "$value": "{brand.slip}"
+    },
+    "orb": {
+      "$type": "gradient",
+      "$value": "{brand.orb}"
+    },
+    "ink": {
+      "$value": "{brand.paper.ink}"
+    },
+    "key": {
+      "$value": "{brand.pastel.sun}"
+    }
   }
 }

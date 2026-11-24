@@ -32,7 +32,7 @@ Was die Konsole zeigt, kommt aus der API. Ohne Endpunkt gibt es keine Oberfläch
 
 | Feature | Status | Hängt ab von |
 |---|---|---|
-| Änderungen freigeben und ablehnen | API läuft | |
+| Änderungen freigeben und ablehnen | läuft | |
 | Anfragen aus der Office-Oberfläche freigeben (neue App, Feature für alle) | offen | Anfragen-API |
 | Vor der Freigabe sehen, welche Daten und Rechte eine App bekommt | offen | Datenzugriff je App |
 | Änderungen nachbessern, Vorschau, Rückgängig mit einem Aufruf | offen | |

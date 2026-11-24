@@ -12,10 +12,12 @@
   import Home from "./views/Home.svelte";
   import Machines from "./views/Machines.svelte";
   import Apps from "./views/Apps.svelte";
+  import Approvals from "./views/Approvals.svelte";
 
   const cell = location.hostname.replace(/^console\./, "");
   const views = [
     { href: "/", label: "Home" },
+    { href: "/approvals", label: "Approvals" },
     { href: "/apps", label: "Apps" },
     { href: "/machines", label: "Machines" },
   ];
@@ -83,7 +85,9 @@
         </button>
       {/snippet}
     </TopBar>
-    {#if section === "/apps"}
+    {#if section === "/approvals"}
+      <Approvals />
+    {:else if section === "/apps"}
       <Apps open={rest} onnavigate={navigate} />
     {:else if section === "/machines"}
       <Machines {cell} />

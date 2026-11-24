@@ -46,6 +46,8 @@
     },
     "mark": {"$type": "gradient", "$value": "linear-gradient(180deg, #6f5db8, #f4a05c)"},
     "amberpill": {"$type": "gradient", "$value": "linear-gradient(135deg, #ffe7b3, #f2a65a)"},
+    "slip": {"$type": "gradient", "$value": "linear-gradient(180deg, #f7e2c4, #f2c39a 50%, #e39e86)"},
+    "orb": {"$type": "gradient", "$value": "linear-gradient(135deg, #fff4d6, #f7b970 50%, #e37c4e)"},
     "font": {
       "$type": "fontFamily",
       "display": {"$value": "\"Funnel Display Variable\", \"Avenir Next\", system-ui, sans-serif"},
