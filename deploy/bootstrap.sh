@@ -10,6 +10,8 @@
 #   CELL_ACME_SERVER   default: Let's Encrypt production
 #   CELL_INGRESS_IP    address the ingress answers on (default 127.0.0.1)
 #   CELL_STORAGE       local-path (default) | longhorn
+#   CELL_JOIN_SERVER   address more machines join the cell on (optional; without
+#                      it, the cell takes no more machines, as the local one)
 #   OPERATOR_IMAGE     operator and API image, already present on the node (required)
 #   BRIDGE_IMAGE       loopback bridge image, needed for *.localhost cells
 #   CELL_BACKUP_S3_ENDPOINT, CELL_BACKUP_S3_BUCKET, CELL_BACKUP_S3_REGION,
@@ -31,6 +33,7 @@ source "$here/versions.env"
 : "${OPERATOR_IMAGE:?OPERATOR_IMAGE must be set}"
 export BRIDGE_IMAGE=${BRIDGE_IMAGE:-}
 case $CELL_DOMAIN in *.localhost | localhost) [ -n "$BRIDGE_IMAGE" ] || die "BRIDGE_IMAGE must be set for *.localhost cells" ;; esac
+export CELL_JOIN_SERVER=${CELL_JOIN_SERVER:-}
 export CELL_DOMAIN AUTHENTIK_CHART_VERSION LONGHORN_VERSION OPERATOR_IMAGE RESTIC_VERSION AGENTGATEWAY_VERSION
 export CELL_TLS=${CELL_TLS:-selfsigned}
 export CELL_ACME_EMAIL=${CELL_ACME_EMAIL:-}

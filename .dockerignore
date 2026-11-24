@@ -6,6 +6,9 @@
 !cmd
 !internal
 !console
+!deploy/deploy.go
+!deploy/node.sh
+!deploy/versions.env
 console/node_modules
 console/dist
 console/test-results

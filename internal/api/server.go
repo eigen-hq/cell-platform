@@ -79,8 +79,10 @@ type Server struct {
 	// (GET /v0/login); Console, if set, is served on its own host.
 	Login   *Login
 	Console *Console
-	Now     func() time.Time
-	Log     *slog.Logger
+	// Join, if set, lets more machines join the cell; a local cell has none.
+	Join *Join
+	Now  func() time.Time
+	Log  *slog.Logger
 }
 
 // route is one operation of the API; the tests check the table against
@@ -128,6 +130,9 @@ func (s *Server) routes() []route {
 		{"GET", "/v0/tasks/{name}", RoleAgent, s.getTask},
 		{"POST", "/v0/tasks/{name}/claim", RoleAgent, s.claimTask},
 		{"POST", "/v0/tasks/{name}/finish", RoleAgent, s.finishTask},
+		{"GET", "/v0/nodes", RoleAgent, s.listNodes},
+		{"POST", "/v0/nodes/joins", RoleAdmin, s.createJoin},
+		{"GET", "/v0/nodes/join.sh", "", s.joinScript},
 	}
 }
 

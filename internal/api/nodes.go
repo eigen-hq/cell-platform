@@ -1,0 +1,250 @@
+package api
+
+import (
+	"crypto/rand"
+	"fmt"
+	"math/big"
+	"net/http"
+	"slices"
+	"strings"
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/marcelheidebrecht/cell-platform/internal/cell"
+)
+
+// Join is what a new machine needs to join the cell (E-44).
+type Join struct {
+	// Server is the address machines reach the cell's server on.
+	Server string
+	// APIHost serves the join script (api.<domain>).
+	APIHost string
+	// CAHash is the SHA-256 of the cluster CA, in hex; the joining machine
+	// checks the server against it.
+	CAHash string
+	// Script is versions.env and node.sh, run on the new machine.
+	Script []byte
+}
+
+const (
+	joinTTL = time.Hour
+	// joinGroup is the group k3s gives machines that join with a token.
+	joinGroup = "system:bootstrappers:k3s:default-node-token"
+)
+
+type nodeView struct {
+	Name    string    `json:"name"`
+	Role    string    `json:"role"` // server | agent
+	Ready   bool      `json:"ready"`
+	Since   time.Time `json:"since"` // ready (or not) since
+	Address string    `json:"address"`
+	CPU     int64     `json:"cpu"`    // cores
+	Memory  int64     `json:"memory"` // bytes
+	Disk    int64     `json:"disk"`   // bytes
+	// In use; absent while no measurement is there.
+	CPUUsed    *float64 `json:"cpuUsed,omitempty"`    // cores
+	MemoryUsed *int64   `json:"memoryUsed,omitempty"` // bytes
+	DiskUsed   *int64   `json:"diskUsed,omitempty"`   // bytes, of Disk
+	// Apps with a pod on the machine; System: the cell's own services run there.
+	Apps    []string  `json:"apps"`
+	System  bool      `json:"system"`
+	OS      string    `json:"os"`
+	Version string    `json:"version"`
+	Joined  time.Time `json:"joined"`
+}
+
+func viewNode(n *corev1.Node) nodeView {
+	v := nodeView{Name: n.Name, Role: "agent", CPU: n.Status.Capacity.Cpu().Value(), Memory: n.Status.Capacity.Memory().Value(),
+		Disk: n.Status.Capacity.StorageEphemeral().Value(), Apps: []string{},
+		OS: n.Status.NodeInfo.OSImage, Version: n.Status.NodeInfo.KubeletVersion, Joined: n.CreationTimestamp.UTC()}
+	if n.Labels["node-role.kubernetes.io/control-plane"] == "true" {
+		v.Role = "server"
+	}
+	for _, c := range n.Status.Conditions {
+		if c.Type == corev1.NodeReady {
+			v.Ready = c.Status == corev1.ConditionTrue
+			v.Since = c.LastTransitionTime.UTC()
+		}
+	}
+	v.Address = n.Annotations["k3s.io/external-ip"]
+	for _, kind := range []corev1.NodeAddressType{corev1.NodeExternalIP, corev1.NodeInternalIP} {
+		for _, a := range n.Status.Addresses {
+			if v.Address == "" && a.Type == kind {
+				v.Address = a.Address
+			}
+		}
+	}
+	return v
+}
+
+func (s *Server) listNodes(w http.ResponseWriter, r *http.Request, _ *Caller) error {
+	ctx := r.Context()
+	var nodes corev1.NodeList
+	if err := s.Kube.List(ctx, &nodes); err != nil {
+		return err
+	}
+	var pods corev1.PodList
+	if err := s.Kube.List(ctx, &pods); err != nil {
+		return err
+	}
+	out := []nodeView{}
+	byName := map[string]*nodeView{}
+	for i := range nodes.Items {
+		out = append(out, viewNode(&nodes.Items[i]))
+	}
+	for i := range out {
+		byName[out[i].Name] = &out[i]
+	}
+	for i := range pods.Items {
+		p := &pods.Items[i]
+		v := byName[p.Spec.NodeName]
+		if v == nil || p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed {
+			continue
+		}
+		if app, ok := strings.CutPrefix(p.Namespace, "app-"); ok {
+			if !slices.Contains(v.Apps, app) {
+				v.Apps = append(v.Apps, app)
+			}
+		} else if p.Namespace == cell.SystemNamespace {
+			v.System = true
+		}
+	}
+	s.nodeUsage(r, byName)
+	for i := range out {
+		slices.Sort(out[i].Apps)
+	}
+	// The server first, then by name.
+	slices.SortFunc(out, func(a, b nodeView) int {
+		if a.Role != b.Role {
+			return strings.Compare(b.Role, a.Role)
+		}
+		return strings.Compare(a.Name, b.Name)
+	})
+	writeJSON(w, http.StatusOK, out)
+	return nil
+}
+
+// nodeUsage adds what the machines use: processor and memory from the
+// metrics API, disk from Longhorn (cells on one's own machines). Either may
+// be missing, a local cell has no Longhorn; then the view leaves it out.
+func (s *Server) nodeUsage(r *http.Request, nodes map[string]*nodeView) {
+	ctx := r.Context()
+	metrics := &unstructured.UnstructuredList{}
+	metrics.SetGroupVersionKind(schema.GroupVersionKind{Group: "metrics.k8s.io", Version: "v1beta1", Kind: "NodeMetricsList"})
+	if err := s.Kube.List(ctx, metrics); err != nil {
+		s.log().Debug("no node metrics", "error", err)
+	}
+	for _, m := range metrics.Items {
+		v := nodes[m.GetName()]
+		cpu, _, _ := unstructured.NestedString(m.Object, "usage", "cpu")
+		mem, _, _ := unstructured.NestedString(m.Object, "usage", "memory")
+		if v == nil || cpu == "" || mem == "" {
+			continue
+		}
+		c, errC := resource.ParseQuantity(cpu)
+		b, errM := resource.ParseQuantity(mem)
+		if errC != nil || errM != nil {
+			continue
+		}
+		cores, bytes := float64(c.MilliValue())/1000, b.Value()
+		v.CPUUsed, v.MemoryUsed = &cores, &bytes
+	}
+	disks := &unstructured.UnstructuredList{}
+	disks.SetGroupVersionKind(schema.GroupVersionKind{Group: "longhorn.io", Version: "v1beta2", Kind: "NodeList"})
+	if err := s.Kube.List(ctx, disks, client.InNamespace("longhorn-system")); err != nil {
+		return // no Longhorn: the disk stays the machine's capacity, without use
+	}
+	for _, d := range disks.Items {
+		v := nodes[d.GetName()]
+		status, _, _ := unstructured.NestedMap(d.Object, "status", "diskStatus")
+		if v == nil || len(status) == 0 {
+			continue
+		}
+		var size, free int64
+		for _, disk := range status {
+			m, _ := disk.(map[string]any)
+			size += number(m["storageMaximum"])
+			free += number(m["storageAvailable"])
+		}
+		if size > 0 {
+			used := size - free
+			v.Disk, v.DiskUsed = size, &used
+		}
+	}
+}
+
+func number(v any) int64 {
+	switch n := v.(type) {
+	case int64:
+		return n
+	case float64:
+		return int64(n)
+	}
+	return 0
+}
+
+// createJoin makes a join key, valid for an hour, and the command that joins
+// a machine with it.
+func (s *Server) createJoin(w http.ResponseWriter, r *http.Request, c *Caller) error {
+	if s.Join == nil {
+		return errorf(http.StatusConflict, "this cell takes no more machines (it runs on one machine only)")
+	}
+	id, secret := randomToken(6), randomToken(16)
+	expires := s.now().Add(joinTTL).UTC().Truncate(time.Second)
+	err := s.Kube.Create(r.Context(), &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "bootstrap-token-" + id, Namespace: metav1.NamespaceSystem},
+		Type:       corev1.SecretTypeBootstrapToken,
+		StringData: map[string]string{
+			"token-id": id, "token-secret": secret, "expiration": expires.Format(time.RFC3339),
+			"usage-bootstrap-authentication": "true", "usage-bootstrap-signing": "true",
+			"auth-extra-groups": joinGroup, "description": "machine join, created by " + c.Username,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		// The key goes to the shell, not into the URL: URLs end up in logs.
+		"command":   fmt.Sprintf("curl -fsSL https://%s/v0/nodes/join.sh | sudo CELL_JOIN_KEY=%s.%s bash", s.Join.APIHost, id, secret),
+		"expiresAt": expires,
+	})
+	return nil
+}
+
+// joinScript is the script the join command runs on the new machine. It
+// needs no login and holds nothing secret (the server's address and the CA's
+// hash); the join key comes with the command (CELL_JOIN_KEY), and k3s on the
+// server checks it when the machine joins.
+func (s *Server) joinScript(w http.ResponseWriter, _ *http.Request, _ *Caller) error {
+	if s.Join == nil {
+		return errorf(http.StatusConflict, "this cell takes no more machines (it runs on one machine only)")
+	}
+	w.Header().Set("Content-Type", "text/x-shellscript")
+	w.Header().Set("Cache-Control", "no-store")
+	fmt.Fprintf(w, `#!/usr/bin/env bash
+# Joins this machine to the cell (E-44). The join key comes from the command.
+[[ ${CELL_JOIN_KEY:-} =~ ^[a-z0-9]{6}\.[a-z0-9]{16}$ ]] || { echo "error: run the command from the console (CELL_JOIN_KEY)" >&2; exit 1; }
+CELL_JOIN_SERVER=%s
+CELL_JOIN_TOKEN=K10%s::$CELL_JOIN_KEY
+export CELL_JOIN_SERVER CELL_JOIN_TOKEN
+`, s.Join.Server, s.Join.CAHash)
+	_, err := w.Write(s.Join.Script)
+	return err
+}
+
+// randomToken returns n characters from [a-z0-9].
+func randomToken(n int) string {
+	const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
+	b := make([]byte, n)
+	for i := range b {
+		c, _ := rand.Int(rand.Reader, big.NewInt(int64(len(chars)))) // crypto/rand never fails
+		b[i] = chars[c.Int64()]
+	}
+	return string(b)
+}

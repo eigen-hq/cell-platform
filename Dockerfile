@@ -17,6 +17,7 @@ RUN go mod download
 COPY api api
 COPY catalog catalog
 COPY cmd cmd
+COPY deploy/deploy.go deploy/node.sh deploy/versions.env deploy/
 COPY internal internal
 RUN CGO_ENABLED=0 go build -trimpath -ldflags=-s -o /out/ ./cmd/operator ./cmd/bridge ./cmd/api ./cmd/agent
 

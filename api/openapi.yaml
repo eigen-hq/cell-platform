@@ -449,6 +449,46 @@ paths:
         default: {$ref: "#/components/responses/Error"}
         "200": {description: Event stream., content: {text/event-stream: {schema: {type: string}}}}
         "401": {$ref: "#/components/responses/Error"}
+  /v0/nodes:
+    get:
+      operationId: listNodes
+      description: The machines of the cell, the server first.
+      responses:
+        default: {$ref: "#/components/responses/Error"}
+        "200":
+          description: Machines.
+          content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/Node"}}}}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+  /v0/nodes/joins:
+    post:
+      operationId: createJoin
+      description: |
+        A join key for one more machine, valid for an hour, and the command
+        that joins a machine with it. Run the command as root on the new
+        machine (Ubuntu LTS); it loads everything from the cell, and the
+        machine shows up in `GET /v0/nodes`. The machine must reach the
+        cell's server, and the server it. 409: the cell takes no more
+        machines (a local cell).
+      responses:
+        default: {$ref: "#/components/responses/Error"}
+        "201": {description: The join command., content: {application/json: {schema: {$ref: "#/components/schemas/Join"}}}}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /v0/nodes/join.sh:
+    get:
+      operationId: joinScript
+      security: []
+      description: |
+        The script the join command runs on the new machine. No login: it
+        holds nothing secret. The join key comes with the command
+        (`CELL_JOIN_KEY`), never in a URL, and the cell checks it when the
+        machine joins.
+      responses:
+        default: {$ref: "#/components/responses/Error"}
+        "200": {description: A bash script., content: {text/x-shellscript: {schema: {type: string}}}}
+        "409": {$ref: "#/components/responses/Error"}
 components:
   securitySchemes:
     bearer: {type: http, scheme: bearer, bearerFormat: JWT}
@@ -779,3 +819,31 @@ components:
       properties:
         result: {type: string}
         failed: {type: boolean, default: false}
+    Node:
+      type: object
+      additionalProperties: false
+      required: [name, role, ready, since, address, cpu, memory, disk, apps, system, os, version, joined]
+      properties:
+        name: {type: string}
+        role: {type: string, enum: [server, agent], description: "server: runs the cell's control plane; agent: runs apps."}
+        ready: {type: boolean}
+        since: {type: string, format: date-time, description: Ready (or not) since.}
+        address: {type: string, description: The address the other machines reach it on.}
+        cpu: {type: integer, description: Cores.}
+        memory: {type: integer, format: int64, description: Bytes.}
+        disk: {type: integer, format: int64, description: "Bytes: Longhorn's disks where there are, else the machine's."}
+        cpuUsed: {type: number, description: Cores in use; absent without a measurement.}
+        memoryUsed: {type: integer, format: int64, description: Bytes in use; absent without a measurement.}
+        diskUsed: {type: integer, format: int64, description: Bytes of `disk` in use; absent without Longhorn.}
+        apps: {type: array, items: {type: string}, description: Apps with a pod on the machine.}
+        system: {type: boolean, description: The cell's own services run here.}
+        os: {type: string}
+        version: {type: string, description: Kubernetes version of the machine.}
+        joined: {type: string, format: date-time}
+    Join:
+      type: object
+      additionalProperties: false
+      required: [command, expiresAt]
+      properties:
+        command: {type: string, description: Run as root on the new machine.}
+        expiresAt: {type: string, format: date-time}

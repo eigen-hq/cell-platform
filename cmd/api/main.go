@@ -3,6 +3,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -22,6 +24,7 @@ import (
 	"github.com/marcelheidebrecht/cell-platform/api"
 	cellv1 "github.com/marcelheidebrecht/cell-platform/api/v1alpha1"
 	"github.com/marcelheidebrecht/cell-platform/catalog"
+	"github.com/marcelheidebrecht/cell-platform/deploy"
 	cellapi "github.com/marcelheidebrecht/cell-platform/internal/api"
 	"github.com/marcelheidebrecht/cell-platform/internal/authentik"
 	"github.com/marcelheidebrecht/cell-platform/internal/cell"
@@ -119,11 +122,24 @@ func run(log *slog.Logger) error {
 		console = &cellapi.Console{Host: cellCfg.Host("console"), Files: files, AuthOrigin: authOrigin}
 	}
 
+	// More machines join on the server's address (E-44); a local cell has none.
+	var join *cellapi.Join
+	if server := os.Getenv("CELL_JOIN_SERVER"); server != "" {
+		ca := cfg.CAData
+		if len(ca) == 0 {
+			if ca, err = os.ReadFile(cfg.CAFile); err != nil {
+				return fmt.Errorf("cluster CA: %w", err)
+			}
+		}
+		sum := sha256.Sum256(ca)
+		join = &cellapi.Join{Server: server, APIHost: cellCfg.Host("api"), CAHash: hex.EncodeToString(sum[:]), Script: deploy.NodeScript}
+	}
+
 	srv := &http.Server{
 		Addr: ":8080",
 		Handler: (&cellapi.Server{
 			Kube: kube, Pods: clientset.CoreV1(), Identity: identity, Authenticate: tokens.Check,
-			Catalog: catalog.FS, OpenAPI: api.OpenAPI, Login: login, Console: console, Log: log,
+			Catalog: catalog.FS, OpenAPI: api.OpenAPI, Login: login, Console: console, Join: join, Log: log,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
