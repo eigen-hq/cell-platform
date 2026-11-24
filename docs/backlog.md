@@ -193,4 +193,4 @@ Hier steht nur, was die Plattform dafür liefert. Planung und Umsetzung liegen b
 - Brand-Look hell: https://claude.ai/artifact/GpypdMvouCnaXyF9wC3Xst
 - Figma „Platform Console 02": https://www.figma.com/design/J1s8hrkim2aNxKgzxEaSe6
 
-Die Designs zeigen noch die alte Grenze (Anfragen, Ask line und geführte Abläufe in der Konsole) und werden angepasst.
+Die beiden Brand-Looks und die Figma-Datei zeigen die neue Grenze (je 31 Frames in „Screens - Dark" und „Screens - Light"). Neue Teile tragen dort eine Lücken-Markierung, solange sie hier offen sind.
