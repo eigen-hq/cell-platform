@@ -47,7 +47,7 @@ Was die Konsole zeigt, kommt aus der API. Ohne Endpunkt gibt es keine Oberfläch
 |---|---|---|
 | Installierte Apps mit Zustand, Version, Adresse | läuft | |
 | Installieren durch die IT: Katalog, eigenes Manifest | läuft (Katalog); Manifest: API läuft | |
-| Paketieren eines Open-Source-Projekts durch einen Agenten (Compose) | API läuft | Helm-Charts: O-15 |
+| Paketieren eines Open-Source-Projekts durch einen Agenten (Compose) | läuft | Helm-Charts: O-15 |
 | Update und Entfernen | läuft (Update von Hand; Update-Richtlinie: O-09) | O-09 |
 | Datenzugriff je App durchsetzen: welche Personen, welche Daten | offen | |
 | Erreichbarkeit je App (öffentlich, hinter Anmeldung, nur Firmennetz) | offen | O-05 |

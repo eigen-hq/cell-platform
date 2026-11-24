@@ -10,6 +10,7 @@
   import Button from "../lib/ui/Button.svelte";
   import Status from "../lib/ui/Status.svelte";
   import AppDrawer from "./AppDrawer.svelte";
+  import PackageForm from "./PackageForm.svelte";
 
   type App = components["schemas"]["App"];
   type Entry = components["schemas"]["CatalogEntry"];
@@ -134,6 +135,11 @@
     {:else}
       <p class="empty">Every app of the catalog is installed.</p>
     {/if}
+  </section>
+
+  <section>
+    <h2 class="sec-title">From an open-source project <small>any project with a Compose file; Packer turns it into an app</small></h2>
+    <PackageForm taken={installed} />
   </section>
 
   {#if current}
