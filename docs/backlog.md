@@ -71,7 +71,7 @@ Gewünscht und ausprobiert wird in der Office-Oberfläche; die Plattform baut, b
 | Feature | Status | Hängt ab von |
 |---|---|---|
 | Diagnose einer App: Pods, Logs, Ereignisse | Ereignisse laufen; Pods, Logs: API läuft | |
-| Diagnose durch den Ops-Agenten | Anstoßen läuft; Ergebnis: API läuft | |
+| Diagnose durch den Ops-Agenten | läuft | |
 | Metriken: CPU, RAM, Platte je App und Zelle, Verlauf | offen | Metrik-Baustein |
 | Verfügbarkeit und Antwortzeiten je App | offen | |
 | Landkarte: Verdrahtung, Verkehr, Verbindungen nach außen, Agenten | offen | Metriken |
@@ -116,7 +116,7 @@ Gewünscht und ausprobiert wird in der Office-Oberfläche; die Plattform baut, b
 
 | Feature | Status | Hängt ab von |
 |---|---|---|
-| Aufgaben der Agenten mit allen Schritten | API läuft | |
+| Aufgaben der Agenten mit allen Schritten | läuft | |
 | Agenten als Konten mit Rechten je App | offen | |
 | Autonomie-Stufen | offen | |
 | Tool-Gateway für alle Apps | API läuft | O-18, O-19, O-20 |

@@ -14,6 +14,7 @@
   import Apps from "./views/Apps.svelte";
   import Approvals from "./views/Approvals.svelte";
   import History from "./views/History.svelte";
+  import Agents from "./views/Agents.svelte";
 
   const cell = location.hostname.replace(/^console\./, "");
   const views = [
@@ -21,6 +22,7 @@
     { href: "/approvals", label: "Approvals" },
     { href: "/apps", label: "Apps" },
     { href: "/machines", label: "Machines" },
+    { href: "/agents", label: "Agents" },
     { href: "/history", label: "History" },
   ];
 
@@ -44,6 +46,14 @@
 
   onMount(() => {
     addEventListener("popstate", () => (path = location.pathname));
+    // Links inside the console stay in the page instead of loading it again.
+    addEventListener("click", (e) => {
+      const a = e.target instanceof Element ? e.target.closest("a") : null;
+      if (!a || e.defaultPrevented || a.target || a.hasAttribute("download") || a.origin !== location.origin) return;
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+      e.preventDefault();
+      navigate(a.pathname);
+    });
     (async () => {
       try {
         await finishSignIn();
@@ -93,6 +103,8 @@
       <Apps open={rest} onnavigate={navigate} />
     {:else if section === "/history"}
       <History open={rest} onnavigate={navigate} />
+    {:else if section === "/agents"}
+      <Agents open={rest} onnavigate={navigate} />
     {:else if section === "/machines"}
       <Machines {cell} />
     {:else}

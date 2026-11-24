@@ -42,6 +42,7 @@
       <ol class="trail">
         {#each trail(c) as s (s.step)}<li class={s.state}>{s.step}{s.state === "skipped" ? ": nothing to back up" : ""}</li>{/each}
       </ol>
+      {#if c.task}<a class="trail" href="/agents/{c.task}">How the agent got there</a>{/if}
       <small class="ref">{c.name}</small>
       <span class="orb" aria-hidden="true"></span>
     </div>
@@ -176,6 +177,12 @@
   .trail .failed::before { border-color: var(--brand-pastel-poppy); background: var(--brand-pastel-poppy); }
   .trail .open,
   .trail .skipped { opacity: 0.55; }
+  .trail {
+    position: relative;
+    z-index: 1;
+    font-size: 13px;
+    font-weight: 700;
+  }
   .ref {
     position: relative;
     z-index: 1;

@@ -96,6 +96,7 @@
     <ol class="steps" aria-label="What happens after a yes">
       {#each steps(c) as s (s)}<li>{s}</li>{/each}
     </ol>
+    {#if c.task}<a class="trail" href="/agents/{c.task}">How the agent got there</a>{/if}
     <small class="ref">{c.name}</small>
   </div>
 </article>
@@ -323,6 +324,10 @@
     height: 10px;
     border: 2px solid currentColor;
     border-radius: 50%;
+  }
+  .trail {
+    font-size: 13px;
+    font-weight: 700;
   }
   .ref {
     font-size: 13px;
