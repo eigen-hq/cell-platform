@@ -56,3 +56,50 @@ export const safety = (c: Change): string =>
 
 /** Whether a change still waits for someone's decision or is under way. */
 export const open = (c: Change) => c.phase === "WaitingForApproval" || c.phase === "Pending" || c.phase === "" || c.phase === "Running";
+
+/** How a change ended, or where it stands, as a word and a tone. */
+export function ended(c: Change): { label: string; tone: "ok" | "wait" | "bad" | "none" } {
+  switch (c.phase) {
+    case "WaitingForApproval":
+      return { label: "Waiting", tone: "wait" };
+    case "":
+    case "Pending":
+      return { label: "Queued", tone: "wait" };
+    case "Running":
+      return { label: "Running", tone: "wait" };
+    case "Succeeded":
+      return { label: "Applied", tone: "ok" };
+    case "RolledBack":
+      return { label: "Rolled back", tone: "bad" };
+    case "Failed":
+      return { label: "Failed", tone: "bad" };
+    case "Rejected":
+      return { label: "Declined", tone: "none" };
+  }
+}
+
+/** Who asked and who decided, in one line. */
+export function people(c: Change): string {
+  const asked = c.requester.kind === "Agent" ? `proposed by ${c.requester.name}` : `asked for by ${c.requester.name}`;
+  const d = c.approval.decision;
+  return d && c.approval.by ? `${asked}, ${d === "Approved" ? "approved" : "declined"} by ${c.approval.by}` : asked;
+}
+
+/** The steps with their state once the change ran (or did not). */
+export function trail(c: Change): { step: string; state: "done" | "failed" | "open" | "skipped" }[] {
+  const all = steps(c);
+  const last = all.length - 1;
+  // The controller writes backup "none" when there was nothing to back up.
+  const ran = (step: string, i: number) => ({ step, state: i === 0 && c.backup === "none" && c.action !== "install" ? ("skipped" as const) : ("done" as const) });
+  switch (c.phase) {
+    case "Succeeded":
+      return all.map(ran);
+    case "RolledBack":
+      // The change ran and failed its health check; the platform went back.
+      return [...all.slice(0, last - 1).map(ran), { step: all[last - 1]!, state: "failed" }, { step: "Rolled back", state: "done" }];
+    case "Failed":
+      return [...all.slice(0, last).map((step) => ({ step, state: "open" as const })), { step: "Failed", state: "failed" }];
+    default:
+      return all.map((step) => ({ step, state: "open" }));
+  }
+}

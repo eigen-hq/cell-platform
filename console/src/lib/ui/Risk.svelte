@@ -1,10 +1,10 @@
 <script lang="ts">
   // Risk as three rising bars and a word. Knows nothing about the API.
-  let { level }: { level: "low" | "medium" | "high" } = $props();
+  let { level, short = false }: { level: "low" | "medium" | "high"; short?: boolean } = $props();
   const lit = $derived({ low: 1, medium: 2, high: 3 }[level]);
 </script>
 
-<span class="risk"><span class="bars" aria-hidden="true">{#each [1, 2, 3] as i (i)}<i class:on={i <= lit}></i>{/each}</span>{level[0]!.toUpperCase() + level.slice(1)} risk</span>
+<span class="risk"><span class="bars" aria-hidden="true">{#each [1, 2, 3] as i (i)}<i class:on={i <= lit}></i>{/each}</span>{short ? level : `${level[0]!.toUpperCase()}${level.slice(1)} risk`}</span>
 
 <style>
   .risk {

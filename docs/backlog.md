@@ -94,8 +94,8 @@ Gewünscht und ausprobiert wird in der Office-Oberfläche; die Plattform baut, b
 
 | Feature | Status | Hängt ab von |
 |---|---|---|
-| Änderungsverlauf mit Urheber und Ergebnis | API läuft | |
-| Prüfprotokoll mit Export | offen | |
+| Änderungsverlauf mit Urheber und Ergebnis | läuft | |
+| Prüfprotokoll mit Export | Export des Änderungsverlaufs (CSV) läuft; Prüfprotokoll offen | |
 | Sicherheitsübersicht: zweiter Faktor, verwaiste Konten, Admins | offen | |
 | Was an Modellanbieter geht | offen | O-17 |
 | Wer kann was öffnen, was verlässt die Zelle | offen | Datenzugriff je App |

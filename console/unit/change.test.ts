@@ -1,7 +1,7 @@
 // Unit checks of plain helpers, run by node (npm run check).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { backupOf, groupsOf, headline } from "../src/lib/change.ts";
+import { backupOf, ended, groupsOf, headline, people, trail } from "../src/lib/change.ts";
 
 const base = { name: "c", app: "forgejo", requester: { kind: "Human", name: "a" }, reason: "", risk: "medium", approval: { required: true, at: null }, phase: "WaitingForApproval", createdAt: "", startedAt: null, finishedAt: null } as const;
 
@@ -22,4 +22,16 @@ test("groupsOf reads the groups a change sets, deduplicated", () => {
 test("a restore names its backup", () => {
   assert.equal(backupOf({ ...base, action: "restore", patch: null, restores: "memos-x7k2p" }), "memos-x7k2p");
   assert.equal(backupOf({ ...base, action: "restore", patch: null }), "the newest backup");
+});
+
+test("people and trail tell how a change went", () => {
+  const rolled = { ...base, action: "update", patch: { version: "2" }, phase: "RolledBack", approval: { required: true, decision: "Approved", by: "lena", at: "" } } as const;
+  assert.equal(people(rolled), "asked for by a, approved by lena");
+  assert.deepEqual(trail(rolled).map((s) => `${s.step}:${s.state}`), ["Backup:done", "Apply the change:done", "Health check:failed", "Rolled back:done"]);
+  assert.equal(ended(rolled).label, "Rolled back");
+  assert.equal(people({ ...base, requester: { kind: "Agent", name: "ops" }, action: "update", patch: null }), "proposed by ops");
+  assert.ok(trail({ ...base, action: "remove", patch: null, phase: "Succeeded" }).every((s) => s.state === "done"));
+  // No backup taken (nothing to back up): the step says so, it is not "done".
+  assert.equal(trail({ ...base, action: "remove", patch: null, phase: "Succeeded", backup: "none" })[0]!.state, "skipped");
+  assert.equal(trail({ ...rolled, backup: "none" })[0]!.state, "skipped");
 });

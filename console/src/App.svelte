@@ -13,6 +13,7 @@
   import Machines from "./views/Machines.svelte";
   import Apps from "./views/Apps.svelte";
   import Approvals from "./views/Approvals.svelte";
+  import History from "./views/History.svelte";
 
   const cell = location.hostname.replace(/^console\./, "");
   const views = [
@@ -20,6 +21,7 @@
     { href: "/approvals", label: "Approvals" },
     { href: "/apps", label: "Apps" },
     { href: "/machines", label: "Machines" },
+    { href: "/history", label: "History" },
   ];
 
   let screen = $state<{ kind: "loading" } | { kind: "error"; message: string } | { kind: "refused"; me: Caller } | { kind: "ready"; me: Caller }>({ kind: "loading" });
@@ -89,6 +91,8 @@
       <Approvals />
     {:else if section === "/apps"}
       <Apps open={rest} onnavigate={navigate} />
+    {:else if section === "/history"}
+      <History open={rest} onnavigate={navigate} />
     {:else if section === "/machines"}
       <Machines {cell} />
     {:else}
