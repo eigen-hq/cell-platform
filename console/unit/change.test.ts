@@ -1,7 +1,7 @@
 // Unit checks of plain helpers, run by node (npm run check).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { backupOf, ended, groupsOf, headline, people, trail } from "../src/lib/change.ts";
+import { backupOf, ended, groupsOf, headline, open, people, trail } from "../src/lib/change.ts";
 
 const base = { name: "c", app: "forgejo", requester: { kind: "Human", name: "a" }, reason: "", risk: "medium", approval: { required: true, at: null }, phase: "WaitingForApproval", createdAt: "", startedAt: null, finishedAt: null } as const;
 
@@ -34,4 +34,9 @@ test("people and trail tell how a change went", () => {
   // No backup taken (nothing to back up): the step says so, it is not "done".
   assert.equal(trail({ ...base, action: "remove", patch: null, phase: "Succeeded", backup: "none" })[0]!.state, "skipped");
   assert.equal(trail({ ...rolled, backup: "none" })[0]!.state, "skipped");
+});
+
+test("a change is open from the moment the API accepts it until it ends", () => {
+  for (const phase of ["", "Pending", "WaitingForApproval", "Running"]) assert.equal(open({ phase } as never), true, phase);
+  for (const phase of ["Succeeded", "Failed", "RolledBack", "Rejected"]) assert.equal(open({ phase } as never), false, phase);
 });

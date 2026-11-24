@@ -18,6 +18,13 @@ test("the admin sees the apps, the catalog and one app in the drawer", async ({ 
     await expect(drawer.getByRole("heading", { name: /^Who can open it/ })).toBeVisible();
     await expect(drawer.getByRole("heading", { name: /^Backups/ })).toBeVisible();
     await expect(drawer.getByRole("heading", { name: /^What runs/ })).toBeVisible();
+    // A new version is asked for like any change; the form only opens here.
+    await drawer.getByRole("heading", { name: /^Version/ }).getByRole("button", { name: "change" }).click();
+    await expect(drawer.getByLabel("New version")).toBeVisible();
+    await drawer.getByLabel("New version").fill("");
+    await expect(drawer.getByRole("button", { name: "Ask for the update" })).toBeDisabled();
+    await drawer.getByRole("button", { name: "Cancel" }).click();
+    await expect(drawer.getByLabel("New version")).toHaveCount(0);
     await drawer.getByRole("button", { name: "Log", exact: true }).first().click();
     await expect(drawer.getByText(/the last 300 lines/)).toBeVisible();
     // Removing asks first.

@@ -10,6 +10,8 @@
   import Button from "../lib/ui/Button.svelte";
   import Drawer from "../lib/ui/Drawer.svelte";
   import Status from "../lib/ui/Status.svelte";
+  import { open } from "../lib/change";
+  import { newest, STALE } from "../lib/newest";
   import AppPods from "./AppPods.svelte";
 
   type App = components["schemas"]["App"];
@@ -27,15 +29,19 @@
   let confirming = $state("");
   let editing = $state<string[] | null>(null);
 
+  // A poll that started before an action may answer after it: drop it.
+  const guard = newest();
   async function load(name: string) {
-    const [b, e, c] = await Promise.all([
+    const answer = await guard(Promise.all([
       api.GET("/v0/apps/{name}/backups", { params: { path: { name } } }),
       api.GET("/v0/apps/{name}/events", { params: { path: { name } } }),
       api.GET("/v0/changes", { params: { query: { app: name } } }),
-    ]);
+    ]));
+    if (answer === STALE) return;
+    const [b, e, c] = answer;
     backups = must(b);
     events = must(e);
-    pending = must(c).filter((x) => x.phase === "WaitingForApproval" || x.phase === "Pending" || x.phase === "Running");
+    pending = must(c).filter(open);
   }
 
   $effect(() => {
@@ -82,6 +88,34 @@
       editing = null;
       return outcome(c);
     });
+  // A new version: typed, or the one the catalog offers. It is a change
+  // like any other: backup first, rolled back if the health check fails.
+  let nextVersion = $state<string | null>(null);
+  let offered = $state("");
+  async function editVersion() {
+    note = null;
+    try {
+      offered = must(await api.GET("/v0/catalog")).find((e) => e.name === app.name)?.version ?? "";
+      nextVersion = offered && offered !== app.version ? offered : app.version;
+    } catch (e) {
+      note = { text: e instanceof Error ? e.message : String(e), bad: true };
+    }
+  }
+  const updating = $derived(pending.some((c) => c.action === "update"));
+  const wanted = $derived(nextVersion?.trim() ?? "");
+  // One request at a time: a second click must not ask for a second update.
+  let asking = $state(false);
+  async function askUpdate() {
+    if (asking) return;
+    asking = true;
+    await act(async () => {
+      const c = must(await api.PATCH("/v0/apps/{name}", { ...path, body: { patch: { version: wanted }, reason: `version ${wanted} from the console` } }));
+      nextVersion = null;
+      pending = [...pending.filter((x) => x.name !== c.name), c];
+      return outcome(c);
+    });
+    asking = false;
+  }
   const toggle = (g: string) => (editing = editing!.includes(g) ? editing!.filter((x) => x !== g) : [...editing!, g]);
 
   const s = $derived(appStatus(app.phase));
@@ -135,6 +169,23 @@
       </ul>
     </section>
   {/if}
+
+  <section>
+    <h3>Version {#if nextVersion === null}<button class="link" onclick={editVersion}>change</button>{/if}</h3>
+    {#if nextVersion !== null}
+      <form class="version" onsubmit={(e) => (e.preventDefault(), askUpdate())}>
+        <label>New version <input bind:value={nextVersion} autocomplete="off" spellcheck="false" /></label>
+        {#if offered && offered !== app.version && wanted !== offered}<button type="button" class="link" onclick={() => (nextVersion = offered)}>the catalog has {offered}</button>{/if}
+        <div class="row">
+          <Button type="submit" disabled={!wanted || wanted === app.version || updating || asking}>Ask for the update</Button>
+          <Button type="button" kind="quiet" onclick={() => (nextVersion = null)}>Cancel</Button>
+        </div>
+        {#if updating}<p class="hint">An update of this app is already on its way.</p>{/if}
+      </form>
+    {:else}
+      <p class="hint">Runs {app.runningVersion || app.version}. An update backs the app up first and rolls back by itself if the health check fails.</p>
+    {/if}
+  </section>
 
   <section>
     <h3>Who can open it {#if !editing && authMode(app) !== "none"}<button class="link" onclick={editAccess}>change</button>{/if}</h3>
@@ -289,6 +340,26 @@
     justify-self: start;
   }
   .groups,
+  .version {
+    display: grid;
+    justify-items: start;
+    gap: 10px;
+  }
+  .version label {
+    display: grid;
+    gap: 4px;
+    color: var(--color-muted);
+    font-size: 0.85rem;
+  }
+  .version input {
+    width: 16ch;
+    padding: 8px 12px;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-part);
+    background: var(--color-sunk);
+    color: var(--color-ink);
+    font: 600 15px ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
   .row {
     display: flex;
     flex-wrap: wrap;
