@@ -70,7 +70,7 @@ Gewünscht und ausprobiert wird in der Office-Oberfläche; die Plattform baut, b
 
 | Feature | Status | Hängt ab von |
 |---|---|---|
-| Diagnose einer App: Pods, Logs, Ereignisse | Ereignisse laufen; Pods, Logs: API läuft | |
+| Diagnose einer App: Pods, Logs, Ereignisse | läuft | |
 | Diagnose durch den Ops-Agenten | läuft | |
 | Metriken: CPU, RAM, Platte je App und Zelle, Verlauf | offen | Metrik-Baustein |
 | Verfügbarkeit und Antwortzeiten je App | offen | |

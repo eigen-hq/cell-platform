@@ -10,6 +10,7 @@
   import Button from "../lib/ui/Button.svelte";
   import Drawer from "../lib/ui/Drawer.svelte";
   import Status from "../lib/ui/Status.svelte";
+  import AppPods from "./AppPods.svelte";
 
   type App = components["schemas"]["App"];
   type Backup = components["schemas"]["Backup"];
@@ -167,6 +168,11 @@
       {/each}
     </ul>
     <div class="row"><Button kind="quiet" onclick={backupNow}>Back up now</Button></div>
+  </section>
+
+  <section>
+    <h3>What runs <small>pods and their containers</small></h3>
+    {#key app.name}<AppPods app={app.name} />{/key}
   </section>
 
   <section>

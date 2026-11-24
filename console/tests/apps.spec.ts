@@ -17,6 +17,9 @@ test("the admin sees the apps, the catalog and one app in the drawer", async ({ 
     const drawer = page.getByRole("dialog");
     await expect(drawer.getByRole("heading", { name: /^Who can open it/ })).toBeVisible();
     await expect(drawer.getByRole("heading", { name: /^Backups/ })).toBeVisible();
+    await expect(drawer.getByRole("heading", { name: /^What runs/ })).toBeVisible();
+    await drawer.getByRole("button", { name: "Log", exact: true }).first().click();
+    await expect(drawer.getByText(/the last 300 lines/)).toBeVisible();
     // Removing asks first.
     await drawer.getByRole("button", { name: "Remove and delete the data" }).click();
     await expect(drawer.getByRole("button", { name: "Yes, remove and delete the data" })).toBeVisible();
