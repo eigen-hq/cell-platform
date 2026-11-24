@@ -6,7 +6,7 @@ Das Repo ist namensneutral gehalten. Der Produktname steht an genau einer Stelle
 
 ## Stand
 
-M0 bis M5 sind abgeschlossen: Eine Zelle entsteht per Befehl, lokal (`make cell-up`) oder auf einer Ubuntu-VM (`deploy/install.sh`). Apps werden allein über ihr Manifest installiert, mit Datenbank, Single Sign-on und Zertifikat. Sie werden außerhalb der Zelle gesichert, lassen sich wiederherstellen (auch in eine neue Zelle), und Änderungen laufen mit Backup, Health-Check und automatischem Rollback. Alles das geht über die Plattform-API unter `https://api.<domain>`; jede Änderung wartet dort auf die Freigabe eines Admins. Der Ops-Agent diagnostiziert Apps, die Aufmerksamkeit brauchen, und paketiert Apps aus Compose-Dateien; er arbeitet nur über die API und schlägt Änderungen zur Freigabe vor. Das MCP-Gateway unter `https://mcp.<domain>/mcp` bündelt die Werkzeuge aller Apps mit MCP-Endpunkt und zeigt jedem Konto nur die Werkzeuge der Apps, die es nutzen darf. Details und Messwerte in `docs/mvp-plan.md`, der Vertrag der API in `api/openapi.yaml`.
+Eine Zelle entsteht per Befehl, lokal (`make cell-up`) oder auf einer Ubuntu-VM (`deploy/install.sh`). Apps werden allein über ihr Manifest installiert, mit Datenbank, Single Sign-on und Zertifikat. Sie werden außerhalb der Zelle gesichert, lassen sich wiederherstellen (auch in eine neue Zelle), und Änderungen laufen mit Backup, Health-Check und automatischem Rollback. Alles das geht über die Plattform-API unter `https://api.<domain>`; jede Änderung wartet dort auf die Freigabe eines Admins. Der Ops-Agent diagnostiziert Apps, die Aufmerksamkeit brauchen, und paketiert Apps aus Compose-Dateien; er arbeitet nur über die API und schlägt Änderungen zur Freigabe vor. Das MCP-Gateway unter `https://mcp.<domain>/mcp` bündelt die Werkzeuge aller Apps mit MCP-Endpunkt und zeigt jedem Konto nur die Werkzeuge der Apps, die es nutzen darf. Details und Messwerte in `docs/stand.md`, der Vertrag der API in `api/openapi.yaml`.
 
 ```
 make cell-up     # lokale Zelle (k3d), Login unter https://auth.cell.localhost
@@ -40,9 +40,10 @@ claude mcp add --transport http cell https://mcp.cell.localhost/mcp --header 'Au
 
 1. `docs/kontext.md` – wofür und für wen wir das bauen
 2. `docs/architektur.md` – wie die Plattform aufgebaut ist
-3. `docs/mvp-plan.md` – Meilensteine mit Akzeptanzkriterien
-4. `docs/app-manifest.md` – Entwurf der zentralen Abstraktion
-5. `docs/entscheidungen.md` – was entschieden ist, was Annahme ist, was offen ist
+3. `docs/stand.md` – was heute läuft, mit Nachweisen
+4. `docs/backlog.md` – alle Features mit Status
+5. `docs/app-manifest.md` – Entwurf der zentralen Abstraktion
+6. `docs/entscheidungen.md` – was entschieden ist, was Annahme ist, was offen ist
 
 Für Coding Agents zusätzlich: `CLAUDE.md`.
 

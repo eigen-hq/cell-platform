@@ -8,7 +8,7 @@ Eine Plattform, die beliebige self-hostbare Software pro Kunde in einer eigenen 
 
 ## Zuerst lesen
 
-1. `docs/mvp-plan.md` – aktueller Meilenstein steht unter „Stand"
+1. `docs/stand.md` – was heute läuft und wie es geprüft ist
 2. `docs/architektur.md`
 3. `docs/app-manifest.md`
 4. `docs/entscheidungen.md`
@@ -16,13 +16,13 @@ Eine Plattform, die beliebige self-hostbare Software pro Kunde in einer eigenen 
 
 ## So arbeiten wir
 
-- Ein Meilenstein nach dem anderen. Nichts aus späteren Meilensteinen vorziehen.
-- Vor dem ersten Code eines Meilensteins: kurzer Umsetzungsplan (Dateien, Reihenfolge, Risiken), dann bauen.
+- Vor dem ersten Code: kurzer Umsetzungsplan (Dateien, Reihenfolge, Risiken), dann bauen.
+- Features stehen in `docs/backlog.md`, mit der Grenze zwischen Plattform (technischer Betrieb) und Office-Oberfläche (die Arbeit). Ein Plattform-Feature umfasst seine Logik und seine Oberfläche in der Konsole; beides entsteht gemeinsam. Die Konsole zeigt nur, was die API liefert.
 - Kleinster lauffähiger Schnitt zuerst. Jede Akzeptanzbedingung wird ein automatischer Test oder ein Schritt in `make demo`.
-- Nach Abschluss eines Meilensteins: „Stand" in `docs/mvp-plan.md` aktualisieren.
+- Wenn etwas Neues läuft: `docs/stand.md` mit Nachweis aktualisieren.
 - Neue Architekturentscheidung oder neue Abhängigkeit: Eintrag in `docs/entscheidungen.md`.
 - Annahmen (A-xx) dürfen genutzt werden. Erweist sich eine als falsch oder teuer: stoppen, Befund und Alternative nennen, nicht still umbauen.
-- Offene Punkte (O-xx) nicht selbst entscheiden, sondern nachfragen, sobald sie den aktuellen Meilenstein blockieren.
+- Offene Punkte (O-xx) nicht selbst entscheiden, sondern nachfragen, sobald sie die aktuelle Arbeit blockieren.
 
 ## Leitplanken der Architektur
 
@@ -31,7 +31,7 @@ Eine Plattform, die beliebige self-hostbare Software pro Kunde in einer eigenen 
 3. Agenten handeln nur über die Plattform-API. Kein direkter Cluster- oder Shell-Zugriff am Operator vorbei.
 4. Jede Änderung läuft gleich ab: Snapshot, Änderung, Health-Check, bei Fehler Rollback, Eintrag ins Änderungsprotokoll.
 5. Eine Zelle pro Kunde. Kein Mandanten-Code innerhalb eines Clusters.
-6. Bausteine komponieren statt neu bauen. Eigener Code nur für Operator, API und Agenten.
+6. Bausteine komponieren statt neu bauen. Eigener Code nur für Operator, API, Agenten und Konsole.
 7. Namensneutral. Kein Produktname in Bezeichnern, API-Gruppen, Namespaces, Image-Pfaden oder CLI-Namen; das technische Präfix ist `cell`.
 8. Keine Geheimnisse im Repo. Zugangsdaten entstehen in der Zelle und liegen dort als Secrets.
 
@@ -55,10 +55,6 @@ Eine Plattform, die beliebige self-hostbare Software pro Kunde in einer eigenen 
 
 ## Nicht tun
 
-- Keine UI in diesem Repo.
 - Kein zentraler Steuerungsdienst über mehrere Zellen, keine Abrechnung.
-- Keine Hochverfügbarkeit, keine Mehr-Knoten-Cluster.
-- Kein VPN oder Mesh-Netz im MVP.
-- Keine Build-Pipeline für Eigenbau-Apps; im MVP kommen sie als fertige Container.
 - Keine Migrationswerkzeuge für Bestandskunden.
 - Kein Push außer auf das vereinbarte Remote (E-09).
