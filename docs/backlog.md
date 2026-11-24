@@ -138,17 +138,19 @@ Gewünscht und ausprobiert wird in der Office-Oberfläche; die Plattform baut, b
 
 ### Verteilte Zelle
 
-Alle offen. Zuerst O-23 und O-24 klären, weil sie Trennung, Speicher und Sicherung betreffen.
+Ein Cluster über alle Rechner, WireGuard dazwischen (E-42); Netz für Menschen über ein eigenes Mesh (E-43); Rechner kommen über die Konsole hinzu (E-44). Alle offen.
 
 - Rechner und Standorte einer Zelle mit Zustand
-- Rechner oder Standort hinzufügen (geführt, durch einen Agenten, als Änderung)
+- Rechner hinzufügen: Beitrittsbefehl aus der Konsole (E-44)
+- Rechner hinzufügen per SSH aus der Konsole, auf dem Beitrittsbefehl aufbauend
+- Rechner entfernen (Apps und Volumes ziehen vorher um)
 - Platzierung: welche App wo läuft, App an einen Standort binden
 - Hardware-Auslastung je Rechner und App
 - Kapazität und Umverteilung (Agent schlägt Verschieben oder mehr Hardware vor)
 - Ausfall eines Rechners oder Standorts: was weiterläuft, was umzieht
 - Latenz je Standort
-- Verbindung zwischen Standorten (VPN oder Mesh)
-- Zugang für Menschen ins Firmennetz
+- Verbindung zwischen den Rechnern (WireGuard, E-42)
+- Zugang für Menschen und Anbindung ans Firmennetz (Mesh, E-43)
 
 ### Naht zur Office-Oberfläche
 
@@ -163,7 +165,8 @@ Alle offen. Zuerst O-23 und O-24 klären, weil sie Trennung, Speicher und Sicher
 
 | Feature | Status | Hängt ab von |
 |---|---|---|
-| Zelle auf dem Hetzner-VPS | offen | Zugang zum VPS, O-06 |
+| Zelle über beide Hetzner-VPS | offen | Rechner hinzufügen |
+| Update der Plattform auf einen Release-Tag (Build auf dem Server aus Git) | offen | |
 | Git-Hosting und Issues in der eigenen Zelle, Backlog als Issues | offen | Zelle auf dem VPS |
 
 ## Gehört zur Office-Oberfläche

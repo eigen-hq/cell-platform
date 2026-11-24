@@ -36,6 +36,22 @@ Stand 19.11.2026:
 | Ressourcen leere Zelle (VM) | `free -m`, `kubectl top` nach 60 s Ruhe | 3,4 GB belegt, 4,5 GB verfügbar, 0,36 CPU im Leerlauf; authentik allein 965 MiB, Longhorn rund 450 MiB |
 | Ressourcen leere Zelle (lokal) | `kubectl top` | Pods 1,05 GiB, Knoten 2,6 GiB (ohne Longhorn) |
 
+### Zelle über mehrere Rechner
+
+Weitere Rechner treten über die Plattform bei (E-42, E-44): Ein Admin holt in der Konsole oder über `POST /v0/nodes/joins` einen Befehl und führt ihn auf dem neuen Rechner aus. Der Rechner lädt alles von der Zelle, verbindet sich über WireGuard und bekommt das Plattform-Image vom ersten Rechner, ohne Registry. Installation und Updates auf einen Release-Tag: `deploy/release.sh <tag>` auf dem Server (Build dort, aus Git); noch nicht gelaufen, der erste Lauf ist die Installation auf dem VPS.
+
+Stand 24.11.2026:
+
+| Prüfung | Wie | Ergebnis |
+|---|---|---|
+| Zweiter Rechner tritt bei | `make vm-test`: zwei frische VMs (Ubuntu 24.04.5 LTS in Lima, 4 vCPU/5 GiB und 2 vCPU/3 GiB, gemeinsames Netz `user-v2`); Admin-Token wie in `test/e2e`, `POST /v0/nodes/joins`, der Befehl läuft unverändert auf der zweiten VM. Seitdem steht der Schlüssel nicht mehr in der URL, sondern im Befehl (`CELL_JOIN_KEY`); diese Form prüft erst der nächste tägliche Lauf | beigetreten in 21 s; `GET /v0/nodes` zeigt Server und Agent, beide bereit, mit den Adressen, die `node.sh` selbst gefunden hat |
+| Verschlüsselt verbunden | `flannel-wg` auf beiden Rechnern; ein Pod auf dem zweiten Rechner erreicht `cell-api` auf dem ersten | bestanden |
+| Image ohne Registry | Pod mit dem Plattform-Image auf dem zweiten Rechner; das Image liegt nur auf dem ersten (Spiegel von k3s) | bestanden; mit `ctr import` geladene Images teilt der Spiegel nicht, daher der Bilder-Ordner von k3s |
+| Speicher auf dem zweiten Rechner | Longhorn-Volume und Snapshot auf dem zweiten Rechner | bestanden |
+| Server-Installation | derselbe Lauf, erster Rechner | 47 s VM-Start, 438 s bis zur Login-Seite; zweiter Lauf ändert nichts |
+| Ressourcen | `kubectl top` nach 60 s Ruhe | Server 3,6 GiB, Agent 0,8 GiB |
+| API und Schlüssel | `make test`, `TestNodes`, `TestJoin` gegen `api/openapi.yaml`: nur Admins holen Schlüssel, er ist ein Bootstrap-Token mit einer Stunde Gültigkeit; die Policy `cell-api-join-keys` lässt die API in `kube-system` nichts anderes anlegen und nichts lesen (gegen die lokale Zelle geprüft) | bestanden |
+
 ### App-Manifest und Operator
 
 Eine App wird allein durch ihr Manifest installiert.
@@ -111,7 +127,7 @@ Stand 20.11.2026: agentgateway als MCP-Gateway, konfiguriert vom Operator aus de
 
 Admins melden sich im Browser an der Konsole der Zelle an.
 
-Stand 24.11.2026: Konsole in Svelte unter `https://console.<domain>`, ausgeliefert von `cell-api` (E-39), eigener Login-Client mit PKCE, nur für `cell-admins` (E-40), Aussehen aus Design-Tokens in zwei Tönen, Nacht und Papier (E-41). Bisher Anmeldung und Grundgerüst; die Ansichten folgen mit den Features im Backlog.
+Stand 24.11.2026: Konsole in Svelte unter `https://console.<domain>`, ausgeliefert von `cell-api` (E-39), eigener Login-Client mit PKCE, nur für `cell-admins` (E-40), Aussehen aus Design-Tokens in zwei Tönen, Nacht und Papier (E-41). Bisher Anmeldung, Grundgerüst und die Rechner der Zelle; die übrigen Ansichten folgen mit den Features im Backlog.
 
 | Prüfung | Wie | Ergebnis |
 |---|---|---|
@@ -119,6 +135,7 @@ Stand 24.11.2026: Konsole in Svelte unter `https://console.<domain>`, ausgeliefe
 | Abmelden und Fehler | derselbe Test: Abmelden verwirft das Token und landet auf der Abmeldeseite der Identität; deren Single Sign-on bleibt (E-40); lehnt die API ein Token direkt nach der Anmeldung ab, zeigt die Konsole den Grund, statt sich endlos neu anzumelden | bestanden |
 | Login-Protokoll | derselbe Test ohne Browser: Code mit PKCE, Tausch gegen ein Token von der Herkunft der Konsole aus (CORS der Identität), mit dem Token `GET /v0/whoami` mit Rolle `admin`; ein Konto außerhalb von `cell-admins` weist die Identität ab | bestanden |
 | Auslieferung | `make test`, `TestConsole`: Konsole nur auf ihrem Host, `/v0/` bleibt dort die API, unbekannte API-Pfade bleiben JSON-Fehler, fehlende Dateien unter `/assets/` 404 statt der Seite, Kopfzeilen (CSP, Cache); `TestLogin` gegen `api/openapi.yaml`; die Subdomain `console` kann keine App belegen (envtest) | bestanden |
+| Rechner | `make e2e`, `TestConsoleLogin` (Playwright, `machines.spec.ts`): Ansicht „Machines" nach dem Figma-Entwurf „16 Cell": Kennzahlen, Bild der Verbindungen (Menschen per https, Rechner per WireGuard), je Rechner Apps, Prozessor, Speicher und Platte (Messwerte aus `metrics.k8s.io`, Platte aus Longhorn); „Add machine" zeigt den Beitrittsbefehl, auf der lokalen Zelle den Grund, warum keiner möglich ist | bestanden |
 | Tokens | `make test`, `TestTokens`: Tokens der Konsole gelten an der API, Tokens des MCP-Gateways und von Apps nicht | bestanden |
 | Typen und Vertrag | `make test` prüft die Konsole mit `svelte-check`, die API-Typen kommen aus `api/openapi.yaml` | bestanden |
 | Größe | Produktions-Build | JavaScript 71 KB (28 KB gzip), CSS 15 KB, Schriften 54 KB |
@@ -128,7 +145,8 @@ Stand 24.11.2026: Konsole in Svelte unter `https://console.<domain>`, ausgeliefe
 | Risiko | Umgang |
 |---|---|
 | Jede App braucht eigene Handgriffe für den Login | Drei bewusst unterschiedliche Referenz-Apps; Muster ins Manifest ziehen |
-| Snapshots auf einem einzelnen Knoten | Volume-Baustein auf echter VM prüfen, nicht nur lokal (`make vm-test`) |
+| Volumes liegen auf einem Rechner (eine Replik, E-14) | Fällt der Rechner aus, ist die App bis zu seiner Rückkehr weg; Backups außerhalb der Zelle; Repliken über Rechner sind ein eigener Schritt |
+| Ports zwischen den Rechnern offen | 6443, 10250 und WireGuard authentifiziert, 5001 (Spiegel) ungeprüft; Beschränkung auf die Adressen der anderen Rechner folgt |
 | Basisdienste brauchen zu viel Speicher für eine kleine VM | Gemessen (siehe Zelle per Befehl); notfalls Bausteine tauschen |
 | „Läuft" ist nicht „integriert" | Zwei Stufen im Katalog sichtbar machen: generisch und integriert |
 | Vertrauen in Agenten | Freigabe als Standard, Protokoll von Anfang an |

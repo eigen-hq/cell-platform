@@ -46,7 +46,10 @@ flowchart TB
 
 ## Die Zelle
 
-Eine Zelle ist eine VM mit k3s und allem, was ein Kunde braucht. Sie ist in sich vollständig und kennt keine anderen Zellen.
+Eine Zelle ist ein k3s-Cluster mit allem, was ein Kunde braucht, auf einem oder mehreren Rechnern (E-42). Sie ist in sich vollständig und kennt keine anderen Zellen.
+
+- Der erste Rechner ist der Server der Zelle (`deploy/install.sh`), jeder weitere kommt über die Konsole hinzu (E-44): Der Admin erzeugt einen Beitrittsbefehl, führt ihn auf dem neuen Rechner aus, und der Rechner lädt alles Nötige von der Zelle selbst.
+- Zwischen den Rechnern läuft der Datenverkehr der Pods verschlüsselt über WireGuard, direkt von Rechner zu Rechner. Images verteilen sie untereinander, ohne Registry.
 
 - Kunden sind auf VM-Ebene getrennt. Das ist wichtig, weil Eigenbau-Apps fremder Code sind.
 - Der gehostete und der selbst betriebene Fall sind technisch identisch.
@@ -57,6 +60,9 @@ Eine Zelle ist eine VM mit k3s und allem, was ein Kunde braucht. Sie ist in sich
 | Baustein | Aufgabe | Umsetzung |
 |---|---|---|
 | Basis | Container betreiben, Selbstheilung, Rollouts | k3s (Annahme) |
+| Netz zwischen Rechnern | Pods auf verschiedenen Rechnern sprechen verschlüsselt miteinander | WireGuard aus k3s (`wireguard-native`, E-42) |
+| Images zwischen Rechnern | Plattform-Image ohne Registry auf jedem Rechner | eingebauter Spiegel von k3s (Spegel, E-42) |
+| Netz für Menschen | Zugang zur Zelle, Anbindung ans Firmennetz | Headscale in der Zelle (E-43), noch nicht gebaut |
 | Ingress und TLS | Jede App unter eigener Subdomain | Traefik aus k3s, cert-manager |
 | App-Operator | Manifest lesen, Zustand herstellen und halten | Eigenentwicklung, Go mit Kubebuilder (Annahme) |
 | Identität | Ein Konto für alle Apps, Gruppen, Agenten-Konten | authentik (Annahme) |
@@ -144,6 +150,7 @@ REST mit OpenAPI-Beschreibung (`api/openapi.yaml`), Anmeldung über Tokens der I
 | `/apps/{name}/pods`, `/logs`, `/events` | Diagnose (Admins und Agenten) |
 | `/tasks` | Aufgaben für Agenten mit ihren Schritten (Admins und Agenten; Antworten können Logs zitieren) |
 | `/events` | Live-Ereignisse als Stream |
+| `/nodes`, `/nodes/joins` | Rechner der Zelle, Beitrittsbefehl für einen weiteren (E-44) |
 
 Die Konsole der Zelle (`https://console.<domain>`, E-39) ist ein Client dieser API wie jeder andere: eigener Login-Client der Identität (`cell-console`, PKCE, E-40), keine eigene Logik auf dem Server. `GET /v0/login` sagt eigenen Clients, wo und wie sie anmelden.
 
@@ -154,8 +161,10 @@ Dazu der eine MCP-Endpunkt des Gateways für die Agenten in der Oberfläche: `ht
 - Jede App liegt hinter dem Login der Identität. Apps ohne eigenes Login bekommen einen vorgeschalteten Login-Proxy.
 - Zugangsdaten entstehen in der Zelle und liegen dort als Secrets.
 - Der Agenten-Dienst hat keine Cluster-Rechte, nur ein API-Konto.
-- „Nur im Firmennetz erreichbar" (VPN oder Mesh pro Zelle) ist noch nicht gebaut (O-05).
+- Beitrittsschlüssel gelten eine Stunde. Die API darf in `kube-system` nur solche Schlüssel anlegen und keine Secrets lesen (Rolle `cell-api-join-keys` und gleichnamige Admission-Policy).
+- Die Ports für das Netz zwischen den Rechnern (6443, 10250, 5001 TCP, 51820 UDP) sind offen. 6443 und 10250 verlangen Zertifikate, WireGuard Schlüssel; für den Spiegel auf 5001 ist das nicht geprüft. Eine Beschränkung auf die Adressen der anderen Rechner folgt.
+- „Nur im Firmennetz erreichbar" über das eigene Mesh (E-43) ist noch nicht gebaut (O-05).
 
 ## Noch nicht gebaut
 
-Zellen über mehrere Rechner und Standorte (O-23), VPN oder Mesh zwischen Standorten und für Menschen (O-05, O-24), zentraler Dienst für Flotte und Abrechnung, Kontext-Index, Build-Pipeline für Eigenbau-Apps, Migration von Bestandskunden, Betrieb offener Sprachmodelle in der Zelle.
+Rechner entfernen und Apps zwischen Rechnern verschieben, Mesh für Menschen und Firmennetz (E-43), zentraler Dienst für Flotte und Abrechnung, Kontext-Index, Build-Pipeline für Eigenbau-Apps, Migration von Bestandskunden, Betrieb offener Sprachmodelle in der Zelle.

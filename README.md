@@ -6,7 +6,7 @@ Das Repo ist namensneutral gehalten. Der Produktname steht an genau einer Stelle
 
 ## Stand
 
-Eine Zelle entsteht per Befehl, lokal (`make cell-up`) oder auf einer Ubuntu-VM (`deploy/install.sh`). Apps werden allein über ihr Manifest installiert, mit Datenbank, Single Sign-on und Zertifikat. Sie werden außerhalb der Zelle gesichert, lassen sich wiederherstellen (auch in eine neue Zelle), und Änderungen laufen mit Backup, Health-Check und automatischem Rollback. Alles das geht über die Plattform-API unter `https://api.<domain>`; jede Änderung wartet dort auf die Freigabe eines Admins. Der Ops-Agent diagnostiziert Apps, die Aufmerksamkeit brauchen, und paketiert Apps aus Compose-Dateien; er arbeitet nur über die API und schlägt Änderungen zur Freigabe vor. Das MCP-Gateway unter `https://mcp.<domain>/mcp` bündelt die Werkzeuge aller Apps mit MCP-Endpunkt und zeigt jedem Konto nur die Werkzeuge der Apps, die es nutzen darf. Details und Messwerte in `docs/stand.md`, der Vertrag der API in `api/openapi.yaml`.
+Eine Zelle entsteht per Befehl, lokal (`make cell-up`) oder auf einem Ubuntu-Rechner (`deploy/install.sh`); weitere Rechner kommen über die Konsole hinzu, verbunden über WireGuard. Apps werden allein über ihr Manifest installiert, mit Datenbank, Single Sign-on und Zertifikat. Sie werden außerhalb der Zelle gesichert, lassen sich wiederherstellen (auch in eine neue Zelle), und Änderungen laufen mit Backup, Health-Check und automatischem Rollback. Alles das geht über die Plattform-API unter `https://api.<domain>`; jede Änderung wartet dort auf die Freigabe eines Admins. Der Ops-Agent diagnostiziert Apps, die Aufmerksamkeit brauchen, und paketiert Apps aus Compose-Dateien; er arbeitet nur über die API und schlägt Änderungen zur Freigabe vor. Das MCP-Gateway unter `https://mcp.<domain>/mcp` bündelt die Werkzeuge aller Apps mit MCP-Endpunkt und zeigt jedem Konto nur die Werkzeuge der Apps, die es nutzen darf. Details und Messwerte in `docs/stand.md`, der Vertrag der API in `api/openapi.yaml`.
 
 ```
 make cell-up     # lokale Zelle (k3d), Login unter https://auth.cell.localhost
@@ -16,9 +16,18 @@ make test        # Unit-, API- und Controller-Tests (envtest)
 make e2e         # Ende-zu-Ende-Tests gegen die lokale Zelle, über die API
 make demo        # Ziel-Demo Schritt für Schritt gegen die lokale Zelle, danach selbst ausprobieren
 make dr-test     # Restore in eine frisch aufgebaute Zelle (löscht die lokale Zelle)
-make vm-test     # Abnahme auf einer frischen Ubuntu-VM (Lima, lokal)
+make vm-test     # Abnahme auf zwei frischen Ubuntu-VMs (Lima, lokal), die zweite tritt über die API bei
 make cell-down   # lokale Zelle löschen
 ```
+
+Auf einem eigenen Server (als root, in einem Klon nur für Releases):
+
+```
+CELL_DOMAIN=cell.example.com CELL_TLS=acme CELL_ACME_EMAIL=ops@example.com deploy/release.sh v0.1.0
+deploy/release.sh v0.2.0  # Update: Tag holen, Image auf dem Server bauen, installieren
+```
+
+Weitere Rechner: Konsole, „Machines", „Add machine", den Befehl auf dem neuen Rechner ausführen.
 
 Die API spricht man mit einem Token der Identität an. Ein Admin (Gruppe `cell-admins`, anfangs `akadmin`) legt in authentik ein App-Passwort an, danach:
 
