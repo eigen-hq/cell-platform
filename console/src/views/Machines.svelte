@@ -94,7 +94,7 @@
   </div>
 {/snippet}
 
-<section class="head">
+<section class="view-head">
   <h1>Machines</h1>
   <p>
     {#if nodes}
@@ -136,7 +136,7 @@
   </section>
 
   <section class="where">
-    <h2>What runs where <small>each machine, its load and its apps</small></h2>
+    <h2 class="sec-title">What runs where <small>each machine, its load and its apps</small></h2>
     <ul class="cards">
       {#each nodes as m (m.name)}
         <li>
@@ -162,7 +162,7 @@
 
   <section class="band">
     <div class="card reach">
-      <h2>How it is reached</h2>
+      <h2 class="sec-title">How it is reached</h2>
       <ul>
         <li><span class="ico people"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" /><path d="M3.5 12h17M12 3.5c2.6 2.4 3.8 5.2 3.8 8.5s-1.2 6.1-3.8 8.5c-2.6-2.4-3.8-5.2-3.8-8.5S9.4 5.9 12 3.5z" /></svg></span><div><strong>Apps and console</strong><small>https://*.{cell}, through {short(server.name)}</small></div></li>
         <li><span class="ico mesh"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="7" height="6" rx="1.5" /><rect x="14" y="4" width="7" height="6" rx="1.5" /><rect x="8.5" y="15" width="7" height="6" rx="1.5" /><path d="M10 7h4M6.5 10l3.5 5M17.5 10 14 15" /></svg></span><div><strong>Between the machines</strong><small>WireGuard, machine to machine, no hub in between</small></div></li>
@@ -193,36 +193,6 @@
 {/if}
 
 <style>
-  .head {
-    display: grid;
-    gap: 10px;
-    padding: 5vh 0 34px;
-  }
-  h1 {
-    margin: 0;
-    font: 600 clamp(2.4rem, 4.4vw, 3.6rem) / 1 var(--font-display);
-    letter-spacing: -0.035em;
-  }
-  .head p {
-    margin: 0;
-    max-width: 62ch;
-    color: var(--color-muted);
-    font-size: 1.15rem;
-  }
-  h2 {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 4px 10px;
-    margin: 0 0 14px;
-    font: 600 1.4rem / 1.2 var(--font-display);
-    letter-spacing: -0.02em;
-  }
-  h2 small {
-    color: var(--color-muted);
-    font: 600 13px var(--font-sans);
-    letter-spacing: 0;
-  }
 
   /* map */
   .map {

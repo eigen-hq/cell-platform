@@ -2,7 +2,7 @@
   import type { Snippet } from "svelte";
   import type { HTMLButtonAttributes } from "svelte/elements";
 
-  let { kind = "primary", children, ...rest }: { kind?: "primary" | "quiet"; children: Snippet } & HTMLButtonAttributes = $props();
+  let { kind = "primary", children, ...rest }: { kind?: "primary" | "quiet" | "danger"; children: Snippet } & HTMLButtonAttributes = $props();
 </script>
 
 <button class={kind} {...rest}>{@render children()}</button>
@@ -25,8 +25,12 @@
     background: var(--button-primary-bg);
     color: var(--button-primary-ink);
   }
-  .quiet {
+  .quiet,
+  .danger {
     background: var(--button-quiet-bg);
     color: var(--button-quiet-ink);
+  }
+  .danger {
+    color: var(--color-bad);
   }
 </style>

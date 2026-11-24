@@ -25,7 +25,7 @@ Was die Konsole zeigt, kommt aus der API. Ohne Endpunkt gibt es keine Oberfläch
 | Konsole im Browser, Anmeldung über die Identität | läuft | |
 | Übersicht: Zustand der Zelle, offene Freigaben, letzte Ereignisse | offen | |
 | Live-Ereignisse | API läuft | |
-| Helle und dunkle Tonlage | offen | |
+| Helle und dunkle Tonlage | läuft | |
 | Erste Einrichtung einer neuen Zelle | offen | |
 
 ### Freigaben
@@ -45,10 +45,10 @@ Was die Konsole zeigt, kommt aus der API. Ohne Endpunkt gibt es keine Oberfläch
 
 | Feature | Status | Hängt ab von |
 |---|---|---|
-| Installierte Apps mit Zustand, Version, Adresse | API läuft | |
-| Installieren durch die IT: Katalog, eigenes Manifest | API läuft | |
+| Installierte Apps mit Zustand, Version, Adresse | läuft | |
+| Installieren durch die IT: Katalog, eigenes Manifest | läuft (Katalog); Manifest: API läuft | |
 | Paketieren eines Open-Source-Projekts durch einen Agenten (Compose) | API läuft | Helm-Charts: O-15 |
-| Update und Entfernen | API läuft | O-09 |
+| Update und Entfernen | Entfernen läuft; Update: API läuft | O-09 |
 | Datenzugriff je App durchsetzen: welche Personen, welche Daten | offen | |
 | Erreichbarkeit je App (öffentlich, hinter Anmeldung, nur Firmennetz) | offen | O-05 |
 | Stufen der Unterstützung (eingebaut, integriert, generisch, Eigenbau, angepasst) | offen | |
@@ -70,8 +70,8 @@ Gewünscht und ausprobiert wird in der Office-Oberfläche; die Plattform baut, b
 
 | Feature | Status | Hängt ab von |
 |---|---|---|
-| Diagnose einer App: Pods, Logs, Ereignisse | API läuft | |
-| Diagnose durch den Ops-Agenten | API läuft | |
+| Diagnose einer App: Pods, Logs, Ereignisse | Ereignisse laufen; Pods, Logs: API läuft | |
+| Diagnose durch den Ops-Agenten | Anstoßen läuft; Ergebnis: API läuft | |
 | Metriken: CPU, RAM, Platte je App und Zelle, Verlauf | offen | Metrik-Baustein |
 | Verfügbarkeit und Antwortzeiten je App | offen | |
 | Landkarte: Verdrahtung, Verkehr, Verbindungen nach außen, Agenten | offen | Metriken |
@@ -83,8 +83,8 @@ Gewünscht und ausprobiert wird in der Office-Oberfläche; die Plattform baut, b
 
 | Feature | Status | Hängt ab von |
 |---|---|---|
-| Sicherungen je App, Sicherung jetzt anstoßen | API läuft | |
-| Wiederherstellen über den aktuellen Stand | API läuft | |
+| Sicherungen je App, Sicherung jetzt anstoßen | läuft | |
+| Wiederherstellen über den aktuellen Stand | läuft | |
 | Wiederherstellen als Kopie | offen | |
 | Backup-Ziel ändern | offen | |
 | Wiederherstellungstest | offen | |
@@ -106,7 +106,7 @@ Gewünscht und ausprobiert wird in der Office-Oberfläche; die Plattform baut, b
 | Feature | Status | Hängt ab von |
 |---|---|---|
 | Konten und Gruppen, Mitglieder, App-Passwort | API läuft | |
-| Zugriff je App über Gruppen | API läuft | |
+| Zugriff je App über Gruppen | läuft | |
 | Abteilungen und Teams als Struktur der Identität | offen | |
 | Personen-Änderungen mit Freigabe, Person entfernen | offen | |
 | Konto-Hilfe: Passwort, zweiter Faktor, Sperre, Sitzungen | offen | |
@@ -138,7 +138,7 @@ Gewünscht und ausprobiert wird in der Office-Oberfläche; die Plattform baut, b
 
 ### Verteilte Zelle
 
-Ein Cluster über alle Rechner, WireGuard dazwischen (E-42); Netz für Menschen über ein eigenes Mesh (E-43); Rechner kommen über die Konsole hinzu (E-44). Alle offen.
+Ein Cluster über alle Rechner, WireGuard dazwischen (E-42); Netz für Menschen über ein eigenes Mesh (E-43); Rechner kommen über die Konsole hinzu (E-44). Läuft (`stand.md`): Rechner mit Zustand, Beitrittsbefehl aus der Konsole, Hardware-Auslastung je Rechner mit seinen Apps, WireGuard zwischen den Rechnern. Der Rest ist offen.
 
 - Rechner und Standorte einer Zelle mit Zustand
 - Rechner hinzufügen: Beitrittsbefehl aus der Konsole (E-44)

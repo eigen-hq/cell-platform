@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "gen": "openapi-typescript ../api/openapi.yaml -o src/lib/api/schema.d.ts && node scripts/tokens.mjs",
-    "check": "npm run gen && svelte-check --fail-on-warnings",
+    "check": "npm run gen && svelte-check --fail-on-warnings && node --test unit/*.test.ts",
     "build": "npm run check && vite build",
     "e2e": "playwright test"
   },

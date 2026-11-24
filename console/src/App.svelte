@@ -11,15 +11,21 @@
   import Notice from "./lib/ui/Notice.svelte";
   import Home from "./views/Home.svelte";
   import Machines from "./views/Machines.svelte";
+  import Apps from "./views/Apps.svelte";
 
   const cell = location.hostname.replace(/^console\./, "");
   const views = [
     { href: "/", label: "Home" },
+    { href: "/apps", label: "Apps" },
     { href: "/machines", label: "Machines" },
   ];
 
   let screen = $state<{ kind: "loading" } | { kind: "error"; message: string } | { kind: "refused"; me: Caller } | { kind: "ready"; me: Caller }>({ kind: "loading" });
   let path = $state(location.pathname);
+  // The first part of the path picks the view; the rest is the view's (for
+  // example /apps/<name> opens that app).
+  let section = $derived("/" + (path.split("/")[1] ?? ""));
+  let rest = $derived(path.split("/").slice(2).join("/") || undefined);
 
   // Leaving for the identity can fail (no login description, no network):
   // then the console says so instead of staying as it was.
@@ -63,7 +69,7 @@
 {:else}
   {@const me = screen.me}
   <div class="page">
-    <TopBar title="Console" subtitle={cell} items={views} current={path} onnavigate={navigate}>
+    <TopBar title="Console" subtitle={cell} items={views} current={section} onnavigate={navigate}>
       {#snippet tools()}
         <IconButton label={tone.current === "night" ? "Paper tone" : "Night tone"} onclick={() => tone.toggle()}>
           {#if tone.current === "night"}
@@ -77,7 +83,9 @@
         </button>
       {/snippet}
     </TopBar>
-    {#if path === "/machines"}
+    {#if section === "/apps"}
+      <Apps open={rest} onnavigate={navigate} />
+    {:else if section === "/machines"}
       <Machines {cell} />
     {:else}
       <Home {me} {cell} />
