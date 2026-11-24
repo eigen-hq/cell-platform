@@ -97,5 +97,12 @@
     "key": {
       "$value": "{brand.pastel.sun}"
     }
+  },
+  "shelf": {
+    "$type": "gradient",
+    "sun": {"$value": "{brand.pill.sun}"},
+    "rose": {"$value": "{brand.pill.rose}"},
+    "lilac": {"$value": "{brand.pill.lilac}"},
+    "down": {"$value": "{brand.pill.down}"}
   }
 }

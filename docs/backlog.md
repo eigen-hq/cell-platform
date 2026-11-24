@@ -23,7 +23,7 @@ Was die Konsole zeigt, kommt aus der API. Ohne Endpunkt gibt es keine Oberfläch
 | Feature | Status | Hängt ab von |
 |---|---|---|
 | Konsole im Browser, Anmeldung über die Identität | läuft | |
-| Übersicht: Zustand der Zelle, offene Freigaben, letzte Ereignisse | offen | |
+| Übersicht: Zustand der Zelle, offene Freigaben, letzte Ereignisse | läuft | |
 | Live-Ereignisse | API läuft | |
 | Helle und dunkle Tonlage | läuft | |
 | Erste Einrichtung einer neuen Zelle | offen | |

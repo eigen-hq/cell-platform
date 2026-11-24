@@ -113,7 +113,7 @@
     {:else if section === "/machines"}
       <Machines {cell} />
     {:else}
-      <Home {me} {cell} />
+      <Home />
     {/if}
   </div>
 {/if}

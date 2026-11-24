@@ -61,6 +61,9 @@
     },
     "attention": {
       "$value": "{brand.amberpill}"
+    },
+    "headline": {
+      "$value": "{brand.headline.night}"
     }
   },
   "grain": {

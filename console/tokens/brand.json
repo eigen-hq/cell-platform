@@ -48,6 +48,18 @@
     "amberpill": {"$type": "gradient", "$value": "linear-gradient(135deg, #ffe7b3, #f2a65a)"},
     "slip": {"$type": "gradient", "$value": "linear-gradient(180deg, #f7e2c4, #f2c39a 50%, #e39e86)"},
     "orb": {"$type": "gradient", "$value": "linear-gradient(135deg, #fff4d6, #f7b970 50%, #e37c4e)"},
+    "headline": {
+      "$type": "gradient",
+      "night": {"$value": "linear-gradient(90deg, #fbd08a, #f2b48a 45%, #e393a6)"},
+      "paper": {"$value": "linear-gradient(90deg, #c2701f, #b0456a)"}
+    },
+    "pill": {
+      "$type": "gradient",
+      "sun": {"$value": "linear-gradient(180deg, #fbe8c0, #fbd08a 35%, #c9553a)"},
+      "rose": {"$value": "linear-gradient(180deg, #f6d3dc, #e393a6 40%, #6e3a62)"},
+      "lilac": {"$value": "linear-gradient(180deg, #e4dcfa, #a7b2f3 40%, #4a3d6b)"},
+      "down": {"$value": "linear-gradient(90deg, #ff9a78, #e0573f 60%, #c9553a)"}
+    },
     "font": {
       "$type": "fontFamily",
       "display": {"$value": "\"Funnel Display Variable\", \"Avenir Next\", system-ui, sans-serif"},
