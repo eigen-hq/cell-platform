@@ -4,7 +4,7 @@ Was die Plattform heute kann und wie es geprüft ist. Jede Fähigkeit hat einen 
 
 ## Überblick
 
-- Zuletzt aktualisiert: 20.11.2026
+- Zuletzt aktualisiert: 24.11.2026
 - `make demo` führt die Ziel-Demo gegen die lokale Zelle vor (Schritte 2 bis 6, je ein Ende-zu-Ende-Test mit Protokoll); Schritt 1 auf einer frischen VM ist `make vm-test`
 - Offene Fragen stehen in `entscheidungen.md`
 
@@ -106,6 +106,22 @@ Stand 20.11.2026: agentgateway als MCP-Gateway, konfiguriert vom Operator aus de
 | Ohne Zugriff keine Werkzeuge | dieselbe Prüfung: ein Konto außerhalb der Gruppe sieht nur `notes_*`, sein Aufruf eines `journal_*`-Werkzeugs wird abgewiesen; ohne Token oder mit einem Token der API antwortet das Gateway 401, ein Token des Gateways gilt nicht an der API | bestanden |
 | Zugriffsregeln | `make test`, `TestGatewayConfig`: die Regeln mit cel-go ausgewertet, auch mit Gruppennamen, die selbst CEL enthalten; Apps ohne `mcp`, noch nie gesunde und gelöschte Apps fehlen | bestanden |
 | Speicher | Gateway im Leerlauf, lokale Zelle | 11 MiB |
+
+### Konsole
+
+Admins melden sich im Browser an der Konsole der Zelle an.
+
+Stand 24.11.2026: Konsole in Svelte unter `https://console.<domain>`, ausgeliefert von `cell-api` (E-39), eigener Login-Client mit PKCE, nur für `cell-admins` (E-40), Aussehen aus Design-Tokens in zwei Tönen, Nacht und Papier (E-41). Bisher Anmeldung und Grundgerüst; die Ansichten folgen mit den Features im Backlog.
+
+| Prüfung | Wie | Ergebnis |
+|---|---|---|
+| Anmeldung im Browser | `make e2e`, `TestConsoleLogin`: ein Admin meldet sich in Chromium (Playwright) an, sieht seinen Namen und die Navigation, wechselt den Ton, lädt neu; jeder Fehler in der Browser-Konsole auf Seiten der Konsole, auch eine Abweisung durch die CSP, lässt den Test scheitern | bestanden |
+| Abmelden und Fehler | derselbe Test: Abmelden verwirft das Token und landet auf der Abmeldeseite der Identität; deren Single Sign-on bleibt (E-40); lehnt die API ein Token direkt nach der Anmeldung ab, zeigt die Konsole den Grund, statt sich endlos neu anzumelden | bestanden |
+| Login-Protokoll | derselbe Test ohne Browser: Code mit PKCE, Tausch gegen ein Token von der Herkunft der Konsole aus (CORS der Identität), mit dem Token `GET /v0/whoami` mit Rolle `admin`; ein Konto außerhalb von `cell-admins` weist die Identität ab | bestanden |
+| Auslieferung | `make test`, `TestConsole`: Konsole nur auf ihrem Host, `/v0/` bleibt dort die API, unbekannte API-Pfade bleiben JSON-Fehler, fehlende Dateien unter `/assets/` 404 statt der Seite, Kopfzeilen (CSP, Cache); `TestLogin` gegen `api/openapi.yaml`; die Subdomain `console` kann keine App belegen (envtest) | bestanden |
+| Tokens | `make test`, `TestTokens`: Tokens der Konsole gelten an der API, Tokens des MCP-Gateways und von Apps nicht | bestanden |
+| Typen und Vertrag | `make test` prüft die Konsole mit `svelte-check`, die API-Typen kommen aus `api/openapi.yaml` | bestanden |
+| Größe | Produktions-Build | JavaScript 71 KB (28 KB gzip), CSS 15 KB, Schriften 54 KB |
 
 ## Risiken
 

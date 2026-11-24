@@ -44,6 +44,9 @@ Drei Listen: was feststeht, was als Annahme gilt, was offen ist. Neue Einträge 
 | E-13 | Zugangsdaten der Identität (DB-Passwort, Secret Key, Admin-Passwort, API-Token) erzeugt der Bootstrap einmalig und legt sie nur als Secrets in `cell-system` ab. |
 | E-37 | Kein MVP und keine Meilensteine. Entwickelt wird nach Bedarf; was läuft, steht mit Nachweis in `stand.md`. Bisherige Ausschlüsse (mehrere Knoten, VPN, Build-Pipeline, Oberfläche) gelten nicht mehr. |
 | E-38 | Die Konsole (Verwaltungsoberfläche der Zelle) entsteht in diesem Repo. Office-Suite und zentrale UI bleiben in anderen Repos (E-03). |
+| E-39 | Konsole: Vite, Svelte 5 und TypeScript in `console/`, gebaut im Image (Node-Stufe) und von `cell-api` unter `https://console.<domain>` ausgeliefert (Ordner `/console`, `CONSOLE_DIR`). Weil API und Konsole denselben Ursprung haben, ruft die Konsole `/v0/...` ohne CORS; unbekannte `/v0/`-Pfade bleiben JSON-Fehler der API, auf dem API-Host gibt es keine Konsole. Strenge CSP: nur eigene Skripte und Stile, Verbindungen nur zur eigenen Herkunft und zur Identität, Schriften selbst gehostet. Typen der API erzeugt `openapi-typescript` aus `api/openapi.yaml`, die Konsole kennt also nur, was der Vertrag sagt. Kein Backend für die Konsole: sie nutzt dieselbe API wie CLI und Agenten. |
+| E-40 | Login der Konsole: eigener öffentlicher Client `cell-console` in authentik (Autorisierungscode mit PKCE, eine feste Rücksprungadresse, kein Geheimnis), angelegt von `cell-api` beim Start. `GET /v0/login` nennt Endpunkte, Client und Scopes. Tokens akzeptiert die API, wenn ihre Zielgruppe einer der eigenen Clients ist (`cell-api`, `cell-console`); Tokens von Apps und vom MCP-Gateway nicht. Künftige eigene Clients (Mobil, Desktop) bekommen je einen Client in dieser Liste, keine eigene Logik. Die Konsole ist auf `cell-admins` beschränkt (Bindung in authentik), Tokens liegen in `sessionStorage`; ist eines abgelaufen, meldet sich die Konsole neu an, was die Identität ohne Rückfrage beantwortet, solange ihre Sitzung gilt. Abmelden verwirft das Token und beendet die Sitzung der Konsole beim Provider (OIDC End-Session); die Sitzung der Identität selbst (Single Sign-on) bleibt wie bei den Apps der Zelle. |
+| E-41 | Aussehen der Konsole: Design-Tokens im DTCG-Format in `console/tokens/`, drei Schichten: Markenwerte (`brand.json`, aus Sketches über die Figma-Datei Platform Console 02), ihre Bedeutung je Ton (`night.json`, `paper.json`) und was Komponenten malen (`components.json`). `scripts/tokens.mjs` macht daraus CSS-Variablen, Verweise bleiben `var()`, also lässt sich jede Schicht später je Kunde überschreiben. Komponenten (`src/lib/ui`) kennen die API nicht, Ansichten (`src/views`) setzen beides zusammen. Der Ton folgt der Systemeinstellung, ein Schalter in der Konsole überschreibt ihn im Browser. |
 
 ## Annahmen
 
@@ -125,6 +128,13 @@ Gepinnt in `deploy/versions.env` (einzige Quelle), geprüft am 19.11.2026 über 
 | Memos | neosmemo/memos 26.11.1 | Katalog-App mit eigenem MCP-Endpunkt (`/mcp`, seit Memos 0.27); im Test paketiert der Agent sie auch aus einer Compose-Datei |
 | agentgateway | v1.7.0 (`cr.agentgateway.dev/agentgateway`) | MCP-Gateway (E-36) |
 | cel-go | v0.29.2 | nur Tests: wertet die Zugriffsregeln des Gateways aus |
+| Node | 26.13.1 (`node:26.13.1-trixie-slim`) | nur Build der Konsole im Image (E-39) |
+| Vite | 8.3.8 | Konsole, mit @sveltejs/vite-plugin-svelte 7.3.2 |
+| Svelte | 5.59.1 | Konsole; svelte-check 4.7.8, @tsconfig/svelte 5.0.9 |
+| TypeScript | 5.9.3 | nicht 7.x: svelte-check und openapi-typescript unterstützen sie noch nicht (Peer-Bereiche) |
+| openapi-typescript / openapi-fetch | 7.13.0 / 0.17.0 | Typen und Client der Konsole aus `api/openapi.yaml` |
+| Funnel Display, Funnel Sans | @fontsource-variable 5.3.0 (OFL-1.1) | Schriften der Konsole, selbst gehostet |
+| Playwright | 1.65.1 | nur Tests: Anmeldung im echten Browser (`TestConsoleLogin`) |
 
 ## Recherche-Notizen
 

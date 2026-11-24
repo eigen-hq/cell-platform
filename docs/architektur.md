@@ -17,6 +17,7 @@ Aufbau der Plattform. Bausteine mit dem Vermerk „Annahme" sind Vorschläge und
 flowchart TB
   UI["Zentrale Oberfläche (anderes Repo)"]
   subgraph Zelle["Zelle: ein k3s-Cluster pro Kunde"]
+    KO["Konsole"]
     API["Plattform-API"]
     GW["MCP-Gateway"]
     AG["Ops-Agenten"]
@@ -35,6 +36,7 @@ flowchart TB
   end
   UI --> API
   UI --> GW
+  KO --> API
   AG --> API
   API --> OP
   OP --> Dienste
@@ -142,6 +144,8 @@ REST mit OpenAPI-Beschreibung (`api/openapi.yaml`), Anmeldung über Tokens der I
 | `/apps/{name}/pods`, `/logs`, `/events` | Diagnose (Admins und Agenten) |
 | `/tasks` | Aufgaben für Agenten mit ihren Schritten (Admins und Agenten; Antworten können Logs zitieren) |
 | `/events` | Live-Ereignisse als Stream |
+
+Die Konsole der Zelle (`https://console.<domain>`, E-39) ist ein Client dieser API wie jeder andere: eigener Login-Client der Identität (`cell-console`, PKCE, E-40), keine eigene Logik auf dem Server. `GET /v0/login` sagt eigenen Clients, wo und wie sie anmelden.
 
 Dazu der eine MCP-Endpunkt des Gateways für die Agenten in der Oberfläche: `https://mcp.<domain>/mcp`, mit Tokens der Identität für den Client `cell-mcp` (E-36).
 

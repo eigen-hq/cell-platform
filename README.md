@@ -53,6 +53,7 @@ Für Coding Agents zusätzlich: `CLAUDE.md`.
 cmd/         Einstiegspunkte: operator, api, agent, cellctl, bridge
 api/         CRD-Typen (Go) und der Vertrag der API (openapi.yaml)
 internal/    Controller, API-Server, Ops-Agent, Clients für Plattformdienste
+console/     Konsole der Zelle (Svelte), ausgeliefert von der API
 catalog/     App-Manifeste, ein Ordner pro App
 deploy/      Zellen-Bootstrap: k3s und Basisdienste
 test/e2e/    Ende-zu-Ende-Tests gegen eine lokale Zelle
@@ -61,4 +62,4 @@ docs/        Diese Dokumente
 
 ## Abgrenzung
 
-Oberfläche, Office-Suite und die zentrale UI liegen in anderen Repos. Dieses Repo liefert die Plattform und zwei Schnittstellen dorthin: die Plattform-API und das MCP-Gateway.
+Office-Suite und die zentrale UI liegen in anderen Repos. Dieses Repo liefert die Plattform, ihre Konsole (E-38) und zwei Schnittstellen nach außen: die Plattform-API und das MCP-Gateway.

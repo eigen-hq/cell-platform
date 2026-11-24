@@ -10,6 +10,7 @@ Alle Features in einer Liste, ohne Phasen (E-37). Die Reihenfolge innerhalb eine
 
 Status:
 
+- **läuft** – Logik und Oberfläche sind da (`stand.md`)
 - **API läuft** – die Logik ist da (Plattform-API); die Oberfläche fehlt noch
 - **offen** – Logik und Oberfläche entstehen gemeinsam, sobald das Feature dran ist
 
@@ -21,7 +22,7 @@ Was die Konsole zeigt, kommt aus der API. Ohne Endpunkt gibt es keine Oberfläch
 
 | Feature | Status | Hängt ab von |
 |---|---|---|
-| Konsole im Browser, Anmeldung über die Identität | offen | |
+| Konsole im Browser, Anmeldung über die Identität | läuft | |
 | Übersicht: Zustand der Zelle, offene Freigaben, letzte Ereignisse | offen | |
 | Live-Ereignisse | API läuft | |
 | Helle und dunkle Tonlage | offen | |
