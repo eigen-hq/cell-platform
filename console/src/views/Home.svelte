@@ -7,6 +7,7 @@
   import type { components } from "../lib/api/schema";
   import { ended, headline, type Change } from "../lib/change";
   import { appState, hero, isDown, isUp, lastBackup, reach } from "../lib/home";
+  import { follow } from "../lib/live";
   import { newest, STALE } from "../lib/newest";
     import { itemPath } from "../lib/route";
   import { agents, type Task } from "../lib/task";
@@ -59,10 +60,26 @@
     }
   }
 
+  // Live events reload the page's data at once (a burst counts once); the
+  // slow poll covers what the stream does not carry, such as agent tasks.
+  let live = $state<{ up: boolean; why?: string; tried?: boolean }>({ up: false });
   $effect(() => {
     load();
-    const t = setInterval(load, 10000);
-    return () => clearInterval(t);
+    const t = setInterval(load, 30000);
+    let soon: ReturnType<typeof setTimeout> | undefined;
+    const stop = follow(
+      (signal) => api.GET("/v0/events", { parseAs: "stream", signal }),
+      () => {
+        clearTimeout(soon);
+        soon = setTimeout(load, 300);
+      },
+      (up, why) => (live = { up, why, tried: true }),
+    );
+    return () => {
+      clearInterval(t);
+      clearTimeout(soon);
+      stop();
+    };
   });
 
   const title = (app: string) => titles.get(app) ?? app;
@@ -114,6 +131,7 @@
         {running} of {apps.length} {apps.length === 1 ? "app is" : "apps are"} running for {people.length} {people.length === 1 ? "person" : "people"}.
         Last backup {backupText(backup)}{backup && !backup.ok ? ", and it failed" : ""}.
       </p>
+      <p class="live" class:up={live.up} title={live.why}>{live.up ? "Live" : live.tried ? "Reconnecting to the cell" : "Connecting"}</p>
     </div>
     {#if apps.length}
       <figure class="shelf">
@@ -302,6 +320,24 @@
     max-width: 56ch;
     color: var(--color-muted);
     font-size: 1.1rem;
+  }
+  .words .live {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 14px;
+    font-size: 0.85rem;
+  }
+  .live::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-wait);
+  }
+  .live.up::before {
+    background: var(--color-ok);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-ok) 25%, transparent);
   }
   .shelf {
     margin: 0;
