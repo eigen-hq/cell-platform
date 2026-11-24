@@ -1,0 +1,62 @@
+{
+  "$description": "Brand layer: raw values of the Eigen brand (Figma file Sketches, read into Platform Console 02). A customer's own look starts by replacing values here.",
+  "brand": {
+    "night": {
+      "$type": "color",
+      "bg": {"$value": "#1e1a36"},
+      "panel": {"$value": "#2e2648"},
+      "sunk": {"$value": "#1a1626"},
+      "line": {"$value": "#4a3d6b"},
+      "ink": {"$value": "#ffffff"},
+      "muted": {"$value": "#d3cbdc"},
+      "dim": {"$value": "#b9b0c6"},
+      "base": {"$value": "#141220"},
+      "sky": {"$type": "gradient", "$value": "linear-gradient(180deg, #232048 0, #1e1a36 22%, #141220 100%)"},
+      "glow": {"$type": "gradient", "$value": "linear-gradient(135deg, #e393a6, #8e86c0 50%, #4f6e9c)"}
+    },
+    "paper": {
+      "$type": "color",
+      "bg": {"$value": "#f5f0eb"},
+      "panel": {"$value": "#e6e0ea"},
+      "sunk": {"$value": "#ffffff"},
+      "line": {"$value": "#c3bbce"},
+      "ink": {"$value": "#2b2f45"},
+      "muted": {"$value": "#6e6a7e"},
+      "dim": {"$value": "#8f8a9e"},
+      "base": {"$value": "#f3eee6"},
+      "sky": {"$type": "gradient", "$value": "linear-gradient(180deg, #f5f0eb, #f3eee6)"},
+      "glow": {"$type": "gradient", "$value": "linear-gradient(135deg, #f2d6c4, #e8c9de 50%, #c9b8e3)"}
+    },
+    "pastel": {
+      "$type": "color",
+      "sun": {"$value": "#fbd08a"},
+      "leaf": {"$value": "#8fcba0"},
+      "poppy": {"$value": "#ed795b"},
+      "blue": {"$value": "#78aaff"},
+      "lavender": {"$value": "#c9b6f2"},
+      "rose": {"$value": "#e393a6"}
+    },
+    "ink": {
+      "$type": "color",
+      "amber": {"$value": "#c2701f"},
+      "green": {"$value": "#4f7d5c"},
+      "red": {"$value": "#c23a3a"},
+      "blue": {"$value": "#4f6e9c"},
+      "violet": {"$value": "#6f5db8"}
+    },
+    "mark": {"$type": "gradient", "$value": "linear-gradient(180deg, #6f5db8, #f4a05c)"},
+    "amberpill": {"$type": "gradient", "$value": "linear-gradient(135deg, #ffe7b3, #f2a65a)"},
+    "font": {
+      "$type": "fontFamily",
+      "display": {"$value": "\"Funnel Display Variable\", \"Avenir Next\", system-ui, sans-serif"},
+      "sans": {"$value": "\"Funnel Sans Variable\", \"Helvetica Neue\", Arial, system-ui, sans-serif"}
+    },
+    "radius": {
+      "$type": "dimension",
+      "part": {"$value": "12px"},
+      "panel": {"$value": "24px"},
+      "key": {"$value": "28px"},
+      "pill": {"$value": "999px"}
+    }
+  }
+}

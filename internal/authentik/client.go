@@ -212,11 +212,14 @@ func (c *Client) flows(ctx context.Context) (authz, invalidation any, err error)
 	return authz, invalidation, err
 }
 
-// OIDC describes a confidential OpenID Connect client for an app.
+// OIDC describes an OpenID Connect client: confidential for an app, or
+// public (no secret, authorization code with PKCE) for a client that runs on
+// the user's device, such as the console.
 type OIDC struct {
 	Slug, Title, LaunchURL string
 	ClientID, ClientSecret string
 	RedirectURIs           []string
+	Public                 bool
 }
 
 // EnsureOIDC creates or updates the provider and application of an app.
@@ -242,7 +245,7 @@ func (c *Client) EnsureOIDC(ctx context.Context, o OIDC) error {
 	for _, u := range o.RedirectURIs {
 		redirects = append(redirects, map[string]string{"matching_mode": "strict", "url": u, "redirect_uri_type": "authorization"})
 	}
-	providerPK, err := c.ensure(ctx, "providers/oauth2/", "pk", url.Values{"name": {o.Slug}}, map[string]any{
+	provider := map[string]any{
 		"name":               o.Slug,
 		"authorization_flow": authz,
 		"invalidation_flow":  invalidation,
@@ -253,7 +256,13 @@ func (c *Client) EnsureOIDC(ctx context.Context, o OIDC) error {
 		"signing_key":        key,
 		"property_mappings":  mappings,
 		"grant_types":        []string{"authorization_code", "refresh_token"},
-	})
+	}
+	if o.Public {
+		provider["client_type"] = "public"
+		provider["grant_types"] = []string{"authorization_code"}
+		delete(provider, "client_secret")
+	}
+	providerPK, err := c.ensure(ctx, "providers/oauth2/", "pk", url.Values{"name": {o.Slug}}, provider)
 	if err != nil {
 		return err
 	}

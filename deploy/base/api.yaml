@@ -110,6 +110,11 @@ spec:
           imagePullPolicy: IfNotPresent
           command: [/api]
           env:
+            - name: CELL_DOMAIN
+              value: ${CELL_DOMAIN}
+            # The web console, built into the image (console.<domain>).
+            - name: CONSOLE_DIR
+              value: /console
             - name: AUTHENTIK_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -162,6 +167,31 @@ spec:
       hosts: [api.${CELL_DOMAIN}]
   rules:
     - host: api.${CELL_DOMAIN}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: cell-api
+                port: {name: http}
+---
+# The web console: the API serves it on its own host, so the console calls
+# the API on the same origin.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cell-console
+  namespace: cell-system
+  annotations:
+    cert-manager.io/cluster-issuer: cell
+spec:
+  ingressClassName: traefik
+  tls:
+    - secretName: console-tls
+      hosts: [console.${CELL_DOMAIN}]
+  rules:
+    - host: console.${CELL_DOMAIN}
       http:
         paths:
           - path: /

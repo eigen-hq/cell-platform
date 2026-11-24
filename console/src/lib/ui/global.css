@@ -1,0 +1,58 @@
+/* Base of every view: type, page paint and grain. Values come from tokens.css. */
+@import "@fontsource-variable/funnel-display";
+@import "@fontsource-variable/funnel-sans";
+@import "../tokens.css";
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html {
+  background: var(--color-base);
+}
+body {
+  display: flow-root; /* children's margins stay inside, the sky reaches the top */
+  margin: 0;
+  min-height: 100vh;
+  background: var(--paint-sky);
+  color: var(--color-ink);
+  font: 400 16px/1.5 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+/* One grain over everything, as on every surface of the brand. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  pointer-events: none;
+  background: var(--grain-layer);
+}
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+a {
+  color: inherit;
+}
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+.vh {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

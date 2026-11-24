@@ -5,5 +5,12 @@
 !catalog
 !cmd
 !internal
+!console
+console/node_modules
+console/dist
+console/test-results
+console/playwright-report
+console/src/lib/api/schema.d.ts
+console/src/lib/tokens.css
 **/*_test.go
 **/testdata

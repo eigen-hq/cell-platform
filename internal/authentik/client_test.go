@@ -303,3 +303,18 @@ func TestEnsureAccessNeverOpensOnFailure(t *testing.T) {
 		t.Errorf("opening the app: %v, bindings %v", err, groupsOf())
 	}
 }
+
+// A public client (the console) has no secret and only the code grant.
+func TestEnsureOIDCPublic(t *testing.T) {
+	api := newFakeAPI()
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+	c := &Client{BaseURL: srv.URL, Token: "t", HTTP: srv.Client()}
+	if err := c.EnsureOIDC(context.Background(), OIDC{Slug: "cell-console", ClientID: "cell-console", RedirectURIs: []string{"https://console.x/"}, Public: true}); err != nil {
+		t.Fatal(err)
+	}
+	p := api.objects["providers/oauth2/"][0]
+	if _, ok := p["client_secret"]; ok || p["client_type"] != "public" || fmt.Sprint(p["grant_types"]) != "[authorization_code]" {
+		t.Errorf("provider %v", p)
+	}
+}

@@ -1,0 +1,72 @@
+{
+  "$description": "Meaning layer, paper tone: a list of changes to the night tone. Pastels are fills here; text and lines in a status color use the darker inks.",
+  "color": {
+    "$type": "color",
+    "bg": {
+      "$value": "{brand.paper.bg}"
+    },
+    "base": {
+      "$value": "{brand.paper.base}"
+    },
+    "panel": {
+      "$value": "{brand.paper.panel}"
+    },
+    "sunk": {
+      "$value": "{brand.paper.sunk}"
+    },
+    "line": {
+      "$value": "{brand.paper.line}"
+    },
+    "ink": {
+      "$value": "{brand.paper.ink}"
+    },
+    "muted": {
+      "$value": "{brand.paper.muted}"
+    },
+    "dim": {
+      "$value": "{brand.paper.dim}"
+    },
+    "on": {
+      "$value": "{brand.paper.ink}"
+    },
+    "selected": {
+      "$value": "{brand.paper.ink}"
+    },
+    "on-selected": {
+      "$value": "{brand.paper.bg}"
+    },
+    "ok": {
+      "$value": "{brand.ink.green}"
+    },
+    "wait": {
+      "$value": "{brand.ink.amber}"
+    },
+    "bad": {
+      "$value": "{brand.ink.red}"
+    },
+    "info": {
+      "$value": "{brand.ink.blue}"
+    },
+    "focus": {
+      "$value": "{brand.paper.ink}"
+    }
+  },
+  "paint": {
+    "$type": "gradient",
+    "sky": {
+      "$value": "{brand.paper.sky}"
+    },
+    "glow": {
+      "$value": "{brand.paper.glow}"
+    },
+    "attention": {
+      "$value": "{brand.amberpill}"
+    }
+  },
+  "grain": {
+    "$description": "Monotone grain over every surface (Sketches: size 0.5, density 0.55); a CSS background, paths relative to src/lib.",
+    "layer": {
+      "$value": "url(\"./ui/grain-paper.svg\") 0 0 / 240px"
+    }
+  }
+}

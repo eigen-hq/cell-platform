@@ -75,6 +75,10 @@ type Server struct {
 	// Catalog holds <app>/manifest.yaml files.
 	Catalog fs.FS
 	OpenAPI []byte
+	// Login describes the identity login of first-party clients
+	// (GET /v0/login); Console, if set, is served on its own host.
+	Login   *Login
+	Console *Console
 	Now     func() time.Time
 	Log     *slog.Logger
 }
@@ -91,6 +95,7 @@ func (s *Server) routes() []route {
 	return []route{
 		{"GET", "/healthz", "", s.healthz},
 		{"GET", "/openapi.yaml", "", s.openapi},
+		{"GET", "/v0/login", "", s.getLogin},
 		{"GET", "/v0/whoami", RoleMember, s.whoami},
 		{"GET", "/v0/catalog", RoleMember, s.listCatalog},
 		{"GET", "/v0/catalog/{name}", RoleMember, s.getCatalogEntry},
@@ -133,6 +138,10 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc(rt.method+" "+rt.path, s.wrap(rt))
 	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if s.onConsole(r) {
+			s.serveConsole(w, r)
+			return
+		}
 		writeError(w, errorf(http.StatusNotFound, "no such endpoint: %s %s", r.Method, r.URL.Path))
 	})
 	return mux

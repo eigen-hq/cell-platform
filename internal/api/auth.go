@@ -16,11 +16,13 @@ import (
 
 // Tokens checks bearer tokens with the identity. authentik's userinfo
 // endpoint accepts only tokens it issued and still holds, and answers with
-// the user's current groups; the token's audience must be the API's own
-// client, so a token an app got for its users does not work here.
+// the user's current groups; the token's audience must be one of the
+// platform's own clients (the API's and those of its first-party clients
+// such as the console), so a token an app got for its users does not work
+// here.
 type Tokens struct {
 	UserinfoURL string
-	ClientID    string
+	ClientIDs   []string
 	HTTP        *http.Client
 	// TTL of a checked token in the cache; group changes take this long.
 	TTL time.Duration
@@ -100,7 +102,7 @@ func (t *Tokens) Check(ctx context.Context, token string) (*Caller, error) {
 	return &caller, nil
 }
 
-// audience checks that the token is a JWT for the API's client and returns
+// audience checks that the token is a JWT for one of the clients and returns
 // when it expires.
 func (t *Tokens) audience(token string) (time.Time, error) {
 	parts := strings.Split(token, ".")
@@ -129,8 +131,8 @@ func (t *Tokens) audience(token string) (time.Time, error) {
 			}
 		}
 	}
-	if !slices.Contains(aud, t.ClientID) {
-		return time.Time{}, fmt.Errorf("token is for %v, not for %s", aud, t.ClientID)
+	if !slices.ContainsFunc(aud, func(a string) bool { return slices.Contains(t.ClientIDs, a) }) {
+		return time.Time{}, fmt.Errorf("token is for %v, not for %v", aud, t.ClientIDs)
 	}
 	return time.Unix(int64(claims.Exp), 0), nil
 }

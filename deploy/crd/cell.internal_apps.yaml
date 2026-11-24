@@ -118,9 +118,9 @@ spec:
                 - message: groups need a login (auth mode oidc or proxy)
                   rule: '!has(self.groups) || size(self.groups) == 0 || self.auth.mode
                     != ''none'''
-                - message: subdomains auth, api and mcp belong to the cell (identity,
-                    platform API and MCP gateway)
-                  rule: '!(self.subdomain in [''auth'', ''api'', ''mcp''])'
+                - message: subdomains auth, api, mcp and console belong to the cell
+                    (identity, platform API, MCP gateway and console)
+                  rule: '!(self.subdomain in [''auth'', ''api'', ''mcp'', ''console''])'
               backup:
                 description: |-
                   BackupPolicy says how often the platform backs the app up outside the

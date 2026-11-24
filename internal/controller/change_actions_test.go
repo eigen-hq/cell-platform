@@ -557,10 +557,11 @@ func TestAccessGroups(t *testing.T) {
 	if !apierrors.IsInvalid(err) || !strings.Contains(err.Error(), "belong to the platform") {
 		t.Errorf("app named like the platform's own clients: %v", err)
 	}
-	hijack := plainSpec("auth")
-	err = k8s.Create(ctx, &cellv1.App{ObjectMeta: metav1.ObjectMeta{Name: "fake-login"}, Spec: hijack})
-	if !apierrors.IsInvalid(err) || !strings.Contains(err.Error(), "belong to the cell") {
-		t.Errorf("app on the identity's subdomain: %v", err)
+	for _, sub := range []string{"auth", "console"} {
+		err = k8s.Create(ctx, &cellv1.App{ObjectMeta: metav1.ObjectMeta{Name: "fake-" + sub}, Spec: plainSpec(sub)})
+		if !apierrors.IsInvalid(err) || !strings.Contains(err.Error(), "belong to the cell") {
+			t.Errorf("app on the cell's subdomain %s: %v", sub, err)
+		}
 	}
 
 	noLogin := plainSpec("open")

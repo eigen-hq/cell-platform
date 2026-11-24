@@ -655,7 +655,8 @@ func jwt(claims map[string]any) string {
 }
 
 // A token counts only if the identity accepts it and it was issued for
-// the API's client; the answer is cached briefly.
+// one of the platform's clients (API, console); the answer is cached
+// briefly.
 func TestTokens(t *testing.T) {
 	calls := 0
 	accept := map[string]bool{}
@@ -669,12 +670,14 @@ func TestTokens(t *testing.T) {
 	}))
 	defer userinfo.Close()
 	now := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
-	tokens := &Tokens{UserinfoURL: userinfo.URL, ClientID: "cell-api", HTTP: userinfo.Client(), TTL: 30 * time.Second, Now: func() time.Time { return now }}
+	tokens := &Tokens{UserinfoURL: userinfo.URL, ClientIDs: []string{"cell-api", "cell-console"}, HTTP: userinfo.Client(), TTL: 30 * time.Second, Now: func() time.Time { return now }}
 	exp := float64(now.Add(time.Hour).Unix())
 	good := jwt(map[string]any{"aud": "cell-api", "exp": exp})
 	otherApp := jwt(map[string]any{"aud": "forgejo", "exp": exp})
+	gateway := jwt(map[string]any{"aud": "cell-mcp", "exp": exp})
+	console := jwt(map[string]any{"aud": "cell-console", "exp": exp, "sub": "console"})
 	revoked := jwt(map[string]any{"aud": []string{"cell-api"}, "exp": exp, "jti": "x"})
-	accept[good], accept[otherApp] = true, true
+	accept[good], accept[otherApp], accept[gateway], accept[console] = true, true, true, true
 
 	c, err := tokens.Check(context.Background(), good)
 	if err != nil || c.Username != "alice" || c.Role != RoleAgent {
@@ -687,8 +690,14 @@ func TestTokens(t *testing.T) {
 	if _, err := tokens.Check(context.Background(), good); err != nil || calls != 2 {
 		t.Errorf("after the TTL: %v, %d userinfo calls", err, calls)
 	}
-	if _, err := tokens.Check(context.Background(), otherApp); err == nil || !strings.Contains(err.Error(), "not for cell-api") {
+	if _, err := tokens.Check(context.Background(), otherApp); err == nil || !strings.Contains(err.Error(), "not for [cell-api cell-console]") {
 		t.Errorf("token of another app: %v", err)
+	}
+	if _, err := tokens.Check(context.Background(), gateway); err == nil {
+		t.Error("token of the MCP gateway accepted")
+	}
+	if c, err := tokens.Check(context.Background(), console); err != nil || c.Username != "alice" {
+		t.Errorf("console token: %+v %v", c, err)
 	}
 	if _, err := tokens.Check(context.Background(), revoked); err == nil {
 		t.Error("token the identity rejects was accepted")
@@ -696,7 +705,7 @@ func TestTokens(t *testing.T) {
 	if _, err := tokens.Check(context.Background(), "not-a-jwt"); err == nil {
 		t.Error("garbage accepted")
 	}
-	if calls != 3 {
+	if calls != 4 {
 		t.Errorf("userinfo calls %d: the audience must be checked first", calls)
 	}
 }

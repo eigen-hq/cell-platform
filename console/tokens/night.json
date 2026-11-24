@@ -1,0 +1,72 @@
+{
+  "$description": "Meaning layer, night tone (the default when the system has no light preference). Components use only these names.",
+  "color": {
+    "$type": "color",
+    "bg": {
+      "$value": "{brand.night.bg}"
+    },
+    "base": {
+      "$value": "{brand.night.base}"
+    },
+    "panel": {
+      "$value": "{brand.night.panel}"
+    },
+    "sunk": {
+      "$value": "{brand.night.sunk}"
+    },
+    "line": {
+      "$value": "{brand.night.line}"
+    },
+    "ink": {
+      "$value": "{brand.night.ink}"
+    },
+    "muted": {
+      "$value": "{brand.night.muted}"
+    },
+    "dim": {
+      "$value": "{brand.night.dim}"
+    },
+    "on": {
+      "$value": "{brand.paper.ink}"
+    },
+    "selected": {
+      "$value": "{brand.paper.bg}"
+    },
+    "on-selected": {
+      "$value": "{brand.paper.ink}"
+    },
+    "ok": {
+      "$value": "{brand.pastel.leaf}"
+    },
+    "wait": {
+      "$value": "{brand.pastel.sun}"
+    },
+    "bad": {
+      "$value": "{brand.pastel.poppy}"
+    },
+    "info": {
+      "$value": "{brand.pastel.blue}"
+    },
+    "focus": {
+      "$value": "{brand.night.ink}"
+    }
+  },
+  "paint": {
+    "$type": "gradient",
+    "sky": {
+      "$value": "{brand.night.sky}"
+    },
+    "glow": {
+      "$value": "{brand.night.glow}"
+    },
+    "attention": {
+      "$value": "{brand.amberpill}"
+    }
+  },
+  "grain": {
+    "$description": "Monotone grain over every surface (Sketches: size 0.5, density 0.55); a CSS background, paths relative to src/lib.",
+    "layer": {
+      "$value": "url(\"./ui/grain-dark.svg\") 0 0 / 240px, url(\"./ui/grain-light.svg\") 0 0 / 240px"
+    }
+  }
+}

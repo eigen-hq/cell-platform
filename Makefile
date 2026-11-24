@@ -13,7 +13,7 @@ K3D := $(BIN)/k3d-$(K3D_VERSION)
 KUBECTL := $(BIN)/kubectl-$(KUBECTL_VERSION)
 FLUX := $(BIN)/flux-$(FLUX_VERSION)
 
-.PHONY: help tools cell-up cell-down status test e2e demo lima vm-test generate dr-test
+.PHONY: help tools cell-up cell-down status test e2e demo lima vm-test generate dr-test console console-browser
 
 help:
 	@grep -hE '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
@@ -50,13 +50,19 @@ cell-down: tools ## Delete the local cell (the backup S3 next to it stays)
 status: ## Show the state of the cell base services
 	go run ./cmd/cellctl status
 
-test: ## Unit and controller tests (envtest)
+console: ## Install the console's pinned packages and type-check it
+	cd console && npm ci --no-audit --no-fund && npm run check
+
+console-browser: console
+	cd console && npx playwright install chromium
+
+test: console ## Unit and controller tests (envtest), console type check
 	deploy/lib_test.sh
 	go vet ./...
 # ponytail: the envtest suite runs about 10m serially; run tests in parallel if it grows
 	KUBEBUILDER_ASSETS="$$(go tool setup-envtest use $(ENVTEST_K8S_VERSION) --bin-dir $(BIN)/envtest -p path)" go test -timeout 20m ./...
 
-e2e: ## End-to-end tests against the local cell
+e2e: console-browser ## End-to-end tests against the local cell (with a browser for the console)
 	go test -tags e2e -count=1 -timeout 60m ./test/e2e/...
 
 demo: cell-up ## Target demo on the local cell, step by step (docs/stand.md)

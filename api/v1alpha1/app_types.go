@@ -129,7 +129,7 @@ type Volume struct {
 }
 
 // +kubebuilder:validation:XValidation:rule="!has(self.groups) || size(self.groups) == 0 || self.auth.mode != 'none'",message="groups need a login (auth mode oidc or proxy)"
-// +kubebuilder:validation:XValidation:rule="!(self.subdomain in ['auth', 'api', 'mcp'])",message="subdomains auth, api and mcp belong to the cell (identity, platform API and MCP gateway)"
+// +kubebuilder:validation:XValidation:rule="!(self.subdomain in ['auth', 'api', 'mcp', 'console'])",message="subdomains auth, api, mcp and console belong to the cell (identity, platform API, MCP gateway and console)"
 type Access struct {
 	// Subdomain of the cell domain the app is reachable at.
 	// +kubebuilder:validation:Pattern=`^[a-z]([a-z0-9-]*[a-z0-9])?$`

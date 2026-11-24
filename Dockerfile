@@ -1,8 +1,15 @@
-# Two images from one build: the operator with the platform API and the
-# ops agent (default target) and the loopback bridge of local cells (target
-# bridge). Separate
-# images keep operator updates from restarting app pods that carry the
-# bridge.
+# Two images from one build: the operator with the platform API, the web
+# console and the ops agent (default target) and the loopback bridge of local
+# cells (target bridge). Separate images keep operator updates from
+# restarting app pods that carry the bridge.
+FROM node:26.13.1-trixie-slim AS console
+WORKDIR /src/console
+COPY console/package.json console/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY api/openapi.yaml /src/api/openapi.yaml
+COPY console ./
+RUN npm run build
+
 FROM golang:1.27.4-trixie AS build
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -21,4 +28,5 @@ FROM gcr.io/distroless/static-debian13:nonroot AS operator
 COPY --from=build /out/operator /operator
 COPY --from=build /out/api /api
 COPY --from=build /out/agent /agent
+COPY --from=console /src/console/dist /console
 ENTRYPOINT ["/operator"]

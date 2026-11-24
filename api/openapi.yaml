@@ -13,7 +13,8 @@ info:
     `https://auth.<cell domain>/application/o/token/` with
     `grant_type=client_credentials`, `client_id=cell-api`, `username`, an
     app password (`POST /v0/users/{name}/tokens`) as `password` and
-    `scope=openid profile`.
+    `scope=openid profile`. The console logs in with its own client
+    (`GET /v0/login`); its tokens are valid here too.
 
     Roles come from identity groups: members of `cell-admins` may do
     everything, members of `cell-agents` read everything and propose
@@ -45,6 +46,18 @@ paths:
       security: []
       responses:
         "200": {description: This document., content: {application/yaml: {schema: {type: string}}}}
+  /v0/login:
+    get:
+      operationId: login
+      security: []
+      description: |
+        How a first-party client (the console) logs its users in: an OpenID
+        Connect authorization code login with PKCE at the cell's identity.
+        The client exchanges the code at `tokenEndpoint` itself and calls
+        the API with the access token.
+      responses:
+        default: {$ref: "#/components/responses/Error"}
+        "200": {description: The login., content: {application/json: {schema: {$ref: "#/components/schemas/Login"}}}}
   /v0/whoami:
     get:
       operationId: whoami
@@ -469,6 +482,18 @@ components:
       required: [error]
       properties:
         error: {type: string}
+    Login:
+      type: object
+      additionalProperties: false
+      required: [issuer, authorizationEndpoint, tokenEndpoint, endSessionEndpoint, clientId, redirectUri, scope]
+      properties:
+        issuer: {type: string}
+        authorizationEndpoint: {type: string}
+        tokenEndpoint: {type: string}
+        endSessionEndpoint: {type: string}
+        clientId: {type: string}
+        redirectUri: {type: string}
+        scope: {type: string}
     Caller:
       type: object
       additionalProperties: false

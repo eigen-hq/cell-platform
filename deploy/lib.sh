@@ -65,7 +65,9 @@ ensure_secret() {
 build_image() {
   local name=$1 target=$2 root=$3 cell=$4 hash ref
   shift 4
-  hash=$(cd "$root" && find "$@" -type f ! -name '*_test.go' ! -path '*/testdata/*' | sort | xargs shasum | shasum | cut -c1-12) || return 1
+  hash=$(cd "$root" && find "$@" -type f ! -name '*_test.go' ! -path '*/testdata/*' \
+    ! -path '*/node_modules/*' ! -path 'console/dist/*' ! -path 'console/test-results/*' ! -path 'console/playwright-report/*' \
+    ! -path 'console/src/lib/api/schema.d.ts' ! -path 'console/src/lib/tokens.css' | sort | xargs shasum | shasum | cut -c1-12) || return 1
   [ -n "$hash" ] || return 1
   ref=$name:$hash
   if ! docker image inspect "$ref" >/dev/null 2>&1; then

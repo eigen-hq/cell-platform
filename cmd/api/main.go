@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -23,10 +24,15 @@ import (
 	"github.com/marcelheidebrecht/cell-platform/catalog"
 	cellapi "github.com/marcelheidebrecht/cell-platform/internal/api"
 	"github.com/marcelheidebrecht/cell-platform/internal/authentik"
+	"github.com/marcelheidebrecht/cell-platform/internal/cell"
 )
 
-// apiClient is the identity's OAuth2 client for API logins (and its slug).
-const apiClient = "cell-api"
+// The identity's OAuth2 clients (and their slugs): cell-api for logins with
+// app passwords (CLI, agents), cell-console for the web console.
+const (
+	apiClient     = "cell-api"
+	consoleClient = "cell-console"
+)
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
@@ -63,6 +69,13 @@ func run(log *slog.Logger) error {
 	if token == "" {
 		return fmt.Errorf("AUTHENTIK_TOKEN is not set")
 	}
+	domain := os.Getenv("CELL_DOMAIN")
+	if domain == "" {
+		return fmt.Errorf("CELL_DOMAIN is not set")
+	}
+	cellCfg := cell.Config{Domain: domain}
+	authOrigin := "https://" + cellCfg.Host("auth")
+	consoleURL := "https://" + cellCfg.Host("console") + "/"
 	authURL := env("AUTHENTIK_URL", "http://authentik-server.cell-system.svc.cluster.local")
 	hc := &http.Client{Timeout: 20 * time.Second}
 	identity := &authentik.Client{BaseURL: authURL, Token: token, HTTP: hc}
@@ -72,20 +85,45 @@ func run(log *slog.Logger) error {
 		if err := identity.EnsureAPIClient(ctx, apiClient, "Platform API"); err != nil {
 			return err
 		}
+		if err := identity.EnsureOIDC(ctx, authentik.OIDC{Slug: consoleClient, Title: "Console", LaunchURL: consoleURL,
+			ClientID: consoleClient, RedirectURIs: []string{consoleURL}, Public: true}); err != nil {
+			return err
+		}
 		if err := identity.EnsureGroup(ctx, cellapi.GroupAdmins, "akadmin"); err != nil {
 			return err
 		}
-		return identity.EnsureGroup(ctx, cellapi.GroupAgents)
+		if err := identity.EnsureGroup(ctx, cellapi.GroupAgents); err != nil {
+			return err
+		}
+		// The console is for the cell's admins only.
+		return identity.EnsureAccess(ctx, consoleClient, []string{cellapi.GroupAdmins})
 	}); err != nil {
 		return err
 	}
-	tokens := &cellapi.Tokens{UserinfoURL: authURL + "/application/o/userinfo/", ClientID: apiClient, HTTP: hc, TTL: 30 * time.Second}
+	tokens := &cellapi.Tokens{UserinfoURL: authURL + "/application/o/userinfo/", ClientIDs: []string{apiClient, consoleClient}, HTTP: hc, TTL: 30 * time.Second}
+	login := &cellapi.Login{
+		Issuer:                authOrigin + "/application/o/" + consoleClient + "/",
+		AuthorizationEndpoint: authOrigin + "/application/o/authorize/",
+		TokenEndpoint:         authOrigin + "/application/o/token/",
+		EndSessionEndpoint:    authOrigin + "/application/o/" + consoleClient + "/end-session/",
+		ClientID:              consoleClient,
+		RedirectURI:           consoleURL,
+		Scope:                 "openid profile email",
+	}
+	var console *cellapi.Console
+	if dir := os.Getenv("CONSOLE_DIR"); dir != "" {
+		files := os.DirFS(dir)
+		if _, err := fs.Stat(files, "index.html"); err != nil {
+			return fmt.Errorf("console: %w", err)
+		}
+		console = &cellapi.Console{Host: cellCfg.Host("console"), Files: files, AuthOrigin: authOrigin}
+	}
 
 	srv := &http.Server{
 		Addr: ":8080",
 		Handler: (&cellapi.Server{
 			Kube: kube, Pods: clientset.CoreV1(), Identity: identity, Authenticate: tokens.Check,
-			Catalog: catalog.FS, OpenAPI: api.OpenAPI, Log: log,
+			Catalog: catalog.FS, OpenAPI: api.OpenAPI, Login: login, Console: console, Log: log,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}

@@ -1,0 +1,26 @@
+{
+  "name": "cell-console",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "gen": "openapi-typescript ../api/openapi.yaml -o src/lib/api/schema.d.ts && node scripts/tokens.mjs",
+    "check": "npm run gen && svelte-check --fail-on-warnings",
+    "build": "npm run check && vite build",
+    "e2e": "playwright test"
+  },
+  "dependencies": {
+    "@fontsource-variable/funnel-display": "5.3.0",
+    "@fontsource-variable/funnel-sans": "5.3.0",
+    "openapi-fetch": "0.17.0",
+    "svelte": "5.59.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.1",
+    "@sveltejs/vite-plugin-svelte": "7.3.2",
+    "@tsconfig/svelte": "5.0.9",
+    "openapi-typescript": "7.13.0",
+    "svelte-check": "4.7.8",
+    "typescript": "5.9.3",
+    "vite": "8.3.8"
+  }
+}
