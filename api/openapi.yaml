@@ -273,14 +273,15 @@ paths:
         "409": {$ref: "#/components/responses/Error"}
   /v0/groups/{name}/members:
     parameters: [{$ref: "#/components/parameters/name"}]
-    put:
-      operationId: setGroupMembers
+    patch:
+      operationId: changeGroupMembers
+      description: Adds and removes single members; everyone else stays as they are, so two admins editing one group cannot undo each other.
       requestBody:
         required: true
-        content: {application/json: {schema: {$ref: "#/components/schemas/Members"}}}
+        content: {application/json: {schema: {$ref: "#/components/schemas/MemberChange"}}}
       responses:
         default: {$ref: "#/components/responses/Error"}
-        "200": {description: The group., content: {application/json: {schema: {$ref: "#/components/schemas/Group"}}}}
+        "200": {description: The group afterwards., content: {application/json: {schema: {$ref: "#/components/schemas/Group"}}}}
         "400": {$ref: "#/components/responses/Error"}
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
@@ -709,12 +710,12 @@ components:
       required: [name]
       properties:
         name: {type: string, pattern: "^[a-z0-9][a-z0-9._-]{1,62}$"}
-    Members:
+    MemberChange:
       type: object
       additionalProperties: false
-      required: [users]
       properties:
-        users: {type: array, items: {type: string}}
+        add: {type: array, items: {type: string}}
+        remove: {type: array, items: {type: string}}
     Event:
       type: object
       additionalProperties: false

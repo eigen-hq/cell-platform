@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"slices"
 	"sort"
 
 	"github.com/marcelheidebrecht/cell-platform/internal/authentik"
@@ -136,18 +137,25 @@ func (s *Server) createGroup(w http.ResponseWriter, r *http.Request, _ *Caller) 
 	return nil
 }
 
-func (s *Server) setGroupMembers(w http.ResponseWriter, r *http.Request, _ *Caller) error {
+// changeGroupMembers adds and removes single members. It never sends the
+// whole list, so two admins editing one group cannot undo each other.
+func (s *Server) changeGroupMembers(w http.ResponseWriter, r *http.Request, _ *Caller) error {
 	var req struct {
-		Users *[]string `json:"users"`
+		Add    []string `json:"add"`
+		Remove []string `json:"remove"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		return err
 	}
-	// Only an explicit [] empties a group, never a forgotten field.
-	if req.Users == nil {
-		return errorf(http.StatusBadRequest, "users is required ([] removes every member)")
+	if len(req.Add)+len(req.Remove) == 0 {
+		return errorf(http.StatusBadRequest, "add or remove someone")
 	}
-	g, err := s.Identity.SetGroupMembers(r.Context(), r.PathValue("name"), *req.Users)
+	for _, u := range req.Add {
+		if slices.Contains(req.Remove, u) {
+			return errorf(http.StatusBadRequest, "%s is both added and removed", u)
+		}
+	}
+	g, err := s.Identity.ChangeGroupMembers(r.Context(), r.PathValue("name"), req.Add, req.Remove)
 	if err != nil {
 		return identityError(err)
 	}

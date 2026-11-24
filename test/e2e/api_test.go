@@ -79,17 +79,7 @@ func (a *apiClient) account(t *testing.T, username, password string, groups ...s
 		if code, body := a.call(t, http.MethodPost, "/v0/groups", map[string]any{"name": g}); code != http.StatusCreated && code != http.StatusConflict {
 			t.Fatalf("create group %s: %d %v", g, code, body)
 		}
-		members := []string{username}
-		for _, grp := range a.do(t, http.MethodGet, "/v0/groups", nil, http.StatusOK).([]any) {
-			if field(grp, "name") == g {
-				for _, m := range field(grp, "members").([]any) {
-					if m != username {
-						members = append(members, m.(string))
-					}
-				}
-			}
-		}
-		a.do(t, http.MethodPut, "/v0/groups/"+g+"/members", map[string]any{"users": members}, http.StatusOK)
+		a.do(t, http.MethodPatch, "/v0/groups/"+g+"/members", map[string]any{"add": []string{username}}, http.StatusOK)
 	}
 	token := a.do(t, http.MethodPost, "/v0/users/"+username+"/tokens", nil, http.StatusCreated)
 	return &apiClient{tc: a.tc, username: username, password: field(token, "token").(string)}

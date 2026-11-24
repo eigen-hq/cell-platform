@@ -229,6 +229,36 @@ func (c *Client) SetGroupMembers(ctx context.Context, group string, usernames []
 	return Group{Name: group, Members: usernames}, nil
 }
 
+// ChangeGroupMembers adds and removes single users, each in one call of its
+// own, and returns the group as it is afterwards.
+func (c *Client) ChangeGroupMembers(ctx context.Context, group string, add, remove []string) (Group, error) {
+	g, err := c.groupObj(ctx, group)
+	if err != nil {
+		return Group{}, err
+	}
+	for op, users := range map[string][]string{"add_user": add, "remove_user": remove} {
+		for _, u := range users {
+			pk, err := c.userPK(ctx, u)
+			if err != nil {
+				return Group{}, err
+			}
+			if err := c.do(ctx, http.MethodPost, fmt.Sprintf("core/groups/%v/%s/", g["pk"], op), map[string]any{"pk": pk}, nil); err != nil {
+				return Group{}, err
+			}
+		}
+	}
+	groups, err := c.ListGroups(ctx)
+	if err != nil {
+		return Group{}, err
+	}
+	for _, g := range groups {
+		if g.Name == group {
+			return g, nil
+		}
+	}
+	return Group{}, fmt.Errorf("group %q: %w", group, ErrNotFound)
+}
+
 // EnsureGroup creates a group if missing and adds the given users to it.
 func (c *Client) EnsureGroup(ctx context.Context, name string, members ...string) error {
 	if _, err := c.groupObj(ctx, name); errors.Is(err, ErrNotFound) {

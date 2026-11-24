@@ -62,7 +62,7 @@ type Identity interface {
 	CreateAppPassword(ctx context.Context, username string) (string, error)
 	ListGroups(ctx context.Context) ([]authentik.Group, error)
 	CreateGroup(ctx context.Context, name string) (authentik.Group, error)
-	SetGroupMembers(ctx context.Context, group string, usernames []string) (authentik.Group, error)
+	ChangeGroupMembers(ctx context.Context, group string, add, remove []string) (authentik.Group, error)
 }
 
 type Server struct {
@@ -116,7 +116,7 @@ func (s *Server) routes() []route {
 		{"POST", "/v0/users/{name}/tokens", RoleAdmin, s.createUserToken},
 		{"GET", "/v0/groups", RoleAgent, s.listGroups},
 		{"POST", "/v0/groups", RoleAdmin, s.createGroup},
-		{"PUT", "/v0/groups/{name}/members", RoleAdmin, s.setGroupMembers},
+		{"PATCH", "/v0/groups/{name}/members", RoleAdmin, s.changeGroupMembers},
 		{"GET", "/v0/changes", RoleMember, s.listChanges},
 		{"GET", "/v0/changes/{name}", RoleMember, s.getChange},
 		{"POST", "/v0/changes/{name}/approve", RoleAdmin, s.approveChange},

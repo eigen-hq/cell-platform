@@ -105,7 +105,7 @@ Gewünscht und ausprobiert wird in der Office-Oberfläche; die Plattform baut, b
 
 | Feature | Status | Hängt ab von |
 |---|---|---|
-| Konten und Gruppen, Mitglieder, App-Passwort | API läuft | |
+| Konten und Gruppen, Mitglieder, App-Passwort | läuft | |
 | Zugriff je App über Gruppen | läuft | |
 | Abteilungen und Teams als Struktur der Identität | offen | |
 | Personen-Änderungen mit Freigabe, Person entfernen | offen | |

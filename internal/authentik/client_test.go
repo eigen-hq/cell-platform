@@ -3,6 +3,7 @@ package authentik
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -316,5 +317,55 @@ func TestEnsureOIDCPublic(t *testing.T) {
 	p := api.objects["providers/oauth2/"][0]
 	if _, ok := p["client_secret"]; ok || p["client_type"] != "public" || fmt.Sprint(p["grant_types"]) != "[authorization_code]" {
 		t.Errorf("provider %v", p)
+	}
+}
+
+// Membership changes go user by user, so nobody else in the group is
+// touched by a save.
+func TestChangeGroupMembers(t *testing.T) {
+	api := newFakeAPI()
+	api.objects["core/users/"] = []map[string]any{{"pk": 1, "username": "alice"}, {"pk": 2, "username": "bob"}, {"pk": 3, "username": "carol"}}
+	group := map[string]any{"pk": "g-1", "name": "finance", "users_obj": []any{map[string]any{"username": "alice"}, map[string]any{"username": "bob"}}}
+	api.objects["core/groups/"] = []map[string]any{group}
+	var ops []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if op, ok := strings.CutPrefix(r.URL.Path, "/api/v3/core/groups/g-1/"); ok && r.Method == http.MethodPost {
+			var body struct{ PK int }
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			ops = append(ops, fmt.Sprint(op, body.PK))
+			name := map[int]string{1: "alice", 2: "bob", 3: "carol"}[body.PK]
+			users := group["users_obj"].([]any)
+			kept := []any{}
+			for _, u := range users {
+				if u.(map[string]any)["username"] != name {
+					kept = append(kept, u)
+				}
+			}
+			if op == "add_user/" {
+				kept = append(kept, map[string]any{"username": name})
+			}
+			group["users_obj"] = kept
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		q := r.URL.Query()
+		q.Del("include_users")
+		r.URL.RawQuery = q.Encode()
+		api.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+	c := &Client{BaseURL: srv.URL, Token: "t", HTTP: srv.Client()}
+	g, err := c.ChangeGroupMembers(context.Background(), "finance", []string{"carol"}, []string{"alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(g.Members) != "[bob carol]" {
+		t.Errorf("members %v", g.Members)
+	}
+	if len(ops) != 2 {
+		t.Errorf("calls %v, want one per changed user", ops)
+	}
+	if _, err := c.ChangeGroupMembers(context.Background(), "nope", []string{"carol"}, nil); !errors.Is(err, ErrNotFound) {
+		t.Errorf("missing group: %v", err)
 	}
 }

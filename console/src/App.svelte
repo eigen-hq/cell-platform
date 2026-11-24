@@ -9,12 +9,14 @@
   import Avatar from "./lib/ui/Avatar.svelte";
   import Button from "./lib/ui/Button.svelte";
   import Notice from "./lib/ui/Notice.svelte";
+  import { route } from "./lib/route";
   import Home from "./views/Home.svelte";
   import Machines from "./views/Machines.svelte";
   import Apps from "./views/Apps.svelte";
   import Approvals from "./views/Approvals.svelte";
   import History from "./views/History.svelte";
   import Agents from "./views/Agents.svelte";
+  import Organization from "./views/Organization.svelte";
 
   const cell = location.hostname.replace(/^console\./, "");
   const views = [
@@ -22,6 +24,7 @@
     { href: "/approvals", label: "Approvals" },
     { href: "/apps", label: "Apps" },
     { href: "/machines", label: "Machines" },
+    { href: "/organization", label: "Organization" },
     { href: "/agents", label: "Agents" },
     { href: "/history", label: "History" },
   ];
@@ -30,8 +33,8 @@
   let path = $state(location.pathname);
   // The first part of the path picks the view; the rest is the view's (for
   // example /apps/<name> opens that app).
-  let section = $derived("/" + (path.split("/")[1] ?? ""));
-  let rest = $derived(path.split("/").slice(2).join("/") || undefined);
+  let section = $derived(route(path).section);
+  let rest = $derived(route(path).rest);
 
   // Leaving for the identity can fail (no login description, no network):
   // then the console says so instead of staying as it was.
@@ -103,6 +106,8 @@
       <Apps open={rest} onnavigate={navigate} />
     {:else if section === "/history"}
       <History open={rest} onnavigate={navigate} />
+    {:else if section === "/organization"}
+      <Organization open={rest} onnavigate={navigate} />
     {:else if section === "/agents"}
       <Agents open={rest} onnavigate={navigate} />
     {:else if section === "/machines"}

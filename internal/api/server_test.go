@@ -96,14 +96,21 @@ func (f *fakeIdentity) CreateGroup(_ context.Context, name string) (authentik.Gr
 	return authentik.Group{Name: name}, nil
 }
 
-func (f *fakeIdentity) SetGroupMembers(_ context.Context, group string, users []string) (authentik.Group, error) {
+func (f *fakeIdentity) ChangeGroupMembers(_ context.Context, group string, add, remove []string) (authentik.Group, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if _, ok := f.groups[group]; !ok {
+	members, ok := f.groups[group]
+	if !ok {
 		return authentik.Group{}, fmt.Errorf("group %q: %w", group, authentik.ErrNotFound)
 	}
-	f.groups[group] = users
-	return authentik.Group{Name: group, Members: users}, nil
+	for _, u := range add {
+		if !slices.Contains(members, u) {
+			members = append(members, u)
+		}
+	}
+	members = slices.DeleteFunc(members, func(u string) bool { return slices.Contains(remove, u) })
+	f.groups[group] = members
+	return authentik.Group{Name: group, Members: slices.Clone(members)}, nil
 }
 
 const manifest = `apiVersion: cell.internal/v1alpha1
@@ -579,23 +586,43 @@ func TestIdentity(t *testing.T) {
 	if code, _ = h.do("POST", "/v0/groups", "admin", map[string]any{"name": "finance"}); code != 201 {
 		t.Errorf("create group: %d", code)
 	}
-	code, body = h.do("PUT", "/v0/groups/finance/members", "admin", map[string]any{"users": []string{"alice"}})
-	if code != 200 || len(field(body, "members").([]any)) != 1 {
-		t.Errorf("members: %d %v", code, body)
+	patch := func(add, remove []string) (int, any) {
+		req := map[string]any{}
+		if add != nil {
+			req["add"] = add
+		}
+		if remove != nil {
+			req["remove"] = remove
+		}
+		return h.do("PATCH", "/v0/groups/finance/members", "admin", req)
 	}
-	if code, _ = h.do("PUT", "/v0/groups/nope/members", "admin", map[string]any{"users": []string{}}); code != 404 {
-		t.Errorf("members of a missing group: %d", code)
+	code, body = patch([]string{"alice", "bob"}, nil)
+	if code != 200 || len(field(body, "members").([]any)) != 2 {
+		t.Errorf("add members: %d %v", code, body)
 	}
-	// A forgotten or null list never empties a group; an explicit [] does.
-	for _, req := range []any{map[string]any{}, map[string]any{"users": nil}} {
-		if code, _ = h.do("PUT", "/v0/groups/finance/members", "admin", req); code != 400 {
+	// Two admins edit finance from the same view: one removes alice, the
+	// other adds carol. Neither undoes the other.
+	if code, _ = patch(nil, []string{"alice"}); code != 200 {
+		t.Errorf("remove alice: %d", code)
+	}
+	if code, _ = patch([]string{"carol"}, nil); code != 200 {
+		t.Errorf("add carol: %d", code)
+	}
+	if members := h.server.Identity.(*fakeIdentity).groups["finance"]; !slices.Equal(members, []string{"bob", "carol"}) {
+		t.Errorf("finance after both edits: %v", members)
+	}
+	for _, req := range []any{map[string]any{}, map[string]any{"add": []string{"bob"}, "remove": []string{"bob"}}, map[string]any{"users": []string{}}} {
+		if code, _ = h.do("PATCH", "/v0/groups/finance/members", "admin", req); code != 400 {
 			t.Errorf("members %v: %d", req, code)
 		}
 	}
-	if members := h.server.Identity.(*fakeIdentity).groups["finance"]; len(members) != 1 {
-		t.Errorf("finance lost its members: %v", members)
+	if code, _ = h.do("PATCH", "/v0/groups/nope/members", "admin", map[string]any{"add": []string{"bob"}}); code != 404 {
+		t.Errorf("members of a missing group: %d", code)
 	}
-	code, body = h.do("PUT", "/v0/groups/finance/members", "admin", map[string]any{"users": []string{}})
+	if code, _ = h.do("PATCH", "/v0/groups/finance/members", "member", map[string]any{"add": []string{"bob"}}); code != 403 {
+		t.Errorf("a member changes a group: %d", code)
+	}
+	code, body = patch(nil, []string{"bob", "carol"})
 	if code != 200 || len(field(body, "members").([]any)) != 0 {
 		t.Errorf("empty the group: %d %v", code, body)
 	}
