@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -93,5 +94,23 @@ func TestCheckStorageSnapshotErrors(t *testing.T) {
 	}
 	if r := checkStorage(context.Background(), snapErr(noAPI), cell.Config{Domain: "x", Storage: "longhorn"}); r.state != fail {
 		t.Errorf("longhorn without snapshot API: got %s %s", r.state, r.detail)
+	}
+}
+
+// The backup target secret exists from the install on; it counts as
+// configured only with a target in it.
+func TestCheckBackupTarget(t *testing.T) {
+	secret := func(conf string) client.Client {
+		return fake.NewClientBuilder().WithObjects(&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: "cell-system", Name: "backup-target"},
+			Data: map[string][]byte{"password": []byte("pw"), "rclone.conf": []byte(conf), "root": []byte("b/cell")}}).Build()
+	}
+	if r := checkBackupTarget(context.Background(), fake.NewClientBuilder().Build()); r.state != warn {
+		t.Errorf("no secret: %+v", r)
+	}
+	if r := checkBackupTarget(context.Background(), secret("")); r.state != warn {
+		t.Errorf("no target: %+v", r)
+	}
+	if r := checkBackupTarget(context.Background(), secret("[target]\ntype = s3\nendpoint = https://s3.test\n")); r.state != ok || r.detail != "https://s3.test/b/cell" {
+		t.Errorf("s3 target: %+v", r)
 	}
 }

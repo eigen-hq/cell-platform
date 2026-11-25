@@ -27,10 +27,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	cellv1 "github.com/marcelheidebrecht/cell-platform/api/v1alpha1"
@@ -112,8 +114,26 @@ func (r *AppReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		}
 		return []reconcile.Request{{NamespacedName: client.ObjectKey{Name: name}}}
 	})
+	// A new backup target reaches every app at once, not only at its next
+	// periodic reconcile.
+	allApps := handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, _ client.Object) []reconcile.Request {
+		var apps cellv1.AppList
+		if err := mgr.GetClient().List(ctx, &apps); err != nil {
+			ctrl.LoggerFrom(ctx).Error(err, "list apps for the new backup target")
+			return nil
+		}
+		out := make([]reconcile.Request, 0, len(apps.Items))
+		for _, a := range apps.Items {
+			out = append(out, reconcile.Request{NamespacedName: client.ObjectKey{Name: a.Name}})
+		}
+		return out
+	})
+	backupTarget := builder.WithPredicates(predicate.NewPredicateFuncs(func(o client.Object) bool {
+		return o.GetNamespace() == cell.SystemNamespace && o.GetName() == cell.BackupTargetSecret
+	}))
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&cellv1.App{}).
+		Watches(&corev1.Secret{}, allApps, backupTarget).
 		Watches(&cellv1.Backup{}, byApp).
 		Watches(&cellv1.Restore{}, byApp).
 		Watches(&cellv1.ChangeRequest{}, byApp).

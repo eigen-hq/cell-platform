@@ -491,6 +491,38 @@ paths:
         default: {$ref: "#/components/responses/Error"}
         "200": {description: A bash script., content: {text/x-shellscript: {schema: {type: string}}}}
         "409": {$ref: "#/components/responses/Error"}
+  /v0/backup-target:
+    get:
+      operationId: getBackupTarget
+      description: |
+        Where the backups of the cell go, and the last check of a target an
+        admin set. Never a secret.
+      responses:
+        default: {$ref: "#/components/responses/Error"}
+        "200": {description: The backup target., content: {application/json: {schema: {$ref: "#/components/schemas/BackupTarget"}}}}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+    put:
+      operationId: setBackupTarget
+      description: |
+        Sets an S3 bucket as the backup target. The cell first checks it: it
+        writes and deletes a small object under `<bucket>/<prefix>`. Only
+        if that works does the target change; otherwise it stays as it was.
+        The switch waits for running backups, restores and changes, and
+        new ones wait until the gateway runs the new target. Follow the check at `GET /v0/backup-target`
+        (`check.state`).
+        Backups made before stay in the old target. 409: a check is
+        running.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/BackupTargetRequest"}}}
+      responses:
+        default: {$ref: "#/components/responses/Error"}
+        "202": {description: The check runs., content: {application/json: {schema: {$ref: "#/components/schemas/BackupTarget"}}}}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
 components:
   securitySchemes:
     bearer: {type: http, scheme: bearer, bearerFormat: JWT}
@@ -849,3 +881,39 @@ components:
       properties:
         command: {type: string, description: Run as root on the new machine.}
         expiresAt: {type: string, format: date-time}
+    BackupTarget:
+      type: object
+      additionalProperties: false
+      required: [configured]
+      properties:
+        configured: {type: boolean, description: Backups have somewhere to go.}
+        kind: {type: string, enum: [s3, local, other], description: "s3: a bucket; local: a directory on the first machine; other: another rclone remote."}
+        where: {type: string, description: The target in words.}
+        endpoint: {type: string, description: s3 only.}
+        region: {type: string, description: s3 only.}
+        bucket: {type: string, description: s3 only.}
+        prefix: {type: string, description: "Path in the target, also without one: the default for the next."}
+        accessKey: {type: string, description: "s3 only: the access key id; its secret stays in the cell."}
+        check: {$ref: "#/components/schemas/BackupCheck"}
+    BackupCheck:
+      type: object
+      additionalProperties: false
+      required: [state, target, at, by]
+      description: The last check of a target an admin set; absent before the first.
+      properties:
+        state: {type: string, enum: [checking, passed, failed]}
+        message: {type: string, description: "Why it failed; while checking, what a passed check waits for (running backups, restores and changes, then the gateway's restart)."}
+        target: {type: string, description: The target that was checked.}
+        at: {type: string, format: date-time, description: "When it was asked for while checking, when it ended afterwards."}
+        by: {type: string}
+    BackupTargetRequest:
+      type: object
+      additionalProperties: false
+      required: [endpoint, bucket, accessKey, secretKey]
+      properties:
+        endpoint: {type: string, description: "http or https URL with a host only, such as https://fsn1.your-objectstorage.com."}
+        region: {type: string, description: "Default: us-east-1."}
+        bucket: {type: string}
+        accessKey: {type: string}
+        secretKey: {type: string, description: Stays in the cell; no answer holds it.}
+        prefix: {type: string, description: "Path in the bucket; default: the current one (the cell's domain)."}

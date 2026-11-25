@@ -20,12 +20,13 @@ make vm-test     # Abnahme auf zwei frischen Ubuntu-VMs (Lima, lokal), die zweit
 make cell-down   # lokale Zelle löschen
 ```
 
-Auf einem eigenen Server (als root, in einem Klon nur für Releases; Voraussetzungen und Schritte in `docs/installation.md`):
+Auf einem eigenen Server, für Installation und Update (Voraussetzungen und Schritte in `docs/installation.md`):
 
 ```
-CELL_DOMAIN=cell.example.com CELL_ACME_EMAIL=ops@example.com deploy/release.sh v0.1.0
-deploy/release.sh v0.2.0  # Update: Tag holen, Image auf dem Server bauen, installieren
+curl -fsSL https://raw.githubusercontent.com/marcelheidebrecht/cell-platform/main/get.sh | sudo bash
 ```
+
+Das holt das neueste Release nach `/opt/cell`, baut das Image auf dem Server und installiert; `CELL_VERSION=v0.2.0` vor `bash` wählt ein bestimmtes. Aus einem Klon: `sudo deploy/install.sh`.
 
 Weitere Rechner: Konsole, „Machines", „Add machine", den Befehl auf dem neuen Rechner ausführen.
 

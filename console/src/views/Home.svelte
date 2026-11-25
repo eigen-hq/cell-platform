@@ -31,6 +31,7 @@
   let groups = $state<Group[]>([]);
   let backups = $state<Backup[]>([]);
   let titles = $state<Map<string, string>>(new Map());
+  let target = $state<components["schemas"]["BackupTarget"] | null>(null);
   let failed = $state("");
 
   const guard = newest();
@@ -38,12 +39,13 @@
     try {
       const answer = await guard(
         (async () => {
-          const [a, c, t, u, g, k] = await Promise.all([
+          const [a, c, t, u, g, k, bt] = await Promise.all([
             api.GET("/v0/apps"), api.GET("/v0/changes"), api.GET("/v0/tasks"), api.GET("/v0/users"), api.GET("/v0/groups"), api.GET("/v0/catalog"),
+            api.GET("/v0/backup-target"),
           ]);
           const list = must(a);
           const b = await Promise.all(list.map((x) => api.GET("/v0/apps/{name}/backups", { params: { path: { name: x.name } } })));
-          return { list, c: must(c), t: must(t), u: must(u), g: must(g), k: must(k), b: b.flatMap((r) => must(r)) };
+          return { list, c: must(c), t: must(t), u: must(u), g: must(g), k: must(k), bt: must(bt), b: b.flatMap((r) => must(r)) };
         })(),
       );
       if (answer === STALE) return;
@@ -53,6 +55,7 @@
       users = answer.u;
       groups = answer.g;
       backups = answer.b;
+      target = answer.bt;
       titles = new Map([...answer.k.map((e) => [e.name, e.title] as const), ...answer.list.map((x) => [x.name, x.title || x.name] as const)]);
       failed = "";
     } catch (e) {
@@ -95,6 +98,7 @@
   let busyTasks = $derived(tasks.filter((t) => t.phase === "Pending" || t.phase === "Running"));
   let recent = $derived([...changes].sort((x, y) => y.createdAt.localeCompare(x.createdAt)).slice(0, 8));
   let teams = $derived(groups.filter((g) => g.name !== AGENTS));
+  let noTarget = $derived(target?.configured === false);
 
   const clock = (iso: string) => {
     const d = new Date(iso);
@@ -163,6 +167,17 @@
         <h2 id="needs" class="sec-title">Needs you <small>{waiting.length} waiting for a yes or a no</small></h2>
         <a href="/approvals">all approvals</a>
       </header>
+      {#if noTarget}
+        <ul class="rows">
+          <li>
+            <a href="/backups">
+              <span class="plus warn" aria-hidden="true">!</span>
+              <span><strong>Set a backup target</strong><small>backups have nowhere to go yet</small></span>
+              <Status tone="bad" label="Not set" />
+            </a>
+          </li>
+        </ul>
+      {/if}
       {#if waiting[0]}
         <!-- keyed: a newer request must not inherit a half-made decision -->
         {#key waiting[0].name}
@@ -179,7 +194,7 @@
             </li>
           {/each}
         </ul>
-      {:else}
+      {:else if !noTarget}
         <div class="calm">
           <svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="26" /><path d="M21 33l7 7 15-16" /></svg>
           <p>Nothing waits for you. Changes that agents or people ask for show up here.</p>
@@ -512,7 +527,8 @@
     border-radius: inherit;
     background: var(--color-info);
   }
-  .add .plus {
+  .add .plus,
+  .plus.warn {
     display: grid;
     place-items: center;
     width: 30px;
@@ -520,6 +536,12 @@
     border: 1.5px dashed var(--color-muted);
     border-radius: 50%;
     color: var(--color-muted);
+  }
+  .plus.warn {
+    border: 0;
+    background: color-mix(in srgb, var(--color-bad) 22%, transparent);
+    color: var(--color-bad);
+    font-weight: 700;
   }
   .add {
     grid-template-columns: auto minmax(0, 1fr) !important;

@@ -15,7 +15,7 @@
 #                      it, the cell takes no more machines, as the local one)
 #   OPERATOR_IMAGE     operator and API image, already present on the node (required)
 #   BRIDGE_IMAGE       loopback bridge image, needed for *.localhost cells
-#   Backup target (optional), one of:
+#   Backup target (optional; the console sets one too), one of:
 #   CELL_BACKUP_S3_ENDPOINT, CELL_BACKUP_S3_BUCKET, CELL_BACKUP_S3_ACCESS_KEY,
 #   CELL_BACKUP_S3_SECRET_KEY (CELL_BACKUP_S3_REGION optional)
 #                      an S3 bucket
@@ -48,7 +48,7 @@ source "$here/versions.env"
 export BRIDGE_IMAGE=${BRIDGE_IMAGE:-}
 case $CELL_DOMAIN in *.localhost | localhost) [ -n "$BRIDGE_IMAGE" ] || die "BRIDGE_IMAGE must be set for *.localhost cells" ;; esac
 export CELL_JOIN_SERVER=${CELL_JOIN_SERVER:-}
-export CELL_DOMAIN AUTHENTIK_CHART_VERSION LONGHORN_VERSION OPERATOR_IMAGE RESTIC_VERSION AGENTGATEWAY_VERSION
+export CELL_DOMAIN AUTHENTIK_CHART_VERSION LONGHORN_VERSION OPERATOR_IMAGE RESTIC_VERSION RCLONE_VERSION AGENTGATEWAY_VERSION
 export CELL_TLS=${CELL_TLS:-selfsigned}
 export CELL_ACME_EMAIL=${CELL_ACME_EMAIL:-}
 export CELL_ACME_SERVER=${CELL_ACME_SERVER:-https://acme-v02.api.letsencrypt.org/directory}
@@ -66,7 +66,7 @@ for ns in cert-manager cnpg-system cell-system; do
   echo ---
 done | kubectl apply --server-side --field-manager=cell-bootstrap -f - >/dev/null
 
-log "cert-manager $CERT_MANAGER_VERSION, CloudNativePG $CNPG_VERSION"
+step "Certificates and databases"
 cm=$(curl -fsSL "https://github.com/cert-manager/cert-manager/releases/download/$CERT_MANAGER_VERSION/cert-manager.yaml")
 if [ "$CELL_TLS" = names ]; then
   # DNS-01 checks ask public resolvers: the cluster DNS answers every cell
@@ -79,11 +79,11 @@ kubectl apply --server-side -f - <<<"$cm" >/dev/null
 kubectl apply --server-side -f "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$CNPG_VERSION/cnpg-$CNPG_VERSION.yaml" >/dev/null
 kubectl -n cert-manager wait deploy --all --for=condition=Available --timeout=5m >/dev/null
 kubectl -n cnpg-system wait deploy --all --for=condition=Available --timeout=5m >/dev/null
-log "CloudNativePG backup plugin (barman-cloud) $BARMAN_PLUGIN_VERSION"
+# The databases' backups (barman-cloud plugin).
 retry kubectl apply --server-side -f "https://github.com/cloudnative-pg/plugin-barman-cloud/releases/download/v$BARMAN_PLUGIN_VERSION/manifest.yaml" >/dev/null
 kubectl -n cnpg-system wait deploy --all --for=condition=Available --timeout=5m >/dev/null
 
-log "storage: $CELL_STORAGE"
+case $CELL_STORAGE in longhorn) step "Storage (Longhorn $LONGHORN_VERSION)" ;; *) step "Storage ($CELL_STORAGE)" ;; esac
 case $CELL_STORAGE in
   local-path) ;; # k3s default StorageClass, no snapshots
   longhorn)
@@ -99,7 +99,6 @@ case $CELL_STORAGE in
   *) die "unknown CELL_STORAGE=$CELL_STORAGE" ;;
 esac
 
-log "cell config"
 kubectl apply -f - >/dev/null <<EOF
 apiVersion: v1
 kind: ConfigMap
@@ -112,14 +111,18 @@ data:
   storage: "$CELL_STORAGE"
 EOF
 
-# The backup target: S3, a path on the first machine or any rclone remote.
-# Only the backup gateway holds it (E-47); apps get keys of their own.
+# The backup target: S3, a path on the first machine or any rclone remote,
+# from the environment or, later, from the console (the operator writes it
+# here). Only the backup gateway holds it (E-47); apps get keys of their
+# own. Without a target the secret still holds the password and the gateway
+# key, and the gateway runs: setting a target then changes nothing else.
+step "Backups"
 s3_vars=(CELL_BACKUP_S3_ENDPOINT CELL_BACKUP_S3_BUCKET CELL_BACKUP_S3_ACCESS_KEY CELL_BACKUP_S3_SECRET_KEY)
 stored_backup_target
 s3_set=0
 for v in "${s3_vars[@]}"; do [ -n "${!v:-}" ] && s3_set=$((s3_set + 1)); done
 prefix=${CELL_BACKUP_PREFIX:-${CELL_BACKUP_S3_PREFIX:-$CELL_DOMAIN}}
-conf="" root=""
+conf="" root="" where=""
 export BACKUP_LOCAL_VOLUME="emptyDir: {}"
 if [ -n "$stored" ]; then
   where="the stored target"
@@ -147,31 +150,32 @@ elif [ -n "${CELL_BACKUP_RCLONE_CONFIG:-}" ]; then
   grep -q '^\[target\]' <<<"$conf" || die "$CELL_BACKUP_RCLONE_CONFIG has no [target] section"
   root="${CELL_BACKUP_RCLONE_ROOT:+${CELL_BACKUP_RCLONE_ROOT%/}/}$prefix"
 fi
-if [ -n "$conf" ]; then
-  # Without one given, the stored password, else a new one (install.sh shows
-  # it once). A new password for an existing repository would lock it.
-  [ -n "${CELL_BACKUP_PASSWORD:-}" ] || CELL_BACKUP_PASSWORD=$(secret_value cell-system backup-target password)
-  [ -n "$CELL_BACKUP_PASSWORD" ] || CELL_BACKUP_PASSWORD=$(rand)
-  log "backup target: $where"
-  # The gateway key derives every app's key: made once, kept.
-  key=$(secret_value cell-system backup-target gatewayKey)
-  [ -n "$key" ] || key=$(rand)
-  changed=$(backup_target_manifest "$conf" root="$root" gatewayKey="$key" password="$CELL_BACKUP_PASSWORD" \
-    prefix="$prefix" localVolume="$BACKUP_LOCAL_VOLUME" | kubectl apply -f -)
-  export RCLONE_VERSION
-  apply backup-gateway.yaml
-  case $changed in *unchanged*) ;; *) kubectl -n cell-system rollout restart deploy/backup-gateway >/dev/null ;; esac
-  kubectl -n cell-system rollout status deploy/backup-gateway --timeout=5m >/dev/null
-fi
+if [ -n "$conf" ]; then note "target: $where"; else note "no target yet: set one in the console under Backups"; fi
+# Without one given, the stored password, else a new one (install.sh shows
+# it once). A new password for an existing repository would lock it.
+[ -n "${CELL_BACKUP_PASSWORD:-}" ] || CELL_BACKUP_PASSWORD=$(secret_value cell-system backup-target password)
+[ -n "$CELL_BACKUP_PASSWORD" ] || CELL_BACKUP_PASSWORD=$(rand)
+# The gateway key derives every app's key: made once, kept.
+key=$(secret_value cell-system backup-target gatewayKey)
+[ -n "$key" ] || key=$(rand)
+changed=$(backup_target_manifest "$conf" root="$root" gatewayKey="$key" password="$CELL_BACKUP_PASSWORD" \
+  prefix="$prefix" localVolume="$BACKUP_LOCAL_VOLUME" | kubectl apply -f -)
+apply backup-gateway.yaml
+case $changed in *unchanged*) ;; *) kubectl -n cell-system rollout restart deploy/backup-gateway >/dev/null ;; esac
+kubectl -n cell-system rollout status deploy/backup-gateway --timeout=5m >/dev/null
 
 if [ "$CELL_INGRESS_IP" != 127.0.0.1 ]; then
-  log "ingress on $CELL_INGRESS_IP only"
+  step "Ingress"
   apply ingress-address.yaml
   ingress_on() { [ "$(kubectl -n kube-system get svc traefik -o jsonpath='{.spec.externalIPs[0]}')" = "$CELL_INGRESS_IP" ]; }
   retry ingress_on
 fi
 
-log "TLS issuer: $CELL_TLS"
+case $CELL_TLS in
+  acme) step "Certificates from Let's Encrypt" ;;
+  names) step "Certificates through the naming service" ;;
+  *) step "Certificates (self-signed)" ;;
+esac
 case $CELL_TLS in
   selfsigned) retry apply issuer-selfsigned.yaml ;;
   acme)
@@ -192,7 +196,7 @@ case $CELL_TLS in
   *) die "unknown CELL_TLS=$CELL_TLS" ;;
 esac
 
-log "identity (authentik $AUTHENTIK_CHART_VERSION)"
+step "Identity (authentik $AUTHENTIK_CHART_VERSION)"
 dbpw=$(secret_value cell-system identity-db-credentials password)
 [ -n "$dbpw" ] || dbpw=$(rand)
 ensure_secret cell-system identity-db-credentials kubernetes.io/basic-auth \
@@ -212,7 +216,7 @@ retry kubectl -n cell-system wait cluster/identity-db --for=condition=Ready --ti
 retry kubectl -n cell-system get deploy authentik-server authentik-worker >/dev/null
 kubectl -n cell-system wait deploy/authentik-server deploy/authentik-worker --for=condition=Available --timeout=10m >/dev/null
 
-log "login page https://auth.$CELL_DOMAIN"
+step "Login page"
 cacert=()
 if [ "$CELL_TLS" = selfsigned ]; then
   ca=$(mktemp)
@@ -224,7 +228,7 @@ fi
 # The flow executor answers with the first login stage once the default flows exist.
 retry curl -fsS -o /dev/null "${cacert[@]}" --resolve "auth.$CELL_DOMAIN:443:$CELL_INGRESS_IP" \
   "https://auth.$CELL_DOMAIN/api/v3/flows/executor/default-authentication-flow/"
-log "Flux $FLUX_VERSION (source and helm controllers)"
+step "App delivery (Flux $FLUX_VERSION)"
 # Flux may write anywhere (cluster-admin), and namespace admins may write
 # HelmReleases. A release that names no ServiceAccount therefore runs as its
 # namespace's helm-deployer (only app namespaces have one, E-45), and
@@ -235,7 +239,7 @@ grep -q -- '^ *- --default-service-account=helm-deployer$' <<<"$flux" || die "co
 kubectl apply --server-side -f - <<<"$flux" >/dev/null
 kubectl -n flux-system wait deploy --all --for=condition=Available --timeout=5m >/dev/null
 
-log "cluster DNS: *.$CELL_DOMAIN to the ingress"
+step "Cluster DNS"
 # Pods reach cell hosts (e.g. the OIDC issuer) through the ingress, like
 # browsers do, without hairpin NAT or public DNS.
 domain_re=$(printf '%s' "$CELL_DOMAIN" | sed 's/[.]/\\./g')
@@ -253,12 +257,12 @@ EOF
 case $dns in *unchanged*) ;; *) kubectl -n kube-system rollout restart deploy/coredns >/dev/null ;; esac
 kubectl -n kube-system rollout status deploy/coredns --timeout=2m >/dev/null
 
-log "operator $OPERATOR_IMAGE"
+step "Operator"
 kubectl apply --server-side -f "$here/crd/" >/dev/null
 apply operator.yaml
 kubectl -n cell-system rollout status deploy/cell-operator --timeout=5m >/dev/null
 
-log "platform API https://api.$CELL_DOMAIN"
+step "Platform API"
 apply change-approval.yaml
 # The mesh (E-56) only on a cell with an address of its own: its devices
 # need the cell's relay. The API makes its login client at start.
@@ -275,7 +279,7 @@ kubectl -n cell-system rollout status deploy/cell-api --timeout=5m >/dev/null
 # without the settings keeps the stored ones; keys and secret stay.
 names_zone=${CELL_NAMES_ZONE:-$(secret_value cell-system names NAMES_ZONE)}
 if [ -n "$names_zone" ]; then
-  log "naming service https://names.$CELL_DOMAIN for *.$names_zone"
+  step "Naming service"
   names_token=${CELL_NAMES_DNS_TOKEN:-$(secret_value cell-system names NAMES_DNS_TOKEN)}
   [ -n "$names_token" ] || die "the naming service needs CELL_NAMES_DNS_TOKEN (Hetzner Cloud API token for the zone)"
   names_keys=$(secret_value cell-system names NAMES_KEYS)
@@ -290,7 +294,7 @@ if [ -n "$names_zone" ]; then
 fi
 
 if [ "$CELL_INGRESS_IP" != 127.0.0.1 ]; then
-  log "mesh https://mesh.$CELL_DOMAIN (Headscale $HEADSCALE_VERSION)"
+  step "Mesh (Headscale $HEADSCALE_VERSION)"
   if [ "$CELL_TLS" = selfsigned ]; then
     kubectl -n cell-system create configmap cell-ca --from-file=ca.crt="$ca" --dry-run=client -o yaml |
       kubectl apply -f - >/dev/null
@@ -318,7 +322,7 @@ if [ "$CELL_INGRESS_IP" != 127.0.0.1 ]; then
   RETRY_ATTEMPTS=24 retry mesh_joined || die "the cell's router did not join the mesh: kubectl -n cell-system logs deploy/cell-mesh-router"
 fi
 
-log "ops agent"
+step "Ops agent"
 llm=unchanged
 if [ -n "${CELL_LLM_API_KEY:-}" ]; then
   llm_args=(apiKey="$CELL_LLM_API_KEY")
@@ -331,8 +335,8 @@ case $llm in *unchanged*) ;; *) kubectl -n cell-system rollout restart deploy/ce
 # Up only once the operator created the agent's account (Secret cell-agent).
 kubectl -n cell-system rollout status deploy/cell-agent --timeout=5m >/dev/null
 
-log "MCP gateway https://mcp.$CELL_DOMAIN/mcp"
+step "MCP gateway"
 apply mcp.yaml
 # Up once the operator wrote its configuration (ConfigMap cell-mcp).
 kubectl -n cell-system rollout status deploy/cell-mcp --timeout=5m >/dev/null
-log "cell ready"
+step_end

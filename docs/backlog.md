@@ -86,7 +86,7 @@ Gewünscht und ausprobiert wird in der Office-Oberfläche; die Plattform baut, b
 | Sicherungen je App, Sicherung jetzt anstoßen | läuft | |
 | Wiederherstellen über den aktuellen Stand | läuft | |
 | Wiederherstellen als Kopie | offen | |
-| Backup-Ziel ändern | offen | |
+| Backup-Ziel setzen und ändern (Konsole, API) | läuft | |
 | Sicherung der ganzen Zelle oder ausgewählter Apps auf einmal | offen | |
 | App-eigene Sicherungen einbinden (Hooks im Manifest: Export der App, Wartungsmodus) | offen | E-52 |
 | Wiederherstellungstest | offen | |

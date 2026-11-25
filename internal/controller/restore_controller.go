@@ -48,6 +48,8 @@ var restoreAnnotation = cellv1.GroupVersion.Group + "/restore"
 // the App reconciler leaves the app alone.
 type RestoreReconciler struct {
 	client.Client
+	// Reader reads the backup gateway's lock past the cache.
+	Reader      client.Reader
 	ResticImage string
 	Now         func() time.Time
 	// Restored is called when an app's data was replaced (its login client
@@ -80,8 +82,8 @@ func (r *RestoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		holder = "ChangeRequest/" + rs.Spec.Change
 	}
 	release := func() error {
-		if rs.Spec.Change != "" {
-			return nil
+		if err := releaseGateway(ctx, r, apiReader(r.Reader, r), "restore/"+rs.Name); err != nil || rs.Spec.Change != "" {
+			return err
 		}
 		return releaseApp(ctx, r, rs.Spec.App, holder)
 	}
@@ -166,6 +168,15 @@ func (r *RestoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 				parent.Status.Restore != rs.Name || rs.Labels[labelRun] != string(parent.UID) {
 				return fail("not a rollback of change " + rs.Spec.Change + ": that change is not running on " + app.Name + " or names another restore")
 			}
+		}
+		// Not while the target changes: the restore would read from one and
+		// the app's next backup write to the other.
+		if why, err := acquireGateway(ctx, r, apiReader(r.Reader, r), "restore/"+rs.Name); err != nil || why != "" {
+			if err == nil && (rs.Status.Phase != cellv1.RunPending || rs.Status.Message != why) {
+				rs.Status.Phase, rs.Status.Message = cellv1.RunPending, why
+				err = r.Status().Update(ctx, &rs)
+			}
+			return wait, err
 		}
 		ok, current, err := acquireApp(ctx, r, &app, holder)
 		if err != nil {

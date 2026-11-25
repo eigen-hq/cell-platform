@@ -23,6 +23,8 @@ import (
 // snapshot of the volumes tagged with the database backup's coordinates.
 type BackupReconciler struct {
 	client.Client
+	// Reader reads the backup gateway's lock past the cache.
+	Reader      client.Reader
 	ResticImage string
 	Now         func() time.Time
 }
@@ -46,7 +48,12 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	holder := "Backup/" + b.Name
-	release := func() error { return releaseApp(ctx, r, b.Spec.App, holder) }
+	release := func() error {
+		if err := releaseApp(ctx, r, b.Spec.App, holder); err != nil {
+			return err
+		}
+		return releaseGateway(ctx, r, apiReader(r.Reader, r), "backup/"+b.Name)
+	}
 	// Deleting a running backup cancels it. It holds the app until its job
 	// is stopped, so nothing keeps copying data a restore could replace.
 	if !b.DeletionTimestamp.IsZero() {
@@ -98,6 +105,14 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		// A backup does not run alongside a restore or change of the app:
 		// it would copy data being replaced. A change's own backup runs
 		// under that change's hold.
+		// Nor while the target changes: it would write to two targets.
+		if why, err := acquireGateway(ctx, r, apiReader(r.Reader, r), "backup/"+b.Name); err != nil || why != "" {
+			if err == nil && (b.Status.Phase != cellv1.RunPending || b.Status.Message != why) {
+				b.Status.Phase, b.Status.Message = cellv1.RunPending, why
+				err = r.Status().Update(ctx, &b)
+			}
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, err
+		}
 		ok, current, err := r.hold(ctx, &b, &app, holder)
 		if err != nil {
 			return ctrl.Result{}, err

@@ -1,10 +1,7 @@
 # Helpers for bootstrap.sh. Sourced, not executed. Tested by lib_test.sh.
 
-log() { printf '\033[1m==> %s\033[0m\n' "$*"; }
-die() {
-  printf 'error: %s\n' "$*" >&2
-  exit 1
-}
+# shellcheck source=ui.sh
+source "$(dirname "${BASH_SOURCE[0]}")/ui.sh"
 
 # render prints deploy/base/<file> with ${VAR} replaced from the environment;
 # an unset variable is an error.
@@ -35,17 +32,18 @@ questions() {
   [ -n "${CELL_ACME_EMAIL:-}" ] || [ "${CELL_TLS:-acme}" != acme ] || echo email
 }
 
-# show_once prints a password from a secret as "label value [note]" once:
-# the marker file stops later prints. Returns 2 if there is none, 1 if it
-# could not be read; neither sets the marker.
+# show_once prints a password from a secret on the terminal (never into the
+# log) as "label value", with a note below, once: the marker file stops
+# later prints. Returns 2 if there is none, 1 if it could not be read;
+# neither sets the marker.
 # Usage: show_once <marker> <label> <namespace> <secret> <key> [note]
 show_once() {
   local v
   [ ! -f "$1" ] || return 0
   v=$(secret_value "$3" "$4" "$5") || return 1
   [ -n "$v" ] || return 2
-  printf '  %-9s %s\n%s' "$2" "$v" "${6:+            $6
-}"
+  ui '  %-11s %s%s%s\n' "$2" "$ui_bold" "$v" "$ui_off"
+  [ -z "${6:-}" ] || ui '              %s%s%s\n' "$ui_dim" "$6" "$ui_off"
   touch "$1"
 }
 
@@ -108,16 +106,17 @@ data_manifest() {
   printf 'apiVersion: v1\nkind: Secret\nmetadata:\n  name: %s\n  namespace: %s\ntype: Opaque\ndata:\n' "$2" "$1"
   shift 2
   for kv in "$@"; do
-    printf '  %s: %s\n' "${kv%%=*}" "$(printf '%s' "${kv#*=}" | base64 | tr -d '\n')"
+    # Quoted: an empty value is "", not null.
+    printf '  %s: "%s"\n' "${kv%%=*}" "$(printf '%s' "${kv#*=}" | base64 | tr -d '\n')"
   done
 }
 
 # backup_target_manifest prints the backup-target Secret: rclone.conf from
-# the first argument, KEY=VALUE pairs from the others.
+# the first argument (empty: no target yet), KEY=VALUE pairs from the others.
 backup_target_manifest() {
   local conf=$1
   shift
-  data_manifest cell-system backup-target "rclone.conf=$conf"$'\n' "$@"
+  data_manifest cell-system backup-target "rclone.conf=${conf:+$conf$'\n'}" "$@"
 }
 
 # names_accounts prints the acme-dns accounts of a cell with an address from

@@ -15,8 +15,10 @@
 #   CELL_JOIN_SERVER   the server's address; set, this machine joins as agent
 #   CELL_JOIN_TOKEN    join token (k3s secure format), with CELL_JOIN_SERVER
 set -euo pipefail
-say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
-[ "$(id -u)" -eq 0 ] || { echo "error: run as root" >&2; exit 1; }
+# The join script carries ui.sh in front of this file.
+# shellcheck source=ui.sh
+declare -F step >/dev/null || source "$(dirname "${BASH_SOURCE[0]}")/ui.sh"
+[ "$(id -u)" -eq 0 ] || die "run as root (sudo)"
 : "${K3S_VERSION:?K3S_VERSION must be set}"
 CELL_STORAGE=${CELL_STORAGE:-longhorn}
 role=server
@@ -25,16 +27,23 @@ if [ -n "${CELL_JOIN_SERVER:-}" ]; then
   role=agent
 fi
 CELL_NODE_IP=${CELL_NODE_IP:-$(ip -4 route get "${CELL_JOIN_SERVER:-1.1.1.1}" | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')}
-[ -n "$CELL_NODE_IP" ] || { echo "error: no address found, set CELL_NODE_IP" >&2; exit 1; }
+[ -n "$CELL_NODE_IP" ] || die "found no address of this machine: set CELL_NODE_IP=<address>"
 CELL_INGRESS_IP=${CELL_INGRESS_IP:-$CELL_NODE_IP}
 # node_iface prints the interface that holds an address (ip -o -4 addr on
 # stdin). Flannel takes the default route's interface unless told, so
 # WireGuard would leave through the public one (E-57).
 node_iface() { awk -v ip="$1" '{split($4, a, "/"); if (a[1] == ip) {print $2; exit}}'; }
 iface=$(ip -o -4 addr show | node_iface "$CELL_NODE_IP")
-[ -n "$iface" ] || { echo "error: $CELL_NODE_IP is not an address of this machine (CELL_NODE_IP)" >&2; exit 1; }
+[ -n "$iface" ] || die "$CELL_NODE_IP is not an address of this machine (CELL_NODE_IP)"
 
-say "host packages"
+# Joining: this script is all that runs, so it keeps its own log.
+if [ "$role" = agent ] && [ -z "${CELL_UI_LOG:-}" ]; then
+  ui '\n  %sJoining this machine to the cell%s %s%s%s\n\n' "$ui_bold" "$ui_off" "$ui_dim" "$K3S_VERSION" "$ui_off"
+  ui_start /var/log/cell-install.log
+  joined=1
+fi
+
+step "System packages"
 export DEBIAN_FRONTEND=noninteractive
 packages=(curl)
 [ "$CELL_STORAGE" = longhorn ] && packages+=(open-iscsi nfs-common)
@@ -72,18 +81,11 @@ taken_ports() {
   printf '%s' "$tcp${udp:+ udp $udp}"
 }
 if [ "$role" = server ]; then
-  busy=$(taken_ports "$CELL_INGRESS_IP") || {
-    echo "error: could not check ports 80/443 and 3478 on $CELL_INGRESS_IP (ss failed)." >&2
-    exit 1
-  }
-  if [ -n "$busy" ]; then
-    echo "error: ports 80/443 (tcp) or 3478 (udp) on $CELL_INGRESS_IP are taken by another program ($busy)." >&2
-    echo "Give the cell an address of its own: CELL_INGRESS_IP=<address> (E-53)." >&2
-    exit 1
-  fi
+  busy=$(taken_ports "$CELL_INGRESS_IP") || die "could not check ports 80/443 and 3478 on $CELL_INGRESS_IP (ss failed)"
+  [ -z "$busy" ] || die "ports 80/443 (tcp) or 3478 (udp) on $CELL_INGRESS_IP are taken by another program ($busy). Stop it, or give the cell an address of its own: CELL_INGRESS_IP=<address>"
 fi
 
-say "k3s $K3S_VERSION as $role on $CELL_NODE_IP"
+step "Kubernetes (k3s ${K3S_VERSION%%+*})"
 # The machines talk on their node addresses only, in one network (E-57):
 # pod traffic through WireGuard, images between machines through the embedded mirror, the
 # platform's own under registry.cell.internal (E-42).
@@ -119,4 +121,7 @@ if [ "$(k3s --version 2>/dev/null | awk 'NR==1{print $3}')" != "$K3S_VERSION" ] 
 elif [ "$changed" = 1 ]; then
   systemctl restart "$service"
 fi
-say "k3s running ($role)"
+if [ "${joined:-}" = 1 ]; then
+  step_end
+  ui '\n  %s%s✓ Joined%s The machine shows up in the console under Machines in a few minutes.\n\n' "$ui_bold" "$ui_ok" "$ui_off"
+fi

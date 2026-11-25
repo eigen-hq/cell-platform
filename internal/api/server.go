@@ -140,6 +140,8 @@ func (s *Server) routes() []route {
 		{"GET", "/v0/nodes", RoleViewer, s.listNodes},
 		{"POST", "/v0/nodes/joins", RoleAdmin, s.createJoin},
 		{"GET", "/v0/nodes/join.sh", "", s.joinScript},
+		{"GET", "/v0/backup-target", RoleViewer, s.getBackupTarget},
+		{"PUT", "/v0/backup-target", RoleAdmin, s.setBackupTarget},
 	}
 }
 

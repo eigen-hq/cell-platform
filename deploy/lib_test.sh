@@ -43,7 +43,7 @@ export FAKE=down; check "secret_value aborts on API error" "1" "$( (secret_value
 
 # node.sh's port check (node.sh runs on its own, so the function comes from there)
 source <(sed -n '/^node_iface()/p; /^ports_taken()/,/^}/p; /^taken_ports()/,/^}/p' "$here/node.sh")
-listeners=$(printf 'LISTEN 0 4096 100.93.118.80:443 0.0.0.0:*\nLISTEN 0 4096 127.0.0.1:80 0.0.0.0:*\nLISTEN 0 4096 192.0.2.100:443 0.0.0.0:*\n')
+listeners=$(printf 'LISTEN 0 4096 100.64.0.7:443 0.0.0.0:*\nLISTEN 0 4096 127.0.0.1:80 0.0.0.0:*\nLISTEN 0 4096 192.0.2.100:443 0.0.0.0:*\n')
 check "port check leaves other addresses alone" "" "$(ports_taken 192.0.2.10 <<<"$listeners")"
 check "port check finds the cell address" "192.0.2.10:443" "$(printf '%s\nLISTEN 0 1 192.0.2.10:443 0.0.0.0:*\n' "$listeners" | ports_taken 192.0.2.10)"
 check "port check finds a wildcard" "*:80" "$(printf 'LISTEN 0 1 *:80 *:*\n' | ports_taken 192.0.2.10)"
@@ -71,7 +71,7 @@ check "a given domain is still asked the email" email "$(CELL_DOMAIN=c.example.c
 check "acme without email is asked the email" email "$(CELL_DOMAIN=c.example.com CELL_TLS=acme; unset CELL_ACME_EMAIL CELL_NAME; questions "$tmp/none" | xargs)"
 check "self-signed is asked nothing" "" "$(CELL_DOMAIN=c.example.com CELL_TLS=selfsigned; unset CELL_ACME_EMAIL CELL_NAME; questions "$tmp/none")"
 check "a cell from the naming service is asked nothing" "" "$(touch "$tmp/names"; unset CELL_DOMAIN CELL_ACME_EMAIL CELL_TLS CELL_NAME; questions "$tmp/names")"
-check "a password is shown once with its note" $'  Login:    secret-pw\n            note\n|' "$(FAKE=value show_once "$tmp/shown" Login: ns s k note; echo "|"; FAKE=value show_once "$tmp/shown" Login: ns s k note)"
+check "a password is shown once with its note" $'  Login       secret-pw\n              note\n|' "$(FAKE=value show_once "$tmp/shown" Login ns s k note; echo "|"; FAKE=value show_once "$tmp/shown" Login ns s k note)"
 check "a missing password returns 2 and is not marked" "2 no" "$(FAKE=notfound show_once "$tmp/m2" L ns s k; echo "$? $([ -f "$tmp/m2" ] && echo yes || echo no)")"
 check "an unreadable password fails and is not marked" "1 no" "$(FAKE=down show_once "$tmp/m1" L ns s k 2>/dev/null; echo "$? $([ -f "$tmp/m1" ] && echo yes || echo no)")"
 ss() { return 42; }
@@ -109,7 +109,9 @@ check "ensure_secret keeps values out of argv" "0" "$(grep -c hunter2 "$FAKE_LOG
 : >"$FAKE_LOG"
 : >"$FAKE_ENV"
 manifest=$(backup_target_manifest "[target] secret_access_key = s3secret" gatewayKey=masterkey "localVolume=hostPath: {path: \"/b\"}")
-check "backup_target_manifest encodes values" 'masterkey|hostPath: {path: "/b"}' "$(grep -E '^  (gatewayKey|localVolume):' <<<"$manifest" | awk '{print $2}' | while read -r v; do base64 -d <<<"$v"; echo; done | paste -sd'|' -)"
+check "backup_target_manifest encodes values" 'masterkey|hostPath: {path: "/b"}' "$(grep -E '^  (gatewayKey|localVolume):' <<<"$manifest" | awk '{gsub(/"/, "", $2); print $2}' | while read -r v; do base64 -d <<<"$v"; echo; done | paste -sd'|' -)"
+check "die inside \$(...) still reports on stderr" "|error: gone" "$(: >"$CELL_STEP_FILE"; out=$( (die gone) 2>"$tmp/err"); printf '%s|' "$out"; grep -o 'error: gone' "$tmp/err")"
+check "no target writes an empty rclone.conf" '  rclone.conf: ""' "$(backup_target_manifest "" root= | grep rclone.conf)"
 check "backup_target_manifest keeps values out of argv" "0" "$(grep -cE 'masterkey|hunter3|s3secret' "$FAKE_LOG" || true)"
 
 BASE_DIR=$tmp

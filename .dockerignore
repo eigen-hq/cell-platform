@@ -8,6 +8,7 @@
 !console
 !deploy/deploy.go
 !deploy/node.sh
+!deploy/ui.sh
 !deploy/versions.env
 console/node_modules
 console/dist

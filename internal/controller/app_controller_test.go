@@ -164,7 +164,8 @@ func TestMain(m *testing.M) {
 		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "cell-config", Namespace: "cell-system"},
 			Data: map[string]string{"domain": "cell.localhost", "tls": "acme", "storage": "local-path"}},
 		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "backup-target", Namespace: "cell-system"},
-			StringData: map[string]string{"password": "pw", "gatewayKey": "gk", "prefix": "cell.localhost"}},
+			StringData: map[string]string{"password": "pw", "gatewayKey": "gk", "prefix": "cell.localhost",
+				"rclone.conf": "[target]\ntype = local\n", "root": "/backup/cell.localhost", "localVolume": "emptyDir: {}"}},
 	} {
 		if err := k8s.Create(ctx, o); err != nil {
 			panic(err)

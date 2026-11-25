@@ -1,5 +1,6 @@
 # The platform API. Its account writes only ChangeRequests (proposals and
-# an admin's decision), Backups and Tasks; the operator alone changes apps.
+# an admin's decision), Backups, Tasks, join keys and the request for a new
+# backup target; the operator alone changes apps.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -115,6 +116,67 @@ metadata:
   name: cell-api-join-keys
 spec:
   policyName: cell-api-join-keys
+  validationActions: [Deny]
+---
+# The backup target: the API reads what the operator tells about it and
+# asks for a new one with a request the operator checks (only that one
+# secret name, policy cell-api-backup-target below). The target's own
+# secret stays out of reach.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cell-api-backup-target
+  namespace: cell-system
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [backup-target-status]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cell-api-backup-target
+  namespace: cell-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cell-api-backup-target
+subjects:
+  - kind: ServiceAccount
+    name: cell-api
+    namespace: cell-system
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: cell-api-backup-target
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels: {kubernetes.io/metadata.name: cell-system}
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["*"]
+        operations: [CREATE]
+        resources: [secrets]
+  matchConditions:
+    - name: api
+      expression: "request.userInfo.username == 'system:serviceaccount:cell-system:cell-api'"
+  validations:
+    - expression: "object.metadata.name == 'backup-target-request' && object.type == 'Opaque'"
+      message: "in cell-system the platform API only creates the request for a new backup target"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: cell-api-backup-target
+spec:
+  policyName: cell-api-backup-target
   validationActions: [Deny]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

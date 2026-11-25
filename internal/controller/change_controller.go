@@ -30,7 +30,9 @@ var changeFinalizer = cellv1.GroupVersion.Group + "/change"
 // back to the backup (spec and data) if it does not pass in time.
 type ChangeReconciler struct {
 	client.Client
-	Now func() time.Time
+	// Reader reads the backup gateway's lock past the cache.
+	Reader client.Reader
+	Now    func() time.Time
 }
 
 func (r *ChangeReconciler) SetupWithManager(mgr ctrl.Manager) error {
@@ -80,10 +82,19 @@ func (r *ChangeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	holder := "ChangeRequest/" + cr.Name
+	// A change backs up before and may restore after: it holds the backup
+	// gateway's target from start to end, rollback included.
+	lockUser := "change/" + cr.Name
+	release := func() error {
+		if err := releaseApp(ctx, r, cr.Spec.App, holder); err != nil {
+			return err
+		}
+		return releaseGateway(ctx, r, apiReader(r.Reader, r), lockUser)
+	}
 	// A started change (it holds the app) is not given up halfway: deleting
 	// it waits until it ended. Waiting or ended changes go at once.
 	if !cr.DeletionTimestamp.IsZero() && cr.Status.Phase != cellv1.RunRunning {
-		if err := releaseApp(ctx, r, cr.Spec.App, holder); err != nil {
+		if err := release(); err != nil {
 			return ctrl.Result{}, err
 		}
 		if controllerutil.RemoveFinalizer(&cr, changeFinalizer) {
@@ -95,7 +106,7 @@ func (r *ChangeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{Requeue: true}, r.Update(ctx, &cr)
 	}
 	if finished(cr.Status.Phase) {
-		return ctrl.Result{}, releaseApp(ctx, r, cr.Spec.App, holder)
+		return ctrl.Result{}, release()
 	}
 	set := func(phase cellv1.RunPhase, msg string, after time.Duration) (ctrl.Result, error) {
 		if cr.Status.Phase == phase && cr.Status.Message == msg {
@@ -117,7 +128,7 @@ func (r *ChangeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		if err := r.Status().Update(ctx, &cr); err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{}, releaseApp(ctx, r, cr.Spec.App, holder)
+		return ctrl.Result{}, release()
 	}
 	wait := 5 * time.Second
 
@@ -149,6 +160,12 @@ func (r *ChangeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 		if action == actionInstall {
 			return r.install(ctx, &cr, gone, &app, holder, set, end)
+		}
+		if why, err := acquireGateway(ctx, r, apiReader(r.Reader, r), lockUser); err != nil || why != "" {
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+			return set(cellv1.RunPending, why, wait)
 		}
 		ok, current, err := acquireApp(ctx, r, &app, holder)
 		if err != nil {

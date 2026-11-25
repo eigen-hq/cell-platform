@@ -231,11 +231,13 @@ func checkStorage(ctx context.Context, c client.Client, cfg cell.Config) result 
 
 func checkBackupTarget(ctx context.Context, c client.Client) result {
 	var s corev1.Secret
-	if err := c.Get(ctx, client.ObjectKey{Namespace: cell.SystemNamespace, Name: "backup-target"}, &s); err != nil {
-		if client.IgnoreNotFound(err) == nil {
-			return result{"backup target", warn, "not configured (CELL_BACKUP_S3_*)"}
-		}
+	if err := c.Get(ctx, client.ObjectKey{Namespace: cell.SystemNamespace, Name: cell.BackupTargetSecret}, &s); client.IgnoreNotFound(err) != nil {
 		return result{"backup target", fail, err.Error()}
 	}
-	return result{"backup target", ok, fmt.Sprintf("%s/%s", s.Data["endpoint"], s.Data["bucket"])}
+	// The secret exists from the install on; a target only once it has one.
+	t := cell.DescribeBackupTarget(s.Data)
+	if !t.Configured {
+		return result{"backup target", warn, "not configured (console: Backups, or CELL_BACKUP_S3_*)"}
+	}
+	return result{"backup target", ok, t.Where}
 }

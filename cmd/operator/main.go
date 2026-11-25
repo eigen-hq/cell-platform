@@ -92,16 +92,23 @@ func run() error {
 	if restic == "" {
 		return fmt.Errorf("RESTIC_IMAGE is not set")
 	}
-	if err := (&controller.BackupReconciler{Client: mgr.GetClient(), ResticImage: restic}).SetupWithManager(mgr); err != nil {
+	if err := (&controller.BackupReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), ResticImage: restic}).SetupWithManager(mgr); err != nil {
 		return err
 	}
-	if err := (&controller.RestoreReconciler{Client: mgr.GetClient(), ResticImage: restic, Restored: r.ForgetLogin}).SetupWithManager(mgr); err != nil {
+	if err := (&controller.RestoreReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), ResticImage: restic, Restored: r.ForgetLogin}).SetupWithManager(mgr); err != nil {
 		return err
 	}
-	if err := (&controller.ChangeReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
+	if err := (&controller.ChangeReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader()}).SetupWithManager(mgr); err != nil {
 		return err
 	}
 	if err := (&controller.GatewayReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
+		return err
+	}
+	rclone := os.Getenv("RCLONE_IMAGE")
+	if rclone == "" {
+		return fmt.Errorf("RCLONE_IMAGE is not set")
+	}
+	if err := (&controller.BackupTargetReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), RcloneImage: rclone}).SetupWithManager(mgr); err != nil {
 		return err
 	}
 	if err := mgr.AddHealthzCheck("ping", healthz.Ping); err != nil {

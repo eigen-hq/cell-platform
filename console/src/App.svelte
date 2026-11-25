@@ -12,6 +12,7 @@
   import { route } from "./lib/route";
   import Home from "./views/Home.svelte";
   import Machines from "./views/Machines.svelte";
+  import Backups from "./views/Backups.svelte";
   import Apps from "./views/Apps.svelte";
   import Approvals from "./views/Approvals.svelte";
   import History from "./views/History.svelte";
@@ -24,6 +25,7 @@
     { href: "/approvals", label: "Approvals" },
     { href: "/apps", label: "Apps" },
     { href: "/machines", label: "Machines" },
+    { href: "/backups", label: "Backups" },
     { href: "/organization", label: "Organization" },
     { href: "/agents", label: "Agents" },
     { href: "/history", label: "History" },
@@ -115,6 +117,8 @@
       <Agents open={rest} onnavigate={navigate} />
     {:else if section === "/machines"}
       <Machines {cell} />
+    {:else if section === "/backups"}
+      <Backups admin={me.role === "admin"} />
     {:else}
       <Home />
     {/if}

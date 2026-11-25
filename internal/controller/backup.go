@@ -52,10 +52,12 @@ type backupTarget struct {
 	Password, GatewayKey string
 }
 
-// loadTarget returns nil when the cell has no backup target.
+// loadTarget returns nil when the cell has no backup target: no secret, or
+// one without a target yet (bootstrap always writes the secret, an admin
+// may set the target later).
 func loadTarget(ctx context.Context, c client.Reader) (*backupTarget, error) {
 	var s corev1.Secret
-	err := c.Get(ctx, client.ObjectKey{Namespace: cell.SystemNamespace, Name: "backup-target"}, &s)
+	err := c.Get(ctx, client.ObjectKey{Namespace: cell.SystemNamespace, Name: cell.BackupTargetSecret}, &s)
 	if apierrors.IsNotFound(err) {
 		return nil, nil
 	}
@@ -63,6 +65,9 @@ func loadTarget(ctx context.Context, c client.Reader) (*backupTarget, error) {
 		return nil, err
 	}
 	d := func(k string) string { return string(s.Data[k]) }
+	if strings.TrimSpace(d("rclone.conf")) == "" {
+		return nil, nil
+	}
 	t := &backupTarget{Password: d("password"), GatewayKey: d("gatewayKey")}
 	if t.Password == "" || t.GatewayKey == "" {
 		return nil, fmt.Errorf("backup target is incomplete (password and gatewayKey are required)")
@@ -254,7 +259,7 @@ func (s snapshot) tag(key string) string {
 }
 
 // jobResult reports the outcome of a Job as ensureChild read it: done, its
-// termination message, or an error when it failed.
+// termination message, and an error when it failed (with the message too).
 func jobResult(ctx context.Context, c client.Client, job *batchv1.Job) (done bool, message string, err error) {
 	finished := ""
 	for _, cond := range job.Status.Conditions {
@@ -283,7 +288,7 @@ func jobResult(ctx context.Context, c client.Client, job *batchv1.Job) (done boo
 	if finished == string(batchv1.JobComplete) {
 		return false, "", fmt.Errorf("job %s completed but its pod is gone", job.Name)
 	}
-	return true, "", fmt.Errorf("job %s failed: %s", job.Name, strings.TrimSpace(message))
+	return true, message, fmt.Errorf("job %s failed: %s", job.Name, strings.TrimSpace(message))
 }
 
 // parseSnapshot reads the single snapshot a script printed.

@@ -113,6 +113,9 @@ spec:
               value: "${BRIDGE_IMAGE}"
             - name: RESTIC_IMAGE
               value: restic/restic:${RESTIC_VERSION}
+            # Checks a backup target an admin sets before the cell uses it.
+            - name: RCLONE_IMAGE
+              value: rclone/rclone:${RCLONE_VERSION}
             - name: AUTHENTIK_TOKEN
               valueFrom:
                 secretKeyRef:

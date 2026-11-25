@@ -144,6 +144,7 @@ REST mit OpenAPI-Beschreibung (`api/openapi.yaml`), Anmeldung über Tokens der I
 | `/catalog` | Verfügbare Apps |
 | `/apps` | Installieren, Status, Update, Entfernen |
 | `/apps/{name}/backups`, `/apps/{name}/restore` | Sicherungen |
+| `/backup-target` | Backup-Ziel der Zelle: lesen, setzen nach Probe (E-60) |
 | `/apps/{name}/access` | Wer darf die App nutzen |
 | `/users`, `/groups` | Organisationsstruktur |
 | `/changes` | Änderungsprotokoll, Freigeben und Ablehnen |
