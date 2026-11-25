@@ -1,6 +1,7 @@
 {
   "name": "cell-console",
   "private": true,
+  "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
     "gen": "openapi-typescript ../api/openapi.yaml -o src/lib/api/schema.d.ts && node scripts/tokens.mjs",

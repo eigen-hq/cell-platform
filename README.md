@@ -72,3 +72,7 @@ docs/        Diese Dokumente
 ## Abgrenzung
 
 Office-Suite und die zentrale UI liegen in anderen Repos. Dieses Repo liefert die Plattform, ihre Konsole (E-38) und zwei Schnittstellen nach außen: die Plattform-API und das MCP-Gateway.
+
+## Lizenz
+
+AGPL-3.0-only ([LICENSE](LICENSE)). Was das für Unternehmen bedeutet, die kommerzielle Lizenz und der Weg für Beiträge: [LICENSING.md](LICENSING.md), [CLA.md](CLA.md), [CONTRIBUTING.md](CONTRIBUTING.md).
