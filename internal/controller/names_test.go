@@ -10,7 +10,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	"github.com/marcelheidebrecht/cell-platform/internal/cell"
+	"github.com/eigen-hq/cell-platform/internal/cell"
 )
 
 func TestACMEAccounts(t *testing.T) {

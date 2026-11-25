@@ -16,7 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/marcelheidebrecht/cell-platform/internal/cell"
+	"github.com/eigen-hq/cell-platform/internal/cell"
 )
 
 // Join is what a new machine needs to join the cell (E-44).

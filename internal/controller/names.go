@@ -10,7 +10,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/marcelheidebrecht/cell-platform/internal/cell"
+	"github.com/eigen-hq/cell-platform/internal/cell"
 )
 
 // A cell with an address from the naming service (E-55) proves its

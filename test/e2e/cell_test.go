@@ -21,7 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 
-	cellv1 "github.com/marcelheidebrecht/cell-platform/api/v1alpha1"
+	cellv1 "github.com/eigen-hq/cell-platform/api/v1alpha1"
 )
 
 func repoRoot() string {

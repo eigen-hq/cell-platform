@@ -2,7 +2,7 @@
 # Installs a cell on this machine, or updates it, from a release of the
 # platform:
 #
-#   curl -fsSL https://raw.githubusercontent.com/marcelheidebrecht/cell-platform/main/get.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/eigen-hq/cell-platform/main/get.sh | sudo bash
 #
 # CELL_VERSION picks a release (default: the latest), for example
 # ... | sudo CELL_VERSION=v0.2.0 bash. Other settings pass through to
@@ -11,7 +11,7 @@
 set -euo pipefail
 # Read as a whole before running: a download cut short runs nothing.
 {
-repo=${CELL_REPO:-marcelheidebrecht/cell-platform}
+repo=${CELL_REPO:-eigen-hq/cell-platform}
 dir=/opt/cell
 fail() { printf '\n  error: %s\n\n' "$*" >&2; exit 1; }
 

@@ -25,7 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	cellv1 "github.com/marcelheidebrecht/cell-platform/api/v1alpha1"
+	cellv1 "github.com/eigen-hq/cell-platform/api/v1alpha1"
 )
 
 // Restore steps, in order.

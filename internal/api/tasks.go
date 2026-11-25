@@ -12,7 +12,7 @@ import (
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	cellv1 "github.com/marcelheidebrecht/cell-platform/api/v1alpha1"
+	cellv1 "github.com/eigen-hq/cell-platform/api/v1alpha1"
 )
 
 // TaskHeader names the task an agent's call belongs to. Agents work only

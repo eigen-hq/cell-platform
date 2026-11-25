@@ -33,8 +33,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	cellv1 "github.com/marcelheidebrecht/cell-platform/api/v1alpha1"
-	"github.com/marcelheidebrecht/cell-platform/internal/authentik"
+	cellv1 "github.com/eigen-hq/cell-platform/api/v1alpha1"
+	"github.com/eigen-hq/cell-platform/internal/authentik"
 )
 
 // Controller tests against a real API server (envtest). Nothing runs pods:

@@ -1,4 +1,4 @@
-module github.com/marcelheidebrecht/cell-platform
+module github.com/eigen-hq/cell-platform
 
 go 1.27.4
 

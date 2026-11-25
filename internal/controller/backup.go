@@ -18,8 +18,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	cellv1 "github.com/marcelheidebrecht/cell-platform/api/v1alpha1"
-	"github.com/marcelheidebrecht/cell-platform/internal/cell"
+	cellv1 "github.com/eigen-hq/cell-platform/api/v1alpha1"
+	"github.com/eigen-hq/cell-platform/internal/cell"
 )
 
 // Backups leave the cell: databases through the CloudNativePG barman-cloud

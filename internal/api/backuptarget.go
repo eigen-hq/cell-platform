@@ -15,7 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/marcelheidebrecht/cell-platform/internal/cell"
+	"github.com/eigen-hq/cell-platform/internal/cell"
 )
 
 // The backup target is no app, so it is set without a ChangeRequest: the

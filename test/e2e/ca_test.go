@@ -18,7 +18,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/marcelheidebrecht/cell-platform/internal/cell"
+	"github.com/eigen-hq/cell-platform/internal/cell"
 )
 
 // Security: the deployed cell CA only vouches for names in the cell domain.

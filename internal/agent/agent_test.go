@@ -27,11 +27,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	apidoc "github.com/marcelheidebrecht/cell-platform/api"
-	cellv1 "github.com/marcelheidebrecht/cell-platform/api/v1alpha1"
-	"github.com/marcelheidebrecht/cell-platform/catalog"
-	"github.com/marcelheidebrecht/cell-platform/internal/agent/agenttest"
-	cellapi "github.com/marcelheidebrecht/cell-platform/internal/api"
+	apidoc "github.com/eigen-hq/cell-platform/api"
+	cellv1 "github.com/eigen-hq/cell-platform/api/v1alpha1"
+	"github.com/eigen-hq/cell-platform/catalog"
+	"github.com/eigen-hq/cell-platform/internal/agent/agenttest"
+	cellapi "github.com/eigen-hq/cell-platform/internal/api"
 )
 
 // cell is the platform API over a fake cluster, with the agent's account.

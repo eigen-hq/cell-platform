@@ -21,13 +21,13 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/marcelheidebrecht/cell-platform/api"
-	cellv1 "github.com/marcelheidebrecht/cell-platform/api/v1alpha1"
-	"github.com/marcelheidebrecht/cell-platform/catalog"
-	"github.com/marcelheidebrecht/cell-platform/deploy"
-	cellapi "github.com/marcelheidebrecht/cell-platform/internal/api"
-	"github.com/marcelheidebrecht/cell-platform/internal/authentik"
-	"github.com/marcelheidebrecht/cell-platform/internal/cell"
+	"github.com/eigen-hq/cell-platform/api"
+	cellv1 "github.com/eigen-hq/cell-platform/api/v1alpha1"
+	"github.com/eigen-hq/cell-platform/catalog"
+	"github.com/eigen-hq/cell-platform/deploy"
+	cellapi "github.com/eigen-hq/cell-platform/internal/api"
+	"github.com/eigen-hq/cell-platform/internal/authentik"
+	"github.com/eigen-hq/cell-platform/internal/cell"
 )
 
 // The identity's OAuth2 clients (and their slugs): cell-api for logins with

@@ -34,8 +34,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
-	cellv1 "github.com/marcelheidebrecht/cell-platform/api/v1alpha1"
-	"github.com/marcelheidebrecht/cell-platform/internal/authentik"
+	cellv1 "github.com/eigen-hq/cell-platform/api/v1alpha1"
+	"github.com/eigen-hq/cell-platform/internal/authentik"
 )
 
 // --- test doubles -----------------------------------------------------------

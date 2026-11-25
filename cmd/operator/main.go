@@ -16,9 +16,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	cellv1 "github.com/marcelheidebrecht/cell-platform/api/v1alpha1"
-	"github.com/marcelheidebrecht/cell-platform/internal/authentik"
-	"github.com/marcelheidebrecht/cell-platform/internal/controller"
+	cellv1 "github.com/eigen-hq/cell-platform/api/v1alpha1"
+	"github.com/eigen-hq/cell-platform/internal/authentik"
+	"github.com/eigen-hq/cell-platform/internal/controller"
 )
 
 func main() {

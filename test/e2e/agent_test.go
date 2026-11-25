@@ -21,9 +21,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	cellv1 "github.com/marcelheidebrecht/cell-platform/api/v1alpha1"
-	"github.com/marcelheidebrecht/cell-platform/internal/agent"
-	"github.com/marcelheidebrecht/cell-platform/internal/agent/agenttest"
+	cellv1 "github.com/eigen-hq/cell-platform/api/v1alpha1"
+	"github.com/eigen-hq/cell-platform/internal/agent"
+	"github.com/eigen-hq/cell-platform/internal/agent/agenttest"
 )
 
 // opsAgent is the agent with its account from the cell and a scripted

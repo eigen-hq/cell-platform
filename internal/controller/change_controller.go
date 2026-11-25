@@ -19,7 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	cellv1 "github.com/marcelheidebrecht/cell-platform/api/v1alpha1"
+	cellv1 "github.com/eigen-hq/cell-platform/api/v1alpha1"
 )
 
 // changeFinalizer keeps a running change until it ended.

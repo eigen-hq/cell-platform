@@ -20,7 +20,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	cellv1 "github.com/marcelheidebrecht/cell-platform/api/v1alpha1"
+	cellv1 "github.com/eigen-hq/cell-platform/api/v1alpha1"
 )
 
 // approvedChange creates a change that an admin already approved (in a

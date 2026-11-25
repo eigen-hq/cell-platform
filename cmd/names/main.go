@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/marcelheidebrecht/cell-platform/internal/names"
+	"github.com/eigen-hq/cell-platform/internal/names"
 )
 
 func main() {

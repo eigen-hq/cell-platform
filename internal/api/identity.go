@@ -6,7 +6,7 @@ import (
 	"slices"
 	"sort"
 
-	"github.com/marcelheidebrecht/cell-platform/internal/authentik"
+	"github.com/eigen-hq/cell-platform/internal/authentik"
 )
 
 // Users and groups live in the identity; the API passes them through. An

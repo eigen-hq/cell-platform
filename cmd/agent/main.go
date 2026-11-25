@@ -14,7 +14,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/v2"
 	"github.com/anthropics/anthropic-sdk-go/v2/option"
 
-	"github.com/marcelheidebrecht/cell-platform/internal/agent"
+	"github.com/eigen-hq/cell-platform/internal/agent"
 )
 
 func main() {
