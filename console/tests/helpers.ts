@@ -25,4 +25,7 @@ export async function signIn(page: Page, username: string, password: string, sta
   const pw = page.getByRole("textbox", { name: "Password" });
   await pw.fill(password);
   await pw.press("Enter");
+  // Back at the console once the identity let the user in (or refused).
+  const origin = new URL(env("CONSOLE_URL")).origin;
+  await page.waitForURL((u) => u.origin === origin && !u.searchParams.has("code"), { timeout: 30_000 });
 }

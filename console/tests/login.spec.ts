@@ -34,8 +34,16 @@ test("signing out drops the console's token and ends its session at the identity
   await signIn(page, user, env("CONSOLE_ADMIN_PASSWORD"));
   await expect(page.getByRole("button", { name: `Sign out ${user}` })).toBeVisible();
   expect(await page.evaluate(() => sessionStorage.getItem("cell.tokens"))).not.toBeNull();
+  // Requests that go out while the sign-out looks up the identity find no
+  // token: they must not turn the sign-out into a new login.
+  await page.route("**/v0/login", async (route) => {
+    await new Promise((r) => setTimeout(r, 1500));
+    await route.continue();
+  });
   await page.getByRole("button", { name: `Sign out ${user}` }).click();
+  await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Apps" }).click();
   await page.waitForURL((u) => u.origin !== baseURL);
+  await page.unroute("**/v0/login");
   await expect(page.getByText(/logged out/i).first()).toBeVisible();
   // The identity's own single sign-on stays, as for every app of the cell (E-40).
   await page.goto("/");

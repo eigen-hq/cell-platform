@@ -6,6 +6,8 @@ export default defineConfig({
   testDir: "tests",
   timeout: 60_000,
   retries: 0,
+  // One cell, one identity server: parallel logins slow it past the waits.
+  workers: 1,
   reporter: "line",
   use: {
     baseURL: process.env.CONSOLE_URL,

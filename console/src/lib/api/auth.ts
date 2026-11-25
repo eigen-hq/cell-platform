@@ -26,6 +26,36 @@ function load<T>(key: string): T | undefined {
 
 export class LoginError extends Error {}
 
+// The browser is on its way to the identity while a trip is set. Requests
+// that find no token meanwhile (a poll, a reload) join it instead of starting
+// a second login: that would overwrite the pending one, or turn a sign-out
+// back into a sign-in. A sign-out always starts its own trip. Only the latest
+// trip leaves and keeps what the identity's answer must match; everyone who
+// waits on an older trip gets the latest trip's outcome.
+let trip = 0;
+let current: Promise<never> | null = null;
+let latest: Promise<never> = Promise.resolve() as Promise<never>;
+
+function depart(where: () => Promise<{ url: URL; keep?: () => void }>, force = false): Promise<never> {
+  if (current && !force) return current;
+  const mine = ++trip;
+  const run = (async (): Promise<never> => {
+    try {
+      const to = await where();
+      if (mine !== trip) return latest;
+      to.keep?.();
+      location.assign(to.url);
+    } catch (e) {
+      if (mine !== trip) return latest;
+      current = null;
+      throw e;
+    }
+    return new Promise<never>(() => {});
+  })();
+  current = latest = run;
+  return run;
+}
+
 async function login(): Promise<Login> {
   const res = await fetch("/v0/login");
   if (!res.ok) throw new LoginError(`The console cannot find its login (HTTP ${res.status}).`);
@@ -49,17 +79,17 @@ export function justSignedIn(): boolean {
 
 /** Sends the browser to the identity's login. */
 export async function signIn(): Promise<never> {
-  const l = await login();
-  const pending: Pending = { verifier: random(32), state: random(16), back: location.pathname + location.search };
-  sessionStorage.setItem(PENDING, JSON.stringify(pending));
-  const challenge = b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(pending.verifier))));
-  const url = new URL(l.authorizationEndpoint);
-  url.search = new URLSearchParams({
-    response_type: "code", client_id: l.clientId, redirect_uri: l.redirectUri, scope: l.scope,
-    state: pending.state, code_challenge: challenge, code_challenge_method: "S256",
-  }).toString();
-  location.assign(url);
-  return new Promise<never>(() => {});
+  return depart(async () => {
+    const l = await login();
+    const pending: Pending = { verifier: random(32), state: random(16), back: location.pathname + location.search };
+    const challenge = b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(pending.verifier))));
+    const url = new URL(l.authorizationEndpoint);
+    url.search = new URLSearchParams({
+      response_type: "code", client_id: l.clientId, redirect_uri: l.redirectUri, scope: l.scope,
+      state: pending.state, code_challenge: challenge, code_challenge_method: "S256",
+    }).toString();
+    return { url, keep: () => sessionStorage.setItem(PENDING, JSON.stringify(pending)) };
+  });
 }
 
 /**
@@ -93,10 +123,12 @@ export async function finishSignIn(): Promise<boolean> {
  * Drops the console's token and ends its session at the identity. The
  * token goes even if the identity cannot be reached.
  */
-export async function signOut(): Promise<void> {
+export async function signOut(): Promise<never> {
   const idToken = load<Tokens>(TOKENS)?.idToken;
   sessionStorage.removeItem(TOKENS);
-  const url = new URL((await login()).endSessionEndpoint);
-  if (idToken) url.searchParams.set("id_token_hint", idToken);
-  location.assign(url);
+  return depart(async () => {
+    const url = new URL((await login()).endSessionEndpoint);
+    if (idToken) url.searchParams.set("id_token_hint", idToken);
+    return { url };
+  }, true);
 }
