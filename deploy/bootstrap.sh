@@ -306,6 +306,12 @@ if [ "$CELL_INGRESS_IP" != 127.0.0.1 ]; then
     data_manifest cell-system mesh-router authkey="$key" | kubectl apply -f - >/dev/null
   fi
   kubectl -n cell-system rollout status deploy/cell-mesh-router --timeout=5m >/dev/null
+  # Running is not joined: the cell is in the mesh once its route is served.
+  mesh_joined() {
+    kubectl -n cell-system exec deploy/cell-mesh -c headscale -- headscale nodes list-routes -o json |
+      python3 -c 'import json, sys; sys.exit(not any(sys.argv[1] in (n.get("subnet_routes") or []) for n in json.load(sys.stdin)))' "$CELL_INGRESS_IP/32"
+  }
+  RETRY_ATTEMPTS=24 retry mesh_joined || die "the cell's router did not join the mesh: kubectl -n cell-system logs deploy/cell-mesh-router"
 fi
 
 log "ops agent"

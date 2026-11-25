@@ -68,13 +68,17 @@ data:
     unix_socket_permission: "0770"
     logtail:
       enabled: false
-  # Everyone in the mesh reaches everyone, and the cell; the cell's router
-  # gets its route to the cell address without a manual approval.
+  # The people's devices reach each other, and the cell's apps (80/443 of
+  # the cell address) through the router, nothing else of the machine. The
+  # router gets its route without a manual approval.
   policy.json: |
     {
       "tagOwners": {"tag:cell": []},
       "autoApprovers": {"routes": {"${CELL_INGRESS_IP}/32": ["tag:cell"]}},
-      "acls": [{"action": "accept", "src": ["*"], "dst": ["*:*"]}]
+      "acls": [
+        {"action": "accept", "src": ["autogroup:member"], "dst": ["autogroup:member:*"]},
+        {"action": "accept", "src": ["autogroup:member"], "dst": ["${CELL_INGRESS_IP}/32:80,443"]}
+      ]
     }
   # Trust for the mesh and the identity: the system's roots plus, in cells
   # with their own CA, that CA (ConfigMap cell-ca, optional).
