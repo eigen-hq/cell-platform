@@ -4,6 +4,7 @@
 # goes to stdout as is.
 #
 #   step "Identity"   ends the step before (done, its time) and starts this one
+#   progress "text"   what the current step does right now, after its time
 #   note "text"       a line under the current step
 #   step_end          ends the last step
 #   die "text"        marks the step failed, prints the error and the log's end
@@ -40,7 +41,15 @@ duration() {
   if [ "$1" -lt 60 ]; then printf '%ss' "$1"; else printf '%sm %02ds' $(($1 / 60)) $(($1 % 60)); fi
 }
 
-step_end() {
+# On a terminal a ticker redraws the current step's line every second
+# (spinner, time, progress); whoever writes that line holds this lock.
+ui_locked() {
+  if [ -n "${CELL_UI_TICK:-}" ]; then { flock 9; "$@"; } 9>>"$CELL_STEP_FILE.lock"; else "$@"; fi
+}
+
+step_end() { ui_locked ui_step_end; }
+
+ui_step_end() {
   local start label
   read -r start label <"$CELL_STEP_FILE" 2>/dev/null || return 0
   [ -n "$label" ] || return 0
@@ -48,13 +57,23 @@ step_end() {
   [ -z "$ui_tty" ] || ui '%s  %s✓%s %-40s %s%s%s\n' "$ui_cl" "$ui_ok" "$ui_off" "$label" "$ui_dim" "$(duration $(($(date +%s) - start)))" "$ui_off"
   ui_notes
   : >"$CELL_STEP_FILE"
+  : >"$CELL_STEP_FILE.progress"
 }
 
 step() {
   step_end
+  ui_locked ui_step "$@"
+}
+
+ui_step() {
   printf '%s %s\n' "$(date +%s)" "$*" >"$CELL_STEP_FILE"
   [ -z "${CELL_UI_LOG:-}" ] || printf '\n==> %s\n' "$*"
-  if [ -n "$ui_tty" ]; then ui '  %s·%s %s' "$ui_dim" "$ui_off" "$*"; else ui '  - %s\n' "$*"; fi
+  if [ -n "$ui_tty" ]; then ui '%s  %s·%s %s' "$ui_cl" "$ui_dim" "$ui_off" "$*"; else ui '  - %s\n' "$*"; fi
+}
+
+progress() {
+  [ -z "${CELL_UI_LOG:-}" ] || printf -- '--> %s\n' "$*"
+  [ -z "$ui_tty" ] || printf '%s' "$*" >"$CELL_STEP_FILE.progress"
 }
 
 # On a terminal a note waits below the step's line until the step ends.
@@ -73,17 +92,20 @@ ui_notes() {
 log() { step "$@"; }
 
 die() {
-  local start label ui_fd=$ui_efd
-  read -r start label <"$CELL_STEP_FILE" 2>/dev/null || label=""
-  if [ "$start" != "!" ]; then
-    [ -z "$label" ] || ui '%s  %s✗%s %s\n' "$ui_cl" "$ui_err" "$ui_off" "$label"
-    ui_notes
-    ui '\n  %serror:%s %s\n' "$ui_err$ui_bold" "$ui_off" "$*"
-    ui_log_tail
-    echo "!" >"$CELL_STEP_FILE"
-  fi
+  ui_locked ui_die "$@"
   [ -z "${CELL_UI_LOG:-}" ] || printf 'error: %s\n' "$*"
   exit 1
+}
+
+ui_die() {
+  local start label ui_fd=$ui_efd
+  read -r start label <"$CELL_STEP_FILE" 2>/dev/null || label=""
+  [ "$start" != "!" ] || return 0
+  [ -z "$label" ] || ui '%s  %s✗%s %s\n' "$ui_cl" "$ui_err" "$ui_off" "$label"
+  ui_notes
+  ui '\n  %serror:%s %s\n' "$ui_err$ui_bold" "$ui_off" "$*"
+  ui_log_tail
+  echo "!" >"$CELL_STEP_FILE"
 }
 
 ui_log_tail() {
@@ -107,10 +129,60 @@ ui_start() {
   set -E
   trap 'ui_failed $?' ERR
   trap ui_exit EXIT
+  if [ -n "$ui_tty" ] && command -v flock >/dev/null; then
+    export CELL_UI_TICK=1
+    (
+      trap - ERR EXIT
+      set +eE
+      ui_tick "$$"
+    ) </dev/null &
+    ui_ticker=$!
+  fi
+}
+
+# ui_tick <pid> redraws the current step's line every second while <pid>
+# runs.
+ui_tick() {
+  local frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏) i=0 cols start label
+  cols=$(stty size </dev/tty 2>/dev/null | awk '{print $2}')
+  [ "${cols:-0}" -gt 0 ] || cols=80
+  while kill -0 "$1" 2>/dev/null; do
+    {
+      flock 9
+      if read -r start label <"$CELL_STEP_FILE" 2>/dev/null && [ -n "$label" ] && [ "$start" != "!" ]; then
+        ui_tick_line "$cols" "${frames[i % 10]}" "$label" "$(duration $(($(date +%s) - start)))" "$(cat "$CELL_STEP_FILE.progress" 2>/dev/null)"
+      fi
+    } 9>>"$CELL_STEP_FILE.lock"
+    i=$((i + 1))
+    sleep 1
+  done
+}
+
+# ui_tick_line <cols> <frame> <label> <time> <detail> prints
+# "  <frame> <label, padded to 40> <time>  <detail>" in at most cols - 1
+# characters: a wrapped line could not be redrawn. The detail goes first,
+# then the label's end.
+ui_tick_line() {
+  local cols=$1 frame=$2 label=$3 time=$4 detail=$5 width room
+  width=$((${#label} > 40 ? ${#label} : 40))
+  room=$((cols - 1 - 4 - width - 1 - ${#time} - 2))
+  if [ "$room" -lt 8 ]; then
+    detail=""
+  elif [ "${#detail}" -gt "$room" ]; then
+    detail="${detail:0:room-3}..."
+  fi
+  room=$((cols - 1 - 4 - 1 - ${#time}))
+  [ "$room" -ge 1 ] || room=1
+  [ "${#label}" -le "$room" ] || label=${label:0:room}
+  ui '%s  %s%s%s %-*s %s%s%s%s' "$ui_cl" "$ui_dim" "$frame" "$ui_off" "$((room < 40 ? room : 40))" "$label" "$ui_dim" "$time" "${detail:+  $detail}" "$ui_off"
 }
 
 ui_exit() {
   local rc=$? start label
+  if [ -n "${ui_ticker:-}" ]; then
+    kill "$ui_ticker" 2>/dev/null || true
+    wait "$ui_ticker" 2>/dev/null || true
+  fi
   if [ "$rc" -ne 0 ]; then
     read -r start label <"$CELL_STEP_FILE" 2>/dev/null || label=""
     if [ "$start" != "!" ]; then
@@ -120,6 +192,6 @@ ui_exit() {
       ui_log_tail
     fi
   fi
-  rm -f "$CELL_STEP_FILE" "$CELL_STEP_FILE.notes" "$CELL_STEP_FILE.cmd"
+  rm -f "$CELL_STEP_FILE" "$CELL_STEP_FILE.notes" "$CELL_STEP_FILE.cmd" "$CELL_STEP_FILE.progress" "$CELL_STEP_FILE.lock"
   exit "$rc"
 }

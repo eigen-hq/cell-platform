@@ -50,6 +50,7 @@ packages=(curl)
 missing=()
 for p in "${packages[@]}"; do dpkg -s "$p" >/dev/null 2>&1 || missing+=("$p"); done
 if [ "${#missing[@]}" -gt 0 ]; then
+  progress "installing ${missing[*]}"
   apt-get update -q
   apt-get install -yq "${missing[@]}"
 fi
@@ -111,6 +112,7 @@ fi
 service=k3s
 [ "$role" = agent ] && service=k3s-agent
 if [ "$(k3s --version 2>/dev/null | awk 'NR==1{print $3}')" != "$K3S_VERSION" ] || ! systemctl is-enabled -q "$service" 2>/dev/null; then
+  progress "downloading and starting k3s"
   if [ "$role" = server ]; then
     curl -sfL "https://raw.githubusercontent.com/k3s-io/k3s/$K3S_VERSION/install.sh" |
       INSTALL_K3S_VERSION="$K3S_VERSION" sh -s - server

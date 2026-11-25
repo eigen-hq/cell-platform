@@ -158,4 +158,26 @@ check "build_image prints the hashed reference" "0:yes" "$rc:$([[ $out =~ ^app:[
 out=$(FAKE_DOCKER=ok FAKE_K3D=ok build_image app op "$tmp/src" c missing-dir 2>/dev/null) && rc=0 || rc=$?
 check "build_image fails on missing sources" "1:" "$rc:$out"
 
+# The live line never wraps: at most cols - 1 characters, also when narrow.
+for cols in 20 45 70 80 200; do
+  for label in "Identity" "Cell address a-rather-long-cell-name from https://names.example.org"; do
+    line=$(ui_cl="" ui_dim="" ui_off="" ui_tick_line "$cols" x "$label" "12m 05s" "Longhorn: 5 of 8 ready, and more" 2>&1)
+    check "live line fits $cols columns (${label:0:8})" "ok" "$([ "${#line}" -le $((cols - 1)) ] && echo ok || echo "${#line}: $line")"
+  done
+done
+check "live line keeps the detail when it fits" "  x Identity                                 12m 05s  Longhorn: 5 of 8 ready" "$(ui_cl="" ui_dim="" ui_off="" ui_tick_line 120 x Identity "12m 05s" "Longhorn: 5 of 8 ready")"
+
+# wait_ready counts available deployments; kubectl prints
+# "<replicas> <available> <generation> <observed generation>".
+kubectl() { printf '%b' "$FAKE_DEPLOYS"; }
+out=$(FAKE_DEPLOYS='1 1 3 3\n2 2 1 1\n0 <none> 1 1\n' wait_ready x ns 0 2>&1) && rc=0 || rc=$?
+check "wait_ready returns when all are available" "0" "$rc"
+out=$(: >"$CELL_STEP_FILE"; FAKE_DEPLOYS='1 1 1 1\n1 <none> 1 1\n' wait_ready Longhorn ns 0 2>&1) && rc=0 || rc=$?
+check "wait_ready fails at the deadline with the count" "1:1 of 2" "$rc:$(grep -o '1 of 2' <<<"$out" | head -1)"
+out=$(: >"$CELL_STEP_FILE"; FAKE_DEPLOYS='1 1 4 3\n' wait_ready x ns 0 2>&1) && rc=0 || rc=$?
+check "wait_ready does not trust the status of an older spec" "1" "$rc"
+out=$(: >"$CELL_STEP_FILE"; FAKE_DEPLOYS='1 1 1 1\n' wait_ready x ns 0 a b 2>&1) && rc=0 || rc=$?
+check "wait_ready waits for named deployments not created yet" "1" "$rc"
+unset -f kubectl
+
 [ "$fails" -eq 0 ]

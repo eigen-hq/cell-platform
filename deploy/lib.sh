@@ -21,6 +21,27 @@ retry() {
   "$@" # last attempt shows its errors and decides the result
 }
 
+# wait_ready <what> <namespace> <minutes> [deployment...] waits until the
+# deployments (without names: all in the namespace) are available, and the
+# step shows how many are.
+wait_ready() {
+  local what=$1 ns=$2 minutes=$3 end counts total ready
+  shift 3
+  end=$(($(date +%s) + minutes * 60))
+  while :; do
+    # Ready: the controller has seen the latest spec (as kubectl wait checks)
+    # and enough replicas are available.
+    counts=$(kubectl -n "$ns" get deploy "$@" --no-headers \
+      -o custom-columns=W:.spec.replicas,A:.status.availableReplicas,G:.metadata.generation,O:.status.observedGeneration 2>/dev/null |
+      awk '{n++} $4 != "<none>" && $4 >= $3 && ($1 == 0 || ($2 != "<none>" && $2 >= $1)) {r++} END {print n + 0, r + 0}') || counts="0 0"
+    read -r total ready <<<"$counts"
+    progress "$what: $ready of $total ready"
+    if [ "$total" -gt 0 ] && [ "$ready" -eq "$total" ] && [ "$total" -ge "$#" ]; then return 0; fi
+    [ "$(date +%s)" -lt "$end" ] || die "$what did not become ready within $minutes minutes ($ready of $total services): kubectl -n $ns get pods"
+    sleep 3
+  done
+}
+
 rand() { openssl rand -hex 24; }
 
 # questions prints which settings install.sh asks for in a terminal: the

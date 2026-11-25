@@ -109,10 +109,12 @@ for p in curl git openssl perl python3; do dpkg -s "$p" >/dev/null 2>&1 || missi
 # Docker only builds the platform image; the cell runs on k3s.
 [ "$build" = 0 ] || command -v docker >/dev/null || missing+=(docker.io)
 if [ "${#missing[@]}" -gt 0 ]; then
+  progress "installing ${missing[*]}"
   apt-get update -q
   apt-get install -yq "${missing[@]}"
 fi
 if [ "$(flux version --client 2>/dev/null | awk '{print $2}')" != "v$FLUX_VERSION" ]; then
+  progress "downloading the Flux CLI"
   arch=$(dpkg --print-architecture)
   curl -fsSL "https://github.com/fluxcd/flux2/releases/download/v$FLUX_VERSION/flux_${FLUX_VERSION}_linux_$arch.tar.gz" |
     tar xz -C /usr/local/bin flux
@@ -123,7 +125,9 @@ if [ "$build" = 1 ]; then
   step "Platform image $version"
   OPERATOR_IMAGE_TAR=/var/lib/cell/cell-operator.tar
   mkdir -p /var/lib/cell
+  progress "compiling Go and the console"
   docker build -q -t "$OPERATOR_IMAGE" "$repo"
+  progress "saving the image"
   docker save "$OPERATOR_IMAGE" -o "$OPERATOR_IMAGE_TAR"
 fi
 : "${OPERATOR_IMAGE:?OPERATOR_IMAGE must be set with OPERATOR_IMAGE_TAR}"
@@ -163,6 +167,7 @@ K3S_VERSION=$K3S_VERSION "$here/node.sh"
 mkdir -p /etc/cell
 for key in "${saved[@]}"; do printf '%s=%s\n' "$key" "${!key:-}"; done >"$settings"
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+progress "waiting for the machine"
 retry kubectl wait node --all --for=condition=Ready --timeout=10s >/dev/null
 
 step "Platform image in the cluster"

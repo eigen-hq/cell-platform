@@ -67,6 +67,7 @@ for ns in cert-manager cnpg-system cell-system; do
 done | kubectl apply --server-side --field-manager=cell-bootstrap -f - >/dev/null
 
 step "Certificates and databases"
+progress "downloading components"
 cm=$(curl -fsSL "https://github.com/cert-manager/cert-manager/releases/download/$CERT_MANAGER_VERSION/cert-manager.yaml")
 if [ "$CELL_TLS" = names ]; then
   # DNS-01 checks ask public resolvers: the cluster DNS answers every cell
@@ -77,21 +78,22 @@ if [ "$CELL_TLS" = names ]; then
 fi
 kubectl apply --server-side -f - <<<"$cm" >/dev/null
 kubectl apply --server-side -f "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$CNPG_VERSION/cnpg-$CNPG_VERSION.yaml" >/dev/null
-kubectl -n cert-manager wait deploy --all --for=condition=Available --timeout=5m >/dev/null
-kubectl -n cnpg-system wait deploy --all --for=condition=Available --timeout=5m >/dev/null
+wait_ready cert-manager cert-manager 5
+wait_ready CloudNativePG cnpg-system 5
 # The databases' backups (barman-cloud plugin).
+progress "database backup plugin"
 retry kubectl apply --server-side -f "https://github.com/cloudnative-pg/plugin-barman-cloud/releases/download/v$BARMAN_PLUGIN_VERSION/manifest.yaml" >/dev/null
-kubectl -n cnpg-system wait deploy --all --for=condition=Available --timeout=5m >/dev/null
+wait_ready CloudNativePG cnpg-system 5
 
 case $CELL_STORAGE in longhorn) step "Storage (Longhorn $LONGHORN_VERSION)" ;; *) step "Storage ($CELL_STORAGE)" ;; esac
 case $CELL_STORAGE in
   local-path) ;; # k3s default StorageClass, no snapshots
   longhorn)
+    progress "snapshot controller"
     kubectl apply -k "https://github.com/kubernetes-csi/external-snapshotter/client/config/crd?ref=$EXTERNAL_SNAPSHOTTER_VERSION" >/dev/null
     kubectl -n kube-system apply -k "https://github.com/kubernetes-csi/external-snapshotter/deploy/kubernetes/snapshot-controller?ref=$EXTERNAL_SNAPSHOTTER_VERSION" >/dev/null
     apply storage-longhorn.yaml
-    kubectl -n longhorn-system wait deploy --all --for=condition=Available --timeout=10m >/dev/null 2>&1 \
-      || retry kubectl -n longhorn-system wait deploy --all --for=condition=Available --timeout=10m >/dev/null
+    wait_ready Longhorn longhorn-system 20
     retry apply storage-longhorn-classes.yaml
     # Longhorn is the default StorageClass; local-path stays for k3s internals.
     kubectl annotate storageclass local-path storageclass.kubernetes.io/is-default-class=false --overwrite >/dev/null
@@ -212,9 +214,9 @@ ensure_secret cell-system identity Opaque \
   AUTHENTIK_BOOTSTRAP_EMAIL="admin@$CELL_DOMAIN" \
   AUTHENTIK_ERROR_REPORTING__ENABLED=false
 retry apply identity.yaml
+progress "starting its database"
 retry kubectl -n cell-system wait cluster/identity-db --for=condition=Ready --timeout=10s >/dev/null
-retry kubectl -n cell-system get deploy authentik-server authentik-worker >/dev/null
-kubectl -n cell-system wait deploy/authentik-server deploy/authentik-worker --for=condition=Available --timeout=10m >/dev/null
+wait_ready authentik cell-system 10 authentik-server authentik-worker
 
 step "Login page"
 cacert=()
@@ -226,6 +228,11 @@ if [ "$CELL_TLS" = selfsigned ]; then
   cacert=(--cacert "$ca")
 fi
 # The flow executor answers with the first login stage once the default flows exist.
+if [ "$CELL_TLS" = selfsigned ]; then
+  progress "waiting for the login page"
+else
+  progress "certificate, then login page"
+fi
 retry curl -fsS -o /dev/null "${cacert[@]}" --resolve "auth.$CELL_DOMAIN:443:$CELL_INGRESS_IP" \
   "https://auth.$CELL_DOMAIN/api/v3/flows/executor/default-authentication-flow/"
 step "App delivery (Flux $FLUX_VERSION)"
@@ -237,7 +244,7 @@ flux=$(flux install --version="v$FLUX_VERSION" --components=source-controller,he
   perl -0777 -pe 's{(- --enable-leader-election\n)((?:(?!\n---\n).)*?image: ghcr\.io/fluxcd/helm-controller:)}{$1        - --default-service-account=helm-deployer\n        - --no-cross-namespace-refs=true\n$2}s')
 grep -q -- '^ *- --default-service-account=helm-deployer$' <<<"$flux" || die "could not lock helm-controller to the apps' deployers"
 kubectl apply --server-side -f - <<<"$flux" >/dev/null
-kubectl -n flux-system wait deploy --all --for=condition=Available --timeout=5m >/dev/null
+wait_ready Flux flux-system 5
 
 step "Cluster DNS"
 # Pods reach cell hosts (e.g. the OIDC issuer) through the ingress, like
