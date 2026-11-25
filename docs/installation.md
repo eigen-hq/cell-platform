@@ -1,72 +1,72 @@
-# Zelle installieren
+# Install a cell
 
-Diese Anleitung richtet eine Zelle auf einem eigenen Server ein. Danach erreichen Sie die Konsole unter `https://console.<Ihre Domain>` und können Apps installieren.
+This guide sets up a cell on your own server. Afterwards you can reach the console at `https://console.<your domain>` and install apps.
 
-Dauer: rund 30 Minuten, davon etwa 20 Minuten Warten auf die Einrichtung.
+Duration: about 30 minutes, of which about 20 minutes are spent waiting for the setup.
 
-## Überblick
+## Overview
 
-1. [Voraussetzungen prüfen](#voraussetzungen)
-2. [Server vorbereiten](#1-server-vorbereiten)
-3. [Zelle installieren](#2-zelle-installieren)
-4. [Anmelden](#3-anmelden)
-5. [Backups einrichten](#4-backups-einrichten)
+1. [Check the requirements](#requirements)
+2. [Prepare the server](#1-prepare-the-server)
+3. [Install the cell](#2-install-the-cell)
+4. [Sign in](#3-sign-in)
+5. [Set up backups](#4-set-up-backups)
 
-Danach nach Bedarf: [weitere Rechner](#weitere-rechner-hinzufügen), [Geräte ins Mesh](#geräte-verbinden).
+Afterwards, as needed: [more machines](#add-more-machines), [devices in the mesh](#connect-devices).
 
-## Voraussetzungen
+## Requirements
 
-| | Benötigt |
+| | Required |
 |---|---|
-| Server | Frisch installiert, mit root-Zugang per SSH |
-| Betriebssystem | Ubuntu 24.04 LTS (empfohlen) |
-| Prozessor | x86_64, 4 Kerne (mindestens 2) |
-| Arbeitsspeicher | 8 GB (mindestens 4) |
-| Festplatte | 80 GB (mindestens 40) |
-| Domain | Eine Domain oder Subdomain, für die Sie DNS-Einträge setzen können, zum Beispiel `cell.example.com` |
-| E-Mail-Adresse | Für die Zertifikate von Let's Encrypt |
-| Backup-Ziel | Ein S3-Bucket außerhalb des Servers, zum Beispiel Hetzner Object Storage. Sie richten es nach der Installation in der Konsole ein. |
+| Server | Freshly installed, with root access over SSH |
+| Operating system | Ubuntu 24.04 LTS (recommended) |
+| Processor | x86_64, 4 cores (at least 2) |
+| Memory | 8 GB (at least 4) |
+| Disk | 80 GB (at least 40) |
+| Domain | A domain or subdomain for which you can set DNS records, for example `cell.example.com` |
+| Email address | For the Let's Encrypt certificates |
+| Backup target | An S3 bucket outside the server, for example Hetzner Object Storage. You set it up in the console after the installation. |
 
-> **Andere Systeme:** Ubuntu 22.04 LTS und Debian 12 oder 13 sollten ebenfalls funktionieren, sind aber noch nicht getestet. Ältere Versionen erhalten keine Sicherheitsupdates mehr und werden nicht unterstützt.
+> **Other systems:** Ubuntu 22.04 LTS and Debian 12 or 13 should also work, but are not tested yet. Older versions no longer receive security updates and are not supported.
 
-## 1. Server vorbereiten
+## 1. Prepare the server
 
-Die Beispiele zeigen die Hetzner Cloud Console; bei anderen Anbietern heißen die Einstellungen ähnlich.
+The examples show the Hetzner Cloud Console; with other providers the settings have similar names.
 
-1. **Server erstellen** mit Ubuntu 24.04.
+1. **Create a server** with Ubuntu 24.04.
 
-   Planen Sie mehr als einen Rechner? Legen Sie unter *Networks* ein privates Netz an und hängen Sie den Server an, **bevor** Sie installieren. Die Installation erkennt das Netz selbst.
+   Do you plan to use more than one machine? Create a private network under *Networks* and attach the server to it **before** you install. The installation detects the network by itself.
 
-2. **Firewall anlegen** (*Firewalls*, *Create Firewall*) und dem Server zuweisen:
+2. **Create a firewall** (*Firewalls*, *Create Firewall*) and assign it to the server:
 
-   | Richtung | Protokoll | Port | Quelle |
+   | Direction | Protocol | Port | Source |
    |---|---|---|---|
-   | Eingehend | TCP | 80 | Überall |
-   | Eingehend | TCP | 443 | Überall |
-   | Eingehend | UDP | 3478 | Überall |
-   | Eingehend | TCP | 22 | Nur Ihre eigene IP-Adresse |
+   | Inbound | TCP | 80 | Anywhere |
+   | Inbound | TCP | 443 | Anywhere |
+   | Inbound | UDP | 3478 | Anywhere |
+   | Inbound | TCP | 22 | Only your own IP address |
 
-   Ausgehende Regeln nicht eintragen: Dann ist ausgehender Verkehr erlaubt, den die Zelle braucht.
+   Do not add outbound rules: then outbound traffic is allowed, which the cell needs.
 
-3. **DNS-Eintrag setzen** bei Ihrem Domain-Anbieter:
+3. **Set a DNS record** at your domain provider:
 
-   | Name | Typ | Wert |
+   | Name | Type | Value |
    |---|---|---|
-   | `*.cell.example.com` | A | Öffentliche IPv4-Adresse des Servers |
+   | `*.cell.example.com` | A | Public IPv4 address of the server |
 
-   Ein Eintrag genügt: Alle Dienste der Zelle liegen unter dieser Domain, etwa `console.cell.example.com`.
+   One record is enough: all services of the cell live under this domain, for example `console.cell.example.com`.
 
-## 2. Zelle installieren
+## 2. Install the cell
 
-Melden Sie sich per SSH am Server an und führen Sie aus:
+Log in to the server over SSH and run:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/marcelheidebrecht/cell-platform/main/get.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/eigen-hq/cell-platform/main/get.sh | sudo bash
 ```
 
-Der Befehl lädt das neueste Release und fragt nach der Domain und der E-Mail-Adresse. Bevor er etwas einrichtet, prüft er den DNS-Eintrag und die Ports und bricht mit einer Erklärung ab, falls etwas fehlt.
+The command downloads the latest release and asks for the domain and the email address. Before it sets anything up, it checks the DNS record and the ports and stops with an explanation if something is missing.
 
-Am Ende erscheint:
+At the end, this appears:
 
 ```
   ✓ Cell ready in 18m 40s
@@ -80,126 +80,126 @@ Am Ende erscheint:
               Shown only now. Keep it outside the cell: a restore into a new cell needs it.
 ```
 
-Notieren Sie beide Werte, etwa in einem Passwort-Manager. Sie erscheinen nur dieses eine Mal.
+Write down both values, for example in a password manager. They appear only this once.
 
-> **Wichtig:** Ohne den Backup-Schlüssel lässt sich kein Backup in einer neuen Zelle wiederherstellen.
+> **Important:** Without the backup key, no backup can be restored into a new cell.
 
-## 3. Anmelden
+## 3. Sign in
 
-1. Öffnen Sie `https://console.cell.example.com`.
-2. Melden Sie sich als `akadmin` mit dem Passwort aus Schritt 2 an.
-3. Ändern Sie das Passwort unter `https://auth.cell.example.com`, Benutzereinstellungen.
+1. Open `https://console.cell.example.com`.
+2. Sign in as `akadmin` with the password from step 2.
+3. Change the password at `https://auth.cell.example.com`, user settings.
 
-## 4. Backups einrichten
+## 4. Set up backups
 
-Ohne Backup-Ziel sichert die Zelle nichts. Richten Sie es ein, bevor Sie Daten in Apps ablegen.
+Without a backup target, the cell backs up nothing. Set it up before you put data into apps.
 
-1. Legen Sie einen S3-Bucket an, zum Beispiel in Hetzner Object Storage, und erzeugen Sie Zugangsschlüssel dafür.
-2. Öffnen Sie in der Konsole *Backups* und tragen Sie Anbieter, Bucket und Schlüssel ein.
-3. Die Zelle legt zur Probe eine Datei im Bucket an und löscht sie wieder. Klappt das, gilt das Ziel ab sofort für alle Apps. Klappt es nicht, bleibt alles, wie es war, und die Konsole zeigt den Grund.
+1. Create an S3 bucket, for example in Hetzner Object Storage, and generate access keys for it.
+2. In the console, open *Backups* and enter provider, bucket and keys.
+3. As a test, the cell creates a file in the bucket and deletes it again. If that works, the target applies to all apps from now on. If it does not, everything stays as it was, and the console shows the reason.
 
-Das Ziel lässt sich auch ohne Konsole setzen, etwa aus einem Skript oder durch einen KI-Agenten mit einem Admin-Token: siehe [Backup-Ziel per API](#backup-ziel-per-api).
+You can also set the target without the console, for example from a script or by an AI agent with an admin token: see [Backup target through the API](#backup-target-through-the-api).
 
-## Weitere Rechner hinzufügen
+## Add more machines
 
-Voraussetzung: Der neue Rechner hängt im selben privaten Netz wie der erste und erfüllt die [Voraussetzungen](#voraussetzungen). Er braucht keine offenen Ports; als Firewall genügt TCP 22 von Ihrer IP-Adresse.
+Prerequisite: the new machine is in the same private network as the first one and meets the [requirements](#requirements). It needs no open ports; as a firewall, TCP 22 from your IP address is enough.
 
-1. In der Konsole: *Machines*, *Add machine*.
-2. Den angezeigten Befehl auf dem neuen Rechner ausführen.
+1. In the console: *Machines*, *Add machine*.
+2. Run the command shown on the new machine.
 
-Der Rechner erscheint nach wenigen Minuten in der Konsole.
+The machine appears in the console after a few minutes.
 
-## Geräte verbinden
+## Connect devices
 
-Über das Mesh erreichen Mitarbeitende die Zelle verschlüsselt von ihren Geräten aus.
+Through the mesh, staff members reach the cell from their devices over an encrypted connection.
 
-1. Tailscale installieren: [tailscale.com/download](https://tailscale.com/download).
-2. Auf dem Gerät ausführen:
+1. Install Tailscale: [tailscale.com/download](https://tailscale.com/download).
+2. Run on the device:
 
    ```bash
    tailscale up --login-server=https://mesh.cell.example.com
    ```
 
-3. Im Browser mit dem Konto der Zelle anmelden.
+3. Sign in in the browser with the cell account.
 
-Erlaubt sind Administratoren und Mitglieder der Gruppe `cell-mesh`. Gruppen verwalten Sie unter `https://auth.cell.example.com/if/admin/`.
+Administrators and members of the group `cell-mesh` are allowed. You manage groups at `https://auth.cell.example.com/if/admin/`.
 
 ## Updates
 
-Derselbe Befehl wie bei der Installation holt das neueste Release:
+The same command as for the installation fetches the latest release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/marcelheidebrecht/cell-platform/main/get.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/eigen-hq/cell-platform/main/get.sh | sudo bash
 ```
 
-Alle Einstellungen und Daten bleiben erhalten. Ein bestimmtes Release installieren Sie mit `CELL_VERSION`:
+All settings and data are kept. You install a specific release with `CELL_VERSION`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/marcelheidebrecht/cell-platform/main/get.sh | sudo CELL_VERSION=v0.2.0 bash
+curl -fsSL https://raw.githubusercontent.com/eigen-hq/cell-platform/main/get.sh | sudo CELL_VERSION=v0.2.0 bash
 ```
 
-## Wenn etwas nicht klappt
+## If something goes wrong
 
-Die Installation zeigt bei einem Fehler den fehlgeschlagenen Schritt, den Grund und die letzten Zeilen des Protokolls. Das vollständige Protokoll liegt in `/var/log/cell-install.log`.
+If an error occurs, the installation shows the failed step, the reason and the last lines of the log. The full log is in `/var/log/cell-install.log`.
 
-| Meldung oder Verhalten | Ursache und Lösung |
+| Message or behavior | Cause and solution |
 |---|---|
-| `*.cell.example.com has no DNS record` | Der DNS-Eintrag fehlt oder ist noch nicht aktiv. Eintrag prüfen, einige Minuten warten, erneut ausführen. |
-| `ports 80/443 (tcp) or 3478 (udp) ... are taken` | Ein anderes Programm belegt die Ports, etwa ein Webserver. Es beenden oder einen eigenen Server nutzen. |
-| Schritt *Login page* dauert länger als 10 Minuten | Port 80 ist von außen nicht erreichbar, Let's Encrypt kann die Domain nicht prüfen. Firewall prüfen. |
-| Neuer Rechner erscheint nicht | Er hängt nicht im privaten Netz des ersten Rechners. |
-| Backup-Ziel: Probe schlägt fehl | Die Konsole nennt den Grund, meist ein falscher Schlüssel, ein falscher Bucket-Name oder ein Schlüssel nur zum Lesen. |
-| Startpasswort nicht notiert | Auf dem Server: `sudo k3s kubectl -n cell-system get secret identity -o jsonpath='{.data.AUTHENTIK_BOOTSTRAP_PASSWORD}' \| base64 -d` (gilt, bis Sie es ändern) |
-| Backup-Schlüssel nicht notiert | Auf dem Server: `sudo k3s kubectl -n cell-system get secret backup-target -o jsonpath='{.data.password}' \| base64 -d` |
+| `*.cell.example.com has no DNS record` | The DNS record is missing or not active yet. Check the record, wait a few minutes, run again. |
+| `ports 80/443 (tcp) or 3478 (udp) ... are taken` | Another program is using the ports, for example a web server. Stop it or use a dedicated server. |
+| Step *Login page* takes longer than 10 minutes | Port 80 is not reachable from outside, so Let's Encrypt cannot verify the domain. Check the firewall. |
+| New machine does not appear | It is not in the private network of the first machine. |
+| Backup target: test fails | The console gives the reason, usually a wrong key, a wrong bucket name or a read-only key. |
+| Initial password not written down | On the server: `sudo k3s kubectl -n cell-system get secret identity -o jsonpath='{.data.AUTHENTIK_BOOTSTRAP_PASSWORD}' \| base64 -d` (valid until you change it) |
+| Backup key not written down | On the server: `sudo k3s kubectl -n cell-system get secret backup-target -o jsonpath='{.data.password}' \| base64 -d` |
 
-Die Installation lässt sich jederzeit erneut ausführen; sie ändert nur, was fehlt.
+You can run the installation again at any time; it changes only what is missing.
 
-## Referenz
+## Reference
 
 ### Ports
 
-| Port | Von | Zweck |
+| Port | From | Purpose |
 |---|---|---|
-| 80/TCP | Internet | Let's Encrypt prüft die Domain; Weiterleitung auf HTTPS |
-| 443/TCP | Internet | Konsole, Anmeldung, API, alle Apps, Mesh |
-| 3478/UDP | Internet | Mesh: direkte Verbindungen zwischen Geräten und Zelle |
-| 6443, 10250, 5001/TCP, 51820/UDP | Nur privates Netz | Verkehr zwischen den Rechnern der Zelle. Nie aus dem Internet öffnen. |
+| 80/TCP | Internet | Let's Encrypt verifies the domain; redirect to HTTPS |
+| 443/TCP | Internet | Console, sign-in, API, all apps, mesh |
+| 3478/UDP | Internet | Mesh: direct connections between devices and cell |
+| 6443, 10250, 5001/TCP, 51820/UDP | Private network only | Traffic between the machines of the cell. Never open to the internet. |
 
-### Einstellungen
+### Settings
 
-Für eine Installation ohne Rückfragen, etwa aus einem Skript, setzen Sie Einstellungen als Umgebungsvariablen vor `bash`:
+For an installation without prompts, for example from a script, set settings as environment variables before `bash`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/marcelheidebrecht/cell-platform/main/get.sh |
+curl -fsSL https://raw.githubusercontent.com/eigen-hq/cell-platform/main/get.sh |
   sudo CELL_DOMAIN=cell.example.com CELL_ACME_EMAIL=ops@example.com bash
 ```
 
-Die Installation speichert sie in `/etc/cell/install.env`; spätere Läufe brauchen sie nicht noch einmal.
+The installation saves them in `/etc/cell/install.env`; later runs do not need them again.
 
-| Variable | Bedeutung | Standard |
+| Variable | Meaning | Default |
 |---|---|---|
-| `CELL_VERSION` | Release, das installiert wird | das neueste |
-| `CELL_DOMAIN` | Domain der Zelle | wird abgefragt |
-| `CELL_ACME_EMAIL` | E-Mail für Let's Encrypt | wird abgefragt; leer: selbstsignierte Zertifikate |
-| `CELL_INGRESS_IP` | Öffentliche Adresse der Zelle | Adresse der Standardroute |
-| `CELL_NODE_IP` | Adresse für den Verkehr zwischen den Rechnern | Adresse im privaten Netz, sonst `CELL_INGRESS_IP` |
-| `CELL_BACKUP_S3_*` | Backup-Ziel schon bei der Installation (`ENDPOINT`, `REGION`, `BUCKET`, `ACCESS_KEY`, `SECRET_KEY`) | keins, in der Konsole einrichten |
-| `CELL_BACKUP_PASSWORD` | Backup-Schlüssel | wird erzeugt |
-| `CELL_LLM_API_KEY` | Anthropic-Schlüssel für den Ops-Agenten | ohne: Agenten-Aufgaben warten |
+| `CELL_VERSION` | Release that is installed | the latest |
+| `CELL_DOMAIN` | Domain of the cell | asked for |
+| `CELL_ACME_EMAIL` | Email for Let's Encrypt | asked for; empty: self-signed certificates |
+| `CELL_INGRESS_IP` | Public address of the cell | address of the default route |
+| `CELL_NODE_IP` | Address for traffic between the machines | address in the private network, otherwise `CELL_INGRESS_IP` |
+| `CELL_BACKUP_S3_*` | Backup target already at installation (`ENDPOINT`, `REGION`, `BUCKET`, `ACCESS_KEY`, `SECRET_KEY`) | none, set it up in the console |
+| `CELL_BACKUP_PASSWORD` | Backup key | generated |
+| `CELL_LLM_API_KEY` | Anthropic key for the ops agent | without it: agent tasks wait |
 
-### Backup-Ziel per API
+### Backup target through the API
 
-Die Konsole nutzt dieselbe Schnittstelle wie Skripte und KI-Agenten. Ein Admin erzeugt in der Konsole unter *Organization* ein Token für sein Konto und gibt es zum Beispiel einem Agenten. Das Token wird gegen ein Zugriffstoken getauscht, mit dem das Ziel gesetzt wird:
+The console uses the same interface as scripts and AI agents. An admin creates a token for their account in the console under *Organization* and gives it to an agent, for example. The token is exchanged for an access token, which is used to set the target:
 
 ```bash
 curl -fsS https://auth.cell.example.com/application/o/token/ \
   -d grant_type=client_credentials -d client_id=cell-api -d 'scope=openid profile' \
-  -d username=akadmin -d password=<Token>
-# access_token aus der Antwort:
+  -d username=akadmin -d password=<token>
+# access_token from the response:
 curl -fsS -X PUT https://api.cell.example.com/v0/backup-target \
   -H 'Authorization: Bearer <access_token>' -H 'Content-Type: application/json' \
   -d '{"endpoint": "https://fsn1.your-objectstorage.com", "region": "fsn1",
-       "bucket": "<Bucket>", "accessKey": "<Access Key>", "secretKey": "<Secret Key>"}'
+       "bucket": "<bucket>", "accessKey": "<access key>", "secretKey": "<secret key>"}'
 ```
 
-`GET /v0/backup-target` zeigt das Ziel und das Ergebnis der Probe. Die vollständige Beschreibung der API liegt unter `https://api.cell.example.com/openapi.yaml`.
+`GET /v0/backup-target` shows the target and the result of the test. The full description of the API is at `https://api.cell.example.com/openapi.yaml`.

@@ -1,32 +1,32 @@
-# App-Manifest
+# App manifest
 
-Stand v1alpha1 (an den drei Referenz-Apps geschärft). Das Manifest ist die zentrale Abstraktion der Plattform: Eine App beschreibt, was sie braucht, und die Plattform stellt es bereit. Die Go-Typen liegen in `api/v1alpha1/app_types.go`, die CRD in `deploy/crd/`.
+Status: v1alpha1 (sharpened against the three reference apps). The manifest is the central abstraction of the platform: an app describes what it needs, and the platform provides it. The Go types are in `api/v1alpha1/app_types.go`, the CRD in `deploy/crd/`.
 
-Vorbild ist das Manifest von Cloudron, bei dem Datenbank, Login und Mail als geteilte Dienste der Plattform angefordert werden.
+The model is the Cloudron manifest, where database, login and mail are requested as shared services of the platform.
 
-## Grundidee
+## Basic idea
 
-- Die App bringt nur sich selbst mit (Helm-Chart oder Container-Image).
-- Alles Geteilte fordert sie an: Datenbank, Volumes, generierte Geheimnisse, Login, Subdomain.
-- Die Plattform setzt die konkreten Werte beim Installieren ein (Platzhalter).
-- Der Kunde gibt nur an, was nur er wissen kann, zum Beispiel die gewünschte Subdomain.
+- The app brings only itself (Helm chart or container image).
+- It requests everything shared: database, volumes, generated secrets, login, subdomain.
+- The platform fills in the concrete values at install time (placeholders).
+- The customer states only what only the customer can know, for example the desired subdomain.
 
-Ein Katalog-Manifest (`catalog/<app>/manifest.yaml`) ist selbst eine `App`. Installieren heißt: dieses Objekt anlegen, gegebenenfalls mit geänderter Subdomain.
+A catalog manifest (`catalog/<app>/manifest.yaml`) is itself an `App`. Installing means: create this object, possibly with a changed subdomain.
 
-## Beispiel
+## Example
 
-Gekürzt aus `catalog/forgejo/manifest.yaml`:
+Shortened from `catalog/forgejo/manifest.yaml`:
 
 ```yaml
 apiVersion: cell.internal/v1alpha1
 kind: App
 metadata:
-  name: forgejo                     # ergibt Namespace app-forgejo
+  name: forgejo                     # yields namespace app-forgejo
 spec:
   title: Forgejo
-  version: "15.0.11"                # als {{ .app.version }} verfügbar
+  version: "15.0.11"                # available as {{ .app.version }}
   source:
-    helm:                           # alternativ: image
+    helm:                           # alternatively: image
       repo: oci://code.forgejo.org/forgejo-helm
       chart: forgejo
       version: "17.3.2"
@@ -47,114 +47,114 @@ spec:
       engine: postgres
       size: 2Gi
   access:
-    subdomain: git                  # ergibt git.<domain-der-zelle>
+    subdomain: git                  # yields git.<domain-of-the-cell>
     port: 3000
-    service: "{{ .app.name }}-http" # Service des Charts
+    service: "{{ .app.name }}-http" # service of the chart
     auth:
       mode: oidc
       redirectPaths: [/user/oauth2/authentik/callback]
       secretKeys: {clientId: key, clientSecret: secret}
-    groups: [entwicklung]           # nur diese Gruppen; leer: alle Nutzer
+    groups: [entwicklung]           # only these groups; empty: all users
   health:
     path: /api/healthz
     timeoutSeconds: 600
 ```
 
-## Felder
+## Fields
 
-| Feld | Bedeutung |
+| Field | Meaning |
 |---|---|
-| `version` | Version der App. Bei Images der Standard-Tag, bei Charts über `{{ .app.version }}` in den Werten |
-| `source.helm` | `repo` (`https://…` oder `oci://…`), `chart`, `version`, `values` mit Platzhaltern |
-| `source.image` | `repository`, `tag` (Standard: `version`), `command`, `args`, `env` (wie bei Kubernetes, inklusive `valueFrom`), `files` |
-| `source.image.files` | Dateien, die schreibgeschützt in den Container kommen (`path`, `content`, `executable`). So laufen app-spezifische Schritte nach der Installation, zum Beispiel als Start-Hook des Images |
-| `needs.database` | `engine: postgres`, `size`. Eine eigene CloudNativePG-Datenbank je App |
-| `needs.volumes` | `name`, `size`, `mountPath` (Image-Apps), höchstens 16. Charts legen ihre Volumes selbst an. Die Größe lässt sich wie bei der Datenbank noch nicht ändern, weil das Zurückrollen ein Volume nicht verkleinern kann |
-| `needs.secrets` | Namen generierter Geheimnisse (Schlüssel `password`), einmal erzeugt, bleiben über Neuinstallationen erhalten |
-| `metadata.name` | Name der App, höchstens 40 Zeichen; Namen mit `cell-` am Anfang gehören der Plattform (ihre eigenen Clients in der Identität) |
-| `access` | `subdomain` (nicht `auth`, `api` und `mcp`, die gehören der Zelle; je Zelle nur einmal: ein Host, den schon eine andere Route bedient, bleibt bei ihr; sonst reserviert der Operator den Host atomar als ConfigMap `host-<subdomain>` in `cell-system`, bevor er etwas einrichtet; wer zuerst reserviert, behält ihn, bis seine Routen ihn verlassen haben oder die App entfernt ist), `port`, `service` (Standard: App-Name), `auth`, `groups` |
-| `access.auth` | `mode`, `redirectPaths` (OIDC-Rückrufpfade), `secretKeys` (Schlüsselnamen im Client-Secret, wie Chart oder App sie erwarten) |
-| `access.groups` | Gruppen der Identität, deren Mitglieder die App nutzen dürfen; leer heißt alle Nutzer der Zelle. Braucht einen Login (`oidc` oder `proxy`); andere werden schon beim Login abgewiesen |
-| `health` | `path` (Standard `/`) und `timeoutSeconds` (Standard 300), siehe Status. Auch die Frist, in der ein Update gesund werden muss |
-| `mcp` | `path` des MCP-Endpunkts der App (Streamable HTTP auf `access.port`). Sobald die App gesund war, bietet das MCP-Gateway der Zelle ihre Werkzeuge an, mit dem App-Namen vorn (`notes_memo_list_memos`), nur Konten, die die App nutzen dürfen (`access.groups`). Der Status nennt die interne Adresse (`mcpEndpoint`) |
-| `backup.schedule` | `none`, `hourly`, `daily` (Standard), `weekly`. Gesichert werden Apps mit Datenbank oder Volumes, das erste Mal direkt nach der Installation. Aufbewahrung 30 Tage |
+| `version` | Version of the app. For images the default tag, for charts available through `{{ .app.version }}` in the values |
+| `source.helm` | `repo` (`https://…` or `oci://…`), `chart`, `version`, `values` with placeholders |
+| `source.image` | `repository`, `tag` (default: `version`), `command`, `args`, `env` (as in Kubernetes, including `valueFrom`), `files` |
+| `source.image.files` | Files that go into the container read-only (`path`, `content`, `executable`). This is how app-specific steps run after installation, for example as a start hook of the image |
+| `needs.database` | `engine: postgres`, `size`. One CloudNativePG database per app |
+| `needs.volumes` | `name`, `size`, `mountPath` (image apps), at most 16. Charts create their volumes themselves. As with the database, the size cannot be changed yet, because a rollback cannot shrink a volume |
+| `needs.secrets` | Names of generated secrets (key `password`), created once, kept across reinstalls |
+| `metadata.name` | Name of the app, at most 40 characters; names starting with `cell-` belong to the platform (its own clients in the identity service) |
+| `access` | `subdomain` (not `auth`, `api` and `mcp`, which belong to the cell; only once per cell: a host that another route already serves stays with that route; otherwise the operator reserves the host atomically as ConfigMap `host-<subdomain>` in `cell-system` before it sets anything up; whoever reserves first keeps it until its routes have left it or the app is removed), `port`, `service` (default: app name), `auth`, `groups` |
+| `access.auth` | `mode`, `redirectPaths` (OIDC callback paths), `secretKeys` (key names in the client secret, as the chart or app expects them) |
+| `access.groups` | Groups of the identity service whose members may use the app; empty means all users of the cell. Needs a login (`oidc` or `proxy`); others are rejected at login |
+| `health` | `path` (default `/`) and `timeoutSeconds` (default 300), see Status. Also the deadline within which an update must become healthy |
+| `mcp` | `path` of the MCP endpoint of the app (Streamable HTTP on `access.port`). Once the app has been healthy, the MCP gateway of the cell offers its tools, with the app name in front (`notes_memo_list_memos`), only to accounts that may use the app (`access.groups`). The status shows the internal address (`mcpEndpoint`) |
+| `backup.schedule` | `none`, `hourly`, `daily` (default), `weekly`. Apps with a database or volumes are backed up, the first time right after installation. Retention is 30 days |
 
-Noch nicht umgesetzt und deshalb nicht im Schema: Backup-Hooks (O-10), `update` (O-09), `provisioning`, MCP-Server als eigener Container (O-19), Objektspeicher, SMTP.
+Not implemented yet and therefore not in the schema: backup hooks (O-10), `update` (O-09), `provisioning`, MCP server as a separate container (O-19), object storage, SMTP.
 
-## Login-Arten
+## Login modes
 
-| `auth.mode` | Wann | Was die Plattform tut | Referenz-App |
+| `auth.mode` | When | What the platform does | Reference app |
 |---|---|---|---|
-| `oidc` | App kann OpenID Connect | Legt in authentik Provider und Application an (implizite Zustimmung, also kein Klick) und ein Secret `oidc` mit Client-ID und -Secret | Forgejo (Chart), Nextcloud (über `user_oidc`, eingerichtet per Start-Hook) |
-| `proxy` | App hat kein eigenes Login | Forward-Auth-Provider am eingebetteten Outpost, Traefik-Middleware vor der App; die App bekommt den Nutzer als `X-authentik-*`-Header | Eigenbau-Platzhalter (`traefik/whoami`) |
-| `none` | App ist bewusst offen oder verwaltet Nutzer selbst | Nichts | – |
+| `oidc` | App supports OpenID Connect | Creates a provider and an application in authentik (implicit consent, so no click) and a secret `oidc` with client ID and secret | Forgejo (chart), Nextcloud (through `user_oidc`, set up by a start hook) |
+| `proxy` | App has no login of its own | Forward-auth provider on the embedded outpost, Traefik middleware in front of the app; the app receives the user as `X-authentik-*` headers | Custom-app placeholder (`traefik/whoami`) |
+| `none` | App is deliberately open or manages users itself | Nothing | - |
 
-`ldap` ist vorgesehen, aber erst umgesetzt, wenn eine App es braucht.
+`ldap` is planned but will be implemented only when an app needs it.
 
-## Platzhalter
+## Placeholders
 
-Strings in `source` und `access.service` sind Go-Templates. Ein Platzhalter, den es für die App nicht gibt (zum Beispiel `.database.host` ohne Datenbank), ist ein Fehler und steht im Status. Passwörter gibt es nie als Platzhalter, nur Secret-Namen.
+Strings in `source` and `access.service` are Go templates. A placeholder that does not exist for the app (for example `.database.host` without a database) is an error and appears in the status. Passwords are never available as placeholders, only secret names.
 
-| Platzhalter | Inhalt |
+| Placeholder | Content |
 |---|---|
-| `.app.name`, `.app.version`, `.app.namespace` | Name, Version, Namespace `app-<name>` |
-| `.cell.domain`, `.cell.caConfigMap` | Domain der Zelle; ConfigMap mit `ca.crt` (Zellen-CA) und `ca-certificates.crt` (öffentliche Wurzeln plus Zellen-CA) |
-| `.access.host`, `.access.url` | Hostname und `https://`-URL der App |
-| `.database.host`, `.port`, `.name`, `.user`, `.secretName` | Datenbank; das Secret hat `username` und `password` |
-| `.auth.issuer`, `.auth.discoveryUrl`, `.auth.clientId`, `.auth.secretName` | OIDC-Werte; das Secret hat die Schlüssel aus `secretKeys` |
-| `.volumes.<name>.claim` | Name des PersistentVolumeClaims |
-| `.secrets.<name>` | Name des generierten Secrets |
+| `.app.name`, `.app.version`, `.app.namespace` | Name, version, namespace `app-<name>` |
+| `.cell.domain`, `.cell.caConfigMap` | Domain of the cell; ConfigMap with `ca.crt` (cell CA) and `ca-certificates.crt` (public roots plus cell CA) |
+| `.access.host`, `.access.url` | Hostname and `https://` URL of the app |
+| `.database.host`, `.port`, `.name`, `.user`, `.secretName` | Database; the secret has `username` and `password` |
+| `.auth.issuer`, `.auth.discoveryUrl`, `.auth.clientId`, `.auth.secretName` | OIDC values; the secret has the keys from `secretKeys` |
+| `.volumes.<name>.claim` | Name of the PersistentVolumeClaim |
+| `.secrets.<name>` | Name of the generated secret |
 
-## Was der Operator anlegt
+## What the operator creates
 
-In dieser Reihenfolge, jeder Schritt mit eigener Bedingung im Status:
+In this order, each step with its own condition in the status:
 
-1. Namespace `app-<name>` und ConfigMap `cell-ca`
-2. generierte Secrets, Datenbank (`DatabaseReady`), wartet bis sie bereit ist
-3. Login-Client in authentik (`LoginReady`); wird bei Spec-Änderung, nach einem Operator-Neustart und alle 10 Minuten neu geschrieben, damit Abweichungen heilen
-4. Workload (`WorkloadReady`): Image-Apps als Deployment (Strategie `Recreate`), Service, PVCs; Helm-Apps als Flux `OCIRepository`/`HelmRepository` und `HelmRelease`
-5. Ingress mit Zertifikat vom ClusterIssuer `cell`, bei `proxy` zusätzlich Middleware und Outpost-Route
-6. Health-Check direkt gegen den Service (`Ready`)
+1. Namespace `app-<name>` and ConfigMap `cell-ca`
+2. generated secrets, database (`DatabaseReady`), waits until it is ready
+3. Login client in authentik (`LoginReady`); rewritten on spec change, after an operator restart and every 10 minutes, so that drift heals
+4. Workload (`WorkloadReady`): image apps as Deployment (strategy `Recreate`), Service, PVCs; Helm apps as Flux `OCIRepository`/`HelmRepository` and `HelmRelease`
+5. Ingress with certificate from the ClusterIssuer `cell`; with `proxy` additionally middleware and outpost route
+6. Health check directly against the service (`Ready`)
 
-Image-Apps vertrauen der Zellen-CA automatisch (eingehängtes Bundle, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`). Helm-Apps hängen `{{ .cell.caConfigMap }}` über ihre Chart-Werte ein. In lokalen Zellen (`*.localhost`) bekommen Image-Apps zusätzlich die Loopback-Brücke (E-21).
+Image apps trust the cell CA automatically (mounted bundle, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`). Helm apps mount `{{ .cell.caConfigMap }}` through their chart values. In local cells (`*.localhost`) image apps additionally get the loopback bridge (E-21).
 
 ## Status
 
-- `phase`: `Installing` bis zum ersten erfolgreichen Health-Check, dann `Ready`. Bleibt eine App länger als `health.timeoutSeconds` ungesund oder ist ihre letzte Änderung gescheitert, wird sie `NeedsAttention`. Während einer Änderung `Updating`, beim Zurückrollen `RollingBack`, bei einer Wiederherstellung `Restoring`, beim Entfernen `Removing`.
-- `version`: Version, mit der der letzte Health-Check bestanden wurde
-- `lastBackup`: Name und Zeitpunkt des letzten vollständigen Backups
-- `url`: Adresse der App
-- `conditions`: `DatabaseReady`, `LoginReady`, `WorkloadReady`, `Ready`, nach einer gescheiterten Änderung `LastChangeSucceeded=False`, jeweils mit lesbarer Begründung
+- `phase`: `Installing` until the first successful health check, then `Ready`. If an app stays unhealthy for longer than `health.timeoutSeconds`, or its last change failed, it becomes `NeedsAttention`. `Updating` during a change, `RollingBack` during a rollback, `Restoring` during a restore, `Removing` during removal.
+- `version`: version with which the last health check passed
+- `lastBackup`: name and time of the last complete backup
+- `url`: address of the app
+- `conditions`: `DatabaseReady`, `LoginReady`, `WorkloadReady`, `Ready`, after a failed change `LastChangeSucceeded=False`, each with a readable reason
 
-## Tag-2-Betrieb
+## Day-2 operation
 
-Neben `App` gibt es drei Ressourcen (`api/v1alpha1/operations_types.go`):
+Besides `App` there are three resources (`api/v1alpha1/operations_types.go`):
 
-- **`Backup`**: Datenbank (Basissicherung über barman-cloud) und Volumes (restic) einer App im Bucket der Zelle. Entsteht nach Zeitplan, vor jeder Änderung oder auf Anfrage. Wartet, solange eine Änderung oder Wiederherstellung der App läuft, und umgekehrt. Ein laufendes Backup bricht beim Löschen ab: Datenbanksicherung und Job werden gelöscht, restic gibt die Sperre des Repositorys frei, und das Backup hält die App, bis kein Pod des Jobs mehr läuft.
-- **`Restore`**: stoppt die App, stellt Volumes und Datenbank aus einem Backup wieder her (Name oder `latest`) und startet sie. Funktioniert auch in einer frischen Zelle, die das Backup nur im Bucket kennt. Beginnt erst, wenn die App eingerichtet ist (Namespace, Volumes) und ihre Backup-Zugangsdaten zum Backup-Ziel der Zelle passen, damit sie die Installation nicht anhält. Eine App ohne Daten (keine Datenbank, keine Volumes, kein Chart) lässt sich nicht wiederherstellen. Vor dem Start konfiguriert der Operator die App für ihre aktuelle Spec (bei Helm-Apps: Flux hat die Release dafür ausgerollt), damit keine Workloads mit einer anderen Konfiguration auf den wiederhergestellten Daten laufen. Gibt Flux dabei auf, scheitert die Wiederherstellung, und die App bleibt angehalten.
-- **`ChangeRequest`**: Urheber, Begründung, Risikostufe, Aktion, Freigabe. Die Summe der `ChangeRequest`s ist das Änderungsprotokoll. Jede Aktion wartet auf die Freigabe, die ein Admin über die Plattform-API in einem eigenen Aufruf einträgt (E-30), und sichert die App vorher, wenn sie Daten hat:
-  - `update`: JSON Merge Patch auf die App-Spec, Health-Check innerhalb von `health.timeoutSeconds`, bei Fehler zurück zur vorigen Spec und Restore des Backups.
-  - `install`: legt die App mit der Spec aus `patch` an und endet mit ihrem ersten Health-Check. Wird sie nicht gesund, scheitert die Änderung, und die App bleibt zur Diagnose installiert. Läuft noch ein `remove` derselben App, wartet die Installation, bis es fertig ist, statt dessen Daten zu übernehmen.
-  - `remove`: löscht die App wie im Abschnitt Entfernen beschrieben; mit `deleteData` danach auch ihren Namespace mit Volumes, Datenbank und Secrets. Backups im Bucket bleiben.
-  - `restore`: stellt das Backup `backup` wieder her (immer beim Namen) und wartet auf den Health-Check. Wird die App innerhalb von `health.timeoutSeconds` nicht gesund, scheitert die Änderung und gibt die App frei; das Backup vor der Änderung hält den Stand davor.
+- **`Backup`**: database (base backup through barman-cloud) and volumes (restic) of an app in the bucket of the cell. Created on schedule, before every change or on request. Waits while a change or restore of the app is running, and the other way round. A running backup aborts on deletion: the database backup and the job are deleted, restic releases the lock on the repository, and the backup holds the app until no pod of the job is running.
+- **`Restore`**: stops the app, restores volumes and database from a backup (name or `latest`) and starts it. Also works in a fresh cell that knows the backup only in the bucket. Starts only when the app is set up (namespace, volumes) and its backup credentials match the backup target of the cell, so that it does not hold up the installation. An app without data (no database, no volumes, no chart) cannot be restored. Before the start the operator configures the app for its current spec (for Helm apps: Flux has rolled out the release for it), so that no workloads run with a different configuration on the restored data. If Flux gives up in the process, the restore fails and the app stays stopped.
+- **`ChangeRequest`**: originator, reason, risk level, action, approval. The sum of the `ChangeRequest`s is the change log. Every action waits for the approval, which an admin records through the platform API in a separate call (E-30), and backs up the app beforehand if it has data:
+  - `update`: JSON Merge Patch on the app spec, health check within `health.timeoutSeconds`, on failure back to the previous spec and restore of the backup.
+  - `install`: creates the app with the spec from `patch` and ends with its first health check. If it does not become healthy, the change fails and the app stays installed for diagnosis. If a `remove` of the same app is still running, the installation waits until it is done, instead of taking over its data.
+  - `remove`: deletes the app as described in the section Removal; with `deleteData` afterwards also its namespace with volumes, database and secrets. Backups in the bucket stay.
+  - `restore`: restores the backup `backup` (always by name) and waits for the health check. If the app does not become healthy within `health.timeoutSeconds`, the change fails and releases the app; the backup taken before the change holds the earlier state.
 
-  Der Name ist höchstens 244 Zeichen lang, weil Backup und Rollback `<name>-pre`, `<name>-rollback` und `<name>-restore` heißen.
+  The name is at most 244 characters long, because backup and rollback are named `<name>-pre`, `<name>-rollback` and `<name>-restore`.
 
-## Aufgaben für Agenten
+## Tasks for agents
 
-Eine **`Task`** (`kind: diagnose` oder `package`) ist Arbeit für den Ops-Agenten. Der Operator legt eine Diagnose an, wenn eine App `NeedsAttention` wird, eine je Ursache (Health-Checks scheitern länger, als das Manifest erlaubt; eine gescheiterte Änderung; eine gescheiterte Wiederherstellung; Name `<app>-diagnose-<Prüfsumme der Ursache>`), mit den Bedingungen der App als `input`. Ein Admin legt Diagnosen oder Paketierungen über `POST /v0/tasks` an; bei `package` ist `input` die Compose-Datei und `app` der Name der neuen App. Der Agent übernimmt die Aufgabe, arbeitet nur über die API (jeder Aufruf ein Schritt in `status.steps`) und beendet sie mit seiner Antwort in `status.result`. Verliert er eine Aufgabe (Neustart, verlorene Antwort der API), beendet er sie beim nächsten Abfragen als gescheitert; ein Admin kann neu fragen. Was er ändern will, schlägt er als `ChangeRequest` mit `spec.task` vor; ein paketiertes Manifest als `install` mit hohem Risiko, das der Cluster vor der Freigabe prüft (E-35).
+A **`Task`** (`kind: diagnose` or `package`) is work for the ops agent. The operator creates a diagnosis when an app becomes `NeedsAttention`, one per cause (health checks fail for longer than the manifest allows; a failed change; a failed restore; name `<app>-diagnose-<checksum of the cause>`), with the conditions of the app as `input`. An admin creates diagnoses or packagings through `POST /v0/tasks`; for `package`, `input` is the Compose file and `app` is the name of the new app. The agent takes the task, works only through the API (every call a step in `status.steps`) and ends it with its answer in `status.result`. If it loses a task (restart, lost API response), it ends the task as failed on its next poll; an admin can ask again. What it wants to change, it proposes as a `ChangeRequest` with `spec.task`; a packaged manifest as `install` with high risk, which the cluster checks before approval (E-35).
 
-## Entfernen
+## Removal
 
-Das Löschen einer `App` entfernt Workload, Ingress und Login-Client. Die Daten bleiben als letzte Sicherung: Volumes bleiben, die Datenbank wird schlafen gelegt (CloudNativePG-Hibernation), der Namespace bekommt das Label `cell.internal/retained=true`. PVCs aus Charts sind per Post-Renderer mit `helm.sh/resource-policy: keep` vor dem Deinstallieren geschützt. Wird die App wieder angelegt, übernimmt sie die Daten. Läuft gerade eine Änderung, Wiederherstellung oder ein Backup, wartet das Entfernen, bis es beendet ist (eine Änderung bricht dabei ihr laufendes Backup ab und gibt die App erst frei, wenn dessen Job gestoppt ist); eine Wiederherstellung, die noch keine Daten ersetzt hat, bricht ab, und neue starten nicht mehr. Endgültig gelöscht werden die Daten nur mit einer freigegebenen Änderung `remove` mit `deleteData` (über die API: `DELETE /v0/apps/{name}?deleteData=true`).
+Deleting an `App` removes workload, ingress and login client. The data stays as a last backup: volumes stay, the database is put to sleep (CloudNativePG hibernation), the namespace gets the label `cell.internal/retained=true`. PVCs from charts are protected from uninstall by a post-renderer with `helm.sh/resource-policy: keep`. If the app is created again, it takes over the data. If a change, restore or backup is running, removal waits until it has ended (a change aborts its running backup in the process and releases the app only when the job of that backup has stopped); a restore that has not replaced any data yet aborts, and new ones no longer start. Data is deleted for good only with an approved `remove` change with `deleteData` (through the API: `DELETE /v0/apps/{name}?deleteData=true`).
 
-## Zwei Stufen im Katalog
+## Two tiers in the catalog
 
-- **Integriert**: gepflegtes Manifest mit Login, geprüften Updates und, wo vorhanden, MCP. Das kuratierte Standard-Set.
-- **Generisch**: Manifest aus einer Compose-Datei abgeleitet (Charts: O-15), vom Ops-Agenten erzeugt und über `POST /v0/apps` mit `manifest` installiert. Läuft mit Subdomain, Backup und Neustart, aber ohne Garantie für Login und Updates.
+- **Integrated**: maintained manifest with login, tested updates and, where available, MCP. The curated default set.
+- **Generic**: manifest derived from a Compose file (charts: O-15), generated by the ops agent and installed through `POST /v0/apps` with `manifest`. Runs with subdomain, backup and restart, but without a guarantee for login and updates.
 
-## Antworten auf die offenen Punkte der ersten Fassung
+## Answers to the open points of the first version
 
-- **App-spezifische Schritte nach der Installation**: als Dateien im Manifest (`source.image.files`), meist als Start-Hook des Images, der bei jedem Start idempotent läuft (Nextcloud: `user_oidc` installieren und Provider anlegen). Bei Charts über deren eigene Mechanismen (Forgejo legt die OAuth-Quelle im Init-Container an).
-- **Platzhalter oder Übersetzungsstück**: Platzhalter reichen für alle drei Apps. Nötig waren zwei kleine Ergänzungen: `secretKeys` (Charts erwarten eigene Schlüsselnamen) und Platzhalter in `access.service` (Service-Name hängt am Release-Namen).
-- **Apps aus mehreren Containern ohne Chart**: noch offen; bis eine solche App kommt, ist der Weg ein Helm-Chart. Kandidat für die Paketierung durch den Agenten.
+- **App-specific steps after installation**: as files in the manifest (`source.image.files`), mostly as a start hook of the image that runs idempotently on every start (Nextcloud: install `user_oidc` and create the provider). For charts, through their own mechanisms (Forgejo creates the OAuth source in the init container).
+- **Placeholders or a translation layer**: placeholders are enough for all three apps. Two small additions were needed: `secretKeys` (charts expect their own key names) and placeholders in `access.service` (the service name depends on the release name).
+- **Apps made of several containers without a chart**: still open; until such an app comes, the way is a Helm chart. Candidate for packaging by the agent.

@@ -65,7 +65,7 @@ test: console ## Unit and controller tests (envtest), console type check
 e2e: console-browser ## End-to-end tests against the local cell (with a browser for the console)
 	go test -tags e2e -count=1 -timeout 60m ./test/e2e/...
 
-demo: cell-up ## Target demo on the local cell, step by step (docs/stand.md)
+demo: cell-up ## Target demo on the local cell, step by step (docs/status.md)
 	test/demo.sh
 
 dr-test: ## Restore an app into a freshly recreated local cell (destroys the cell)

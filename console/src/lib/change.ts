@@ -1,5 +1,5 @@
 // A change request in plain words: what it does, in which steps, and what
-// protects the app while it runs (docs/architektur.md: snapshot, change,
+// protects the app while it runs (docs/architecture.md: snapshot, change,
 // health check, rollback on failure).
 import type { components } from "./api/schema";
 

@@ -1,213 +1,213 @@
 # Backlog
 
-Alle Features in einer Liste, ohne Phasen (E-37). Die Reihenfolge innerhalb eines Bereichs folgt den Abhängigkeiten.
+All features in one list, without phases (E-37). The order within an area follows the dependencies.
 
-## Die Grenze
+## The boundary
 
-- **Plattform und Konsole: technischer Betrieb.** Apps ausführen, überwachen, sichern, prüfen und freigeben. Hier sieht die IT, was in der Zelle passiert, und entscheidet über alles, was für mehr als eine Person gilt.
-- **Office-Oberfläche: die Arbeit.** Alle Mitarbeiter nutzen dort die Apps, fragen neue an, wünschen sich Features und probieren sie zuerst für sich allein aus. Die Office-Oberfläche liegt beim Mitgründer, in eigenen Repos.
-- **Die Naht:** Anfragen aus der Office-Oberfläche kommen über die Plattform-API an. Was nur eine Person betrifft, läuft eingeschränkt ohne Freigabe. Was für alle gilt, geht durch die Freigabe der IT in der Konsole. Die Plattform setzt durch, welche App welche Daten sehen darf.
+- **Platform and console: technical operation.** Run, monitor, back up, check and approve apps. Here IT sees what happens in the cell and decides everything that applies to more than one person.
+- **Office UI: the work.** All employees use the apps there, request new ones, ask for features and try them out for themselves first. The office UI belongs to the co-founder, in separate repos.
+- **The seam:** requests from the office UI arrive through the platform API. What affects only one person runs restricted, without approval. What applies to everyone goes through the approval by IT in the console. The platform enforces which app may see which data.
 
 Status:
 
-- **läuft** – Logik und Oberfläche sind da (`stand.md`)
-- **API läuft** – die Logik ist da (Plattform-API); die Oberfläche fehlt noch
-- **offen** – Logik und Oberfläche entstehen gemeinsam, sobald das Feature dran ist
+- **running**: logic and UI are there (`status.md`)
+- **API running**: the logic is there (platform API); the UI is still missing
+- **open**: logic and UI are built together, once the feature is next
 
-Was die Konsole zeigt, kommt aus der API. Ohne Endpunkt gibt es keine Oberfläche, auch keine mit Beispieldaten.
+What the console shows comes from the API. Without an endpoint there is no UI, not even one with sample data.
 
-## Plattform und Konsole
+## Platform and console
 
-### Grundgerüst
+### Foundation
 
-| Feature | Status | Hängt ab von |
+| Feature | Status | Depends on |
 |---|---|---|
-| Konsole im Browser, Anmeldung über die Identität | läuft | |
-| Übersicht: Zustand der Zelle, offene Freigaben, letzte Ereignisse | läuft | |
-| Live-Ereignisse | läuft (Übersicht) | |
-| Helle und dunkle Tonlage | läuft | |
-| Erste Einrichtung einer neuen Zelle | offen | |
+| Console in the browser, login through the identity service | running | |
+| Overview: state of the cell, open approvals, latest events | running | |
+| Live events | running (overview) | |
+| Light and dark tone | running | |
+| First setup of a new cell | open | |
 
-### Freigaben
+### Approvals
 
-| Feature | Status | Hängt ab von |
+| Feature | Status | Depends on |
 |---|---|---|
-| Änderungen freigeben und ablehnen | läuft | |
-| Anfragen aus der Office-Oberfläche freigeben (neue App, Feature für alle) | offen | Anfragen-API |
-| Vor der Freigabe sehen, welche Daten und Rechte eine App bekommt | offen | Datenzugriff je App |
-| Änderungen nachbessern, Vorschau, Rückgängig mit einem Aufruf | offen | |
-| Vier-Augen-Prinzip | offen | O-12 |
-| Freigabe-Richtlinie (was automatisch laufen darf) | offen | |
-| Update-Richtlinie | offen | O-09 |
-| Rollen in der Konsole: Leitungen geben für ihre Abteilung frei, Prüfer lesen nur | offen | |
+| Approve and reject changes | running | |
+| Approve requests from the office UI (new app, feature for everyone) | open | Requests API |
+| See before approval which data and permissions an app gets | open | Data access per app |
+| Improve changes, preview, undo with one call | open | |
+| Four-eyes principle | open | O-12 |
+| Approval policy (what may run automatically) | open | |
+| Update policy | open | O-09 |
+| Roles in the console: managers approve for their department, auditors read only | open | |
 
-### Apps im Betrieb
+### Apps in operation
 
-| Feature | Status | Hängt ab von |
+| Feature | Status | Depends on |
 |---|---|---|
-| Installierte Apps mit Zustand, Version, Adresse | läuft | |
-| Installieren durch die IT: Katalog, eigenes Manifest | läuft (Katalog); Manifest: API läuft | |
-| Paketieren eines Open-Source-Projekts durch einen Agenten (Compose) | läuft | Helm-Charts: O-15 |
-| Update und Entfernen | läuft (Update von Hand; Update-Richtlinie: O-09) | O-09 |
-| Datenzugriff je App durchsetzen: welche Personen, welche Daten | offen | |
-| Erreichbarkeit je App (öffentlich, hinter Anmeldung, nur Firmennetz) | offen | O-05 |
-| Stufen der Unterstützung (eingebaut, integriert, generisch, Eigenbau, angepasst) | offen | |
-| Dienste der Zelle (Anmeldung, Eingang, Datenbanken, Speicher, Tool-Gateway, System-Mail) | offen | |
-| Technische Aktionen in einer App durch einen Agenten (z. B. in authentik einrichten) | offen | O-14, O-18 |
+| Installed apps with state, version, address | running | |
+| Install by IT: catalog, own manifest | running (catalog); manifest: API running | |
+| Packaging of an open-source project by an agent (Compose) | running | Helm charts: O-15 |
+| Update and remove | running (update by hand; update policy: O-09) | O-09 |
+| Enforce data access per app: which people, which data | open | |
+| Reachability per app (public, behind login, company network only) | open | O-05 |
+| Support tiers (built-in, integrated, generic, custom-built, adapted) | open | |
+| Services of the cell (login, ingress, databases, storage, tool gateway, system mail) | open | |
+| Technical actions in an app by an agent (e.g. set up in authentik) | open | O-14, O-18 |
 
-### Angepasste Apps, technische Seite
+### Adapted apps, technical side
 
-Gewünscht und ausprobiert wird in der Office-Oberfläche; die Plattform baut, betreibt und gibt frei.
+What is wanted and tried out happens in the office UI; the platform builds, operates and approves.
 
-| Feature | Status | Hängt ab von |
+| Feature | Status | Depends on |
 |---|---|---|
-| Build-Pipeline für Eigenbau und angepasste Apps | offen | |
-| Persönliche Testversion: eine angepasste App nur für eine Person, eingeschränkt, ohne Freigabe | offen | Build-Pipeline, Datenzugriff je App |
-| Übernahme für alle nach Freigabe der IT | offen | |
-| Anpassungen bei jedem Update neu anwenden | offen | |
+| Build pipeline for custom-built and adapted apps | open | |
+| Personal trial version: an adapted app for one person only, restricted, without approval | open | Build pipeline, data access per app |
+| Rollout to everyone after approval by IT | open | |
+| Reapply adaptations on every update | open | |
 
-### Überwachung und Observability
+### Monitoring and observability
 
-| Feature | Status | Hängt ab von |
+| Feature | Status | Depends on |
 |---|---|---|
-| Diagnose einer App: Pods, Logs, Ereignisse | läuft | |
-| Diagnose durch den Ops-Agenten | läuft | |
-| Metriken: CPU, RAM, Platte je App und Zelle, Verlauf | offen | Metrik-Baustein |
-| Verfügbarkeit und Antwortzeiten je App | offen | |
-| Landkarte: Verdrahtung, Verkehr, Verbindungen nach außen, Agenten | offen | Metriken |
-| Befunde mit Agenten-Aktion (z. B. ungenutzte oder doppelte Apps) | offen | Nutzungszahlen |
-| Warnungen und Benachrichtigungen an die IT | offen | System-Mail |
-| Kapazität: wann die Zelle wachsen muss | offen | Metriken |
+| Diagnosis of an app: pods, logs, events | running | |
+| Diagnosis by the ops agent | running | |
+| Metrics: CPU, RAM, disk per app and cell, history | open | Metrics component |
+| Availability and response times per app | open | |
+| Map: wiring, traffic, outbound connections, agents | open | Metrics |
+| Findings with an agent action (e.g. unused or duplicate apps) | open | Usage numbers |
+| Warnings and notifications to IT | open | System mail |
+| Capacity: when the cell needs to grow | open | Metrics |
 
-### Sicherungen und Daten
+### Backups and data
 
-| Feature | Status | Hängt ab von |
+| Feature | Status | Depends on |
 |---|---|---|
-| Sicherungen je App, Sicherung jetzt anstoßen | läuft | |
-| Wiederherstellen über den aktuellen Stand | läuft | |
-| Wiederherstellen als Kopie | offen | |
-| Backup-Ziel setzen und ändern (Konsole, API) | läuft | |
-| Sicherung der ganzen Zelle oder ausgewählter Apps auf einmal | offen | |
-| App-eigene Sicherungen einbinden (Hooks im Manifest: Export der App, Wartungsmodus) | offen | E-52 |
-| Wiederherstellungstest | offen | |
-| Export aller Daten und Umzug auf eigene Infrastruktur | offen | |
+| Backups per app, trigger a backup now | running | |
+| Restore over the current state | running | |
+| Restore as a copy | open | |
+| Set and change the backup target (console, API) | running | |
+| Backup of the whole cell or selected apps at once | open | |
+| Include app-own backups (hooks in the manifest: app export, maintenance mode) | open | E-52 |
+| Restore test | open | |
+| Export of all data and move to own infrastructure | open | |
 
-### Prüfung und Sicherheit
+### Audit and security
 
-| Feature | Status | Hängt ab von |
+| Feature | Status | Depends on |
 |---|---|---|
-| Änderungsverlauf mit Urheber und Ergebnis | läuft | |
-| Prüfprotokoll mit Export | Export des Änderungsverlaufs (CSV) läuft; Prüfprotokoll offen | |
-| Sicherheitsübersicht: zweiter Faktor, verwaiste Konten, Admins | offen | |
-| Was an Modellanbieter geht | offen | E-48 |
-| Wer kann was öffnen, was verlässt die Zelle | offen | Datenzugriff je App |
-| Eskalation an menschlichen Support (nur mit Zustimmung, befristet, protokolliert) | offen | |
+| Change history with originator and result | running | |
+| Audit log with export | export of the change history (CSV) running; audit log open | |
+| Security overview: second factor, orphaned accounts, admins | open | |
+| What goes to the model provider | open | E-48 |
+| Who can open what, what leaves the cell | open | Data access per app |
+| Escalation to human support (only with consent, time-limited, logged) | open | |
 
-### Vor der ersten Kundenzelle (E-52)
+### Before the first customer cell (E-52)
 
-| Feature | Status | Hängt ab von |
+| Feature | Status | Depends on |
 |---|---|---|
-| Eigenes Dienstkonto in authentik mit engen Rechten | offen | |
-| Fremde Images per Digest pinnen | offen | |
-| Kurze Tokens für das Tool-Gateway | offen | |
-| Wartezeit auf den Login-Proxy nicht auf die Frist der App anrechnen | offen | |
-| Neustart einer App als API-Aktion | offen | |
-| Konsole: Aktionen für Viewer ausblenden | offen | |
+| Own service account in authentik with narrow permissions | open | |
+| Pin third-party images by digest | open | |
+| Short-lived tokens for the tool gateway | open | |
+| Do not count the wait for the login proxy against the deadline of the app | open | |
+| Restart of an app as an API action | open | |
+| Console: hide actions for viewers | open | |
 
-### Identität
+### Identity
 
-| Feature | Status | Hängt ab von |
+| Feature | Status | Depends on |
 |---|---|---|
-| Konten und Gruppen, Mitglieder, App-Passwort | läuft | |
-| Zugriff je App über Gruppen | läuft | |
-| Abteilungen und Teams als Struktur der Identität | offen | |
-| Personen-Änderungen mit Freigabe, Person entfernen | offen | |
-| Konto-Hilfe: Passwort, zweiter Faktor, Sperre, Sitzungen | offen | |
-| Anmelde-Richtlinie | offen | |
+| Accounts and groups, members, app password | running | |
+| Access per app through groups | running | |
+| Departments and teams as structure of the identity service | open | |
+| Person changes with approval, remove a person | open | |
+| Account help: password, second factor, lock, sessions | open | |
+| Login policy | open | |
 
-### Agenten
+### Agents
 
-| Feature | Status | Hängt ab von |
+| Feature | Status | Depends on |
 |---|---|---|
-| Aufgaben der Agenten mit allen Schritten | läuft | |
-| Agenten als Konten mit Rechten je App | offen | |
-| Autonomie-Stufen | offen | |
-| Tool-Gateway für alle Apps | API läuft | O-18, O-19, O-20 |
+| Agent tasks with all steps | running | |
+| Agents as accounts with permissions per app | open | |
+| Autonomy levels | open | |
+| Tool gateway for all apps | API running | O-18, O-19, O-20 |
 
-### Modelle
+### Models
 
-| Feature | Status | Hängt ab von |
+| Feature | Status | Depends on |
 |---|---|---|
-| Modelle in der Zelle betreiben | offen | |
-| Modelle über den eigenen Schlüssel | offen | O-16 |
-| Nutzung und Kosten, Budget und Grenzen je Agent oder Abteilung | offen | |
+| Run models in the cell | open | |
+| Models through the customer's own key | open | O-16 |
+| Usage and costs, budget and limits per agent or department | open | |
 
-### Zelle
+### Cell
 
-| Feature | Status | Hängt ab von |
+| Feature | Status | Depends on |
 |---|---|---|
-| Zelle und Domain | offen | |
-| System-Mail der Zelle (nur Versand: Einladungen, Passwort-Links, Warnungen) | offen | |
+| Cell and domain | open | |
+| System mail of the cell (send only: invitations, password links, warnings) | open | |
 
-### Verteilte Zelle
+### Distributed cell
 
-Ein Cluster über alle Rechner, WireGuard dazwischen (E-42); Netz für Menschen über ein eigenes Mesh (E-43); Rechner kommen über die Konsole hinzu (E-44). Läuft (`stand.md`): Rechner mit Zustand, Beitrittsbefehl aus der Konsole, Hardware-Auslastung je Rechner mit seinen Apps, WireGuard zwischen den Rechnern. Der Rest ist offen.
+One cluster across all machines, WireGuard in between (E-42); network for people through a mesh of its own (E-43); machines are added through the console (E-44). Running (`status.md`): machines with state, join command from the console, hardware load per machine with its apps, WireGuard between the machines. The rest is open.
 
-- Rechner und Standorte einer Zelle mit Zustand
-- Rechner hinzufügen: Beitrittsbefehl aus der Konsole (E-44)
-- Rechner hinzufügen per SSH aus der Konsole, auf dem Beitrittsbefehl aufbauend
-- Rechner entfernen (Apps und Volumes ziehen vorher um)
-- Platzierung: welche App wo läuft, App an einen Standort binden
-- Hardware-Auslastung je Rechner und App
-- Kapazität und Umverteilung (Agent schlägt Verschieben oder mehr Hardware vor)
-- Ausfall eines Rechners oder Standorts: was weiterläuft, was umzieht
-- Latenz je Standort
-- Verbindung zwischen den Rechnern (WireGuard, E-42)
-- Zugang für Menschen über das Mesh (läuft, E-56); Konsole zeigt, wie ein Gerät beitritt; Apps nur im Mesh erreichbar; Anbindung ans Firmennetz
+- Machines and sites of a cell with state
+- Add a machine: join command from the console (E-44)
+- Add a machine over SSH from the console, building on the join command
+- Remove a machine (apps and volumes move beforehand)
+- Placement: which app runs where, bind an app to a site
+- Hardware load per machine and app
+- Capacity and redistribution (agent proposes moving or more hardware)
+- Failure of a machine or site: what keeps running, what moves
+- Latency per site
+- Connection between the machines (WireGuard, E-42)
+- Access for people through the mesh (running, E-56); console shows how a device joins; apps reachable only in the mesh; connection to the company network
 
-### Naht zur Office-Oberfläche
+### Seam to the office UI
 
-| Feature | Status | Hängt ab von |
+| Feature | Status | Depends on |
 |---|---|---|
-| Anfragen-API: neue App, Feature-Wunsch, persönliche Testversion, mit Personenkreis und Datenzugriff; Status für die Anfragenden | offen | O-27 |
-| Ereignisse für die Office-Oberfläche (Anfrage freigegeben, App bereit) | offen | O-27 |
-| Gemeinsame Anmeldung (eigener Client je Oberfläche) | offen | E-52 |
-| Office-Oberfläche als App der Zelle | offen | O-26 |
+| Requests API: new app, feature request, personal trial version, with group of people and data access; status for the requesters | open | O-27 |
+| Events for the office UI (request approved, app ready) | open | O-27 |
+| Shared login (own client per UI) | open | E-52 |
+| Office UI as an app of the cell | open | O-26 |
 
-### Selbst betreiben
+### Self-hosting
 
-| Feature | Status | Hängt ab von |
+| Feature | Status | Depends on |
 |---|---|---|
-| Zelle über beide Hetzner-VPS | offen | Rechner hinzufügen |
-| Update der Plattform auf einen Release-Tag (Build auf dem Server aus Git) | offen | |
-| Git-Hosting und Issues in der eigenen Zelle, Backlog als Issues | offen | Zelle auf dem VPS |
+| Cell across both Hetzner VPS | open | Add machine |
+| Update of the platform to a release tag (build on the server from Git) | open | |
+| Git hosting and issues in our own cell, backlog as issues | open | Cell on the VPS |
 
-## Gehört zur Office-Oberfläche
+## Belongs to the office UI
 
-Hier steht nur, was die Plattform dafür liefert. Planung und Umsetzung liegen beim Mitgründer.
+Only what the platform provides for it is listed here. Planning and implementation are with the co-founder.
 
-| Feature | Was die Plattform liefert |
+| Feature | What the platform provides |
 |---|---|
-| Apps starten, die man nutzen darf | Liste der Apps je Person (API läuft) |
-| Neue App anfragen, für bestimmte Personen, mit bestimmtem Datenzugriff | Anfragen-API, Freigabe in der Konsole |
-| Feature für eine App wünschen | Anfragen-API, Build-Pipeline |
-| Gewünschtes Feature zuerst nur für sich ausprobieren | Persönliche Testversion |
-| Aufträge an Agenten in eigenen Worten | Aufgaben über die API |
-| Geführte Abläufe: jemand kommt dazu, jemand geht, ein Team braucht ein Tool, ein Team anlegen, einer Abteilung eine App geben, etwas ist kaputt, etwas zurückholen | Anfragen-API; Ausführung und Freigabe in der Plattform |
-| Eigenen Assistenten verbinden | Tool-Gateway, Tokens |
-| Erscheinungsbild je Kunde | – |
-| Mail, Postfächer, zentraler Starter für alle Tools | – |
+| Launch the apps one may use | List of apps per person (API running) |
+| Request a new app, for certain people, with certain data access | Requests API, approval in the console |
+| Ask for a feature for an app | Requests API, build pipeline |
+| Try out a requested feature for yourself first | Personal trial version |
+| Give agents jobs in your own words | Tasks through the API |
+| Guided flows: someone joins, someone leaves, a team needs a tool, create a team, give a department an app, something is broken, get something back | Requests API; execution and approval in the platform |
+| Connect your own assistant | Tool gateway, tokens |
+| Appearance per customer | - |
+| Mail, mailboxes, central launcher for all tools | - |
 
-## Bewusst draußen
+## Deliberately out
 
-- Migration bestehender IT-Landschaften
-- Abrechnung, zentraler Dienst über mehrere Zellen
-- Geräteverwaltung
+- Migration of existing IT landscapes
+- Billing, central service across several cells
+- Device management
 
 ## Design
 
-- Brand-Look dunkel: https://claude.ai/artifact/URWKXNc7sU4avqh8JWoLWA
-- Brand-Look hell: https://claude.ai/artifact/GpypdMvouCnaXyF9wC3Xst
-- Figma „Platform Console 02": https://www.figma.com/design/J1s8hrkim2aNxKgzxEaSe6
+- Brand look dark: https://claude.ai/artifact/URWKXNc7sU4avqh8JWoLWA
+- Brand look light: https://claude.ai/artifact/GpypdMvouCnaXyF9wC3Xst
+- Figma "Platform Console 02": https://www.figma.com/design/J1s8hrkim2aNxKgzxEaSe6
 
-Die beiden Brand-Looks und die Figma-Datei zeigen die neue Grenze (je 31 Frames in „Screens - Dark" und „Screens - Light"). Neue Teile tragen dort eine Lücken-Markierung, solange sie hier offen sind.
+The two brand looks and the Figma file show the new boundary (31 frames each in "Screens - Dark" and "Screens - Light"). New parts carry a gap marker there while they are open here.
