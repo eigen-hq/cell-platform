@@ -102,6 +102,7 @@ Vorschläge aus der Planung, noch nicht bestätigt. Sie dürfen genutzt werden; 
 | O-25 | Gemeinsame Anmeldung von Konsole und Office-Oberfläche: dieselbe Identität der Zelle, eigener Client je Oberfläche oder ein gemeinsamer | Wenn die Office-Oberfläche angebunden wird |
 | O-26 | Office-Oberfläche in der Zelle: als App aus dem Katalog oder als Teil der Plattform; wie Nutzer zwischen beiden Oberflächen wechseln | Wenn die Office-Oberfläche angebunden wird |
 | O-27 | Was die Office-Oberfläche von der Plattform braucht: Plattform-API, Tool-Gateway, Ereignisse; welche Rechte ihr Konto hat | Wenn die Office-Oberfläche angebunden wird |
+| O-28 | Wer ist Mitglied der API: Jedes Konto der Identität, auch ein Nutzer, der nur Apps verwendet, bekommt mit einem App-Passwort ein Token für `cell-api` und damit die Rolle `member`. Mitglieder lesen alle Apps samt Spec (Umgebungswerte, Dateien, Helm-Werte), Änderungen mit Patch, Backups und den Ereignis-Stream. Optionen: `member` nur über eine eigene Gruppe (Bindung am Client `cell-api` wie bei der Konsole), oder Mitglieder sehen Apps ohne Spec und Patch | Bevor Nutzer, die keine Admins sind, Konten in der Zelle bekommen |
 
 ## Versionen
 
