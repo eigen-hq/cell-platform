@@ -26,6 +26,13 @@
 #   CELL_BACKUP_PASSWORD  needed with each: encrypts the backups; keep it
 #                      outside the cell, a restore into a new cell needs it
 #   CELL_BACKUP_PREFIX path in the target (default: CELL_DOMAIN)
+#   CELL_TLS=names     certificates through the naming service (E-55), with
+#   CELL_NAMES_URL, CELL_NAMES_LABEL, CELL_NAMES_TOKEN  from the cell's
+#                      registration (install.sh does it, CELL_NAME)
+#   CELL_DNS01_RESOLVERS  resolvers for the DNS-01 check (default 1.1.1.1:53,9.9.9.9:53)
+#   CELL_NAMES_ZONE, CELL_NAMES_DNS_TOKEN
+#                      run the naming service in this cell for a zone in the
+#                      Hetzner Cloud DNS (only the cell that serves others)
 #   CELL_LLM_API_KEY   the customer's model key for the ops agent (optional;
 #                      without it, agent tasks wait). Kept as Secret
 #                      cell-agent-llm; unsetting it later leaves the Secret.
@@ -59,7 +66,15 @@ for ns in cert-manager cnpg-system cell-system; do
 done | kubectl apply --server-side --field-manager=cell-bootstrap -f - >/dev/null
 
 log "cert-manager $CERT_MANAGER_VERSION, CloudNativePG $CNPG_VERSION"
-kubectl apply --server-side -f "https://github.com/cert-manager/cert-manager/releases/download/$CERT_MANAGER_VERSION/cert-manager.yaml" >/dev/null
+cm=$(curl -fsSL "https://github.com/cert-manager/cert-manager/releases/download/$CERT_MANAGER_VERSION/cert-manager.yaml")
+if [ "$CELL_TLS" = names ]; then
+  # DNS-01 checks ask public resolvers: the cluster DNS answers every cell
+  # host with the ingress (below), also the challenge records.
+  export CELL_DNS01_RESOLVERS=${CELL_DNS01_RESOLVERS:-1.1.1.1:53,9.9.9.9:53}
+  cm=$(perl -pe 's{^(\s*)- --max-concurrent-challenges=60\n}{$1- --max-concurrent-challenges=60\n$1- --dns01-recursive-nameservers-only\n$1- --dns01-recursive-nameservers=$ENV{CELL_DNS01_RESOLVERS}\n}' <<<"$cm")
+  grep -q -- '^ *- --dns01-recursive-nameservers-only$' <<<"$cm" || die "could not point cert-manager at public resolvers"
+fi
+kubectl apply --server-side -f - <<<"$cm" >/dev/null
 kubectl apply --server-side -f "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$CNPG_VERSION/cnpg-$CNPG_VERSION.yaml" >/dev/null
 kubectl -n cert-manager wait deploy --all --for=condition=Available --timeout=5m >/dev/null
 kubectl -n cnpg-system wait deploy --all --for=condition=Available --timeout=5m >/dev/null
@@ -159,6 +174,17 @@ case $CELL_TLS in
     [ -n "$CELL_ACME_EMAIL" ] || die "CELL_TLS=acme needs CELL_ACME_EMAIL"
     retry apply issuer-acme.yaml
     ;;
+  names)
+    : "${CELL_NAMES_URL:?CELL_TLS=names needs CELL_NAMES_URL}" "${CELL_NAMES_LABEL:?CELL_TLS=names needs CELL_NAMES_LABEL}"
+    : "${CELL_NAMES_TOKEN:?CELL_TLS=names needs CELL_NAMES_TOKEN}"
+    export CELL_NAMES_URL CELL_NAMES_LABEL CELL_NAMES_TOKEN
+    data_manifest cert-manager cell-names url="$CELL_NAMES_URL" label="$CELL_NAMES_LABEL" token="$CELL_NAMES_TOKEN" | kubectl apply -f - >/dev/null
+    # ponytail: the operator adds app hosts to the same secret; a write of
+    # it racing this one can drop an app's host until its next reconcile.
+    accounts=$(names_accounts_manifest auth api console mcp)
+    kubectl apply -f - <<<"$accounts" >/dev/null
+    retry apply issuer-names.yaml
+    ;;
   *) die "unknown CELL_TLS=$CELL_TLS" ;;
 esac
 
@@ -232,6 +258,24 @@ log "platform API https://api.$CELL_DOMAIN"
 apply change-approval.yaml
 apply api.yaml
 kubectl -n cell-system rollout status deploy/cell-api --timeout=5m >/dev/null
+
+# The naming service, in the cell that runs it for others (E-55). A rerun
+# without the settings keeps the stored ones; keys and secret stay.
+names_zone=${CELL_NAMES_ZONE:-$(secret_value cell-system names NAMES_ZONE)}
+if [ -n "$names_zone" ]; then
+  log "naming service https://names.$CELL_DOMAIN for *.$names_zone"
+  names_token=${CELL_NAMES_DNS_TOKEN:-$(secret_value cell-system names NAMES_DNS_TOKEN)}
+  [ -n "$names_token" ] || die "the naming service needs CELL_NAMES_DNS_TOKEN (Hetzner Cloud API token for the zone)"
+  names_keys=$(secret_value cell-system names NAMES_KEYS)
+  [ -n "$names_keys" ] || names_keys=$(rand)
+  names_secret=$(secret_value cell-system names NAMES_SECRET)
+  [ -n "$names_secret" ] || names_secret=$(rand)$(rand)
+  changed=$(data_manifest cell-system names NAMES_ZONE="$names_zone" NAMES_DNS_TOKEN="$names_token" \
+    NAMES_KEYS="$names_keys" NAMES_SECRET="$names_secret" | kubectl apply -f -)
+  apply names.yaml
+  case $changed in *unchanged*) ;; *) kubectl -n cell-system rollout restart deploy/cell-names >/dev/null ;; esac
+  kubectl -n cell-system rollout status deploy/cell-names --timeout=5m >/dev/null
+fi
 
 log "ops agent"
 llm=unchanged

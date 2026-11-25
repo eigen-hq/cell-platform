@@ -1,0 +1,21 @@
+# Cells with an address from the naming service (E-55): Let's Encrypt via
+# DNS-01, the challenges written by the naming service. Works without any
+# open port, also inside a company network. The accounts (one entry per
+# host, cert-manager needs that) are kept by bootstrap and the operator.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: cell
+spec:
+  acme:
+    email: "${CELL_ACME_EMAIL}"
+    server: ${CELL_ACME_SERVER}
+    privateKeySecretRef:
+      name: cell-acme
+    solvers:
+      - dns01:
+          acmeDNS:
+            host: ${CELL_NAMES_URL}
+            accountSecretRef:
+              name: cell-acme-dns
+              key: accounts.json

@@ -44,6 +44,14 @@ check "port check finds the cell address" "192.0.2.10:443" "$(printf '%s\nLISTEN
 check "port check finds a wildcard" "*:80" "$(printf 'LISTEN 0 1 *:80 *:*\n' | web_ports_taken 192.0.2.10)"
 check "port check finds an IPv4-mapped address" "192.0.2.10:443" "$(printf 'LISTEN 0 1 [::ffff:192.0.2.10]:443 [::]:*\n' | web_ports_taken 192.0.2.10)"
 
+accounts=$(CELL_DOMAIN=acme-x.cells.test CELL_NAMES_LABEL=acme-x CELL_NAMES_TOKEN=tok names_accounts '{"forgejo.acme-x.cells.test":{"subdomain":"forgejo"}}' auth api)
+check "names_accounts keeps the apps and adds platform hosts" 'api.acme-x.cells.test auth.acme-x.cells.test forgejo.acme-x.cells.test|api acme-x tok' \
+  "$(python3 -c 'import json,sys; a=json.load(sys.stdin); print(" ".join(sorted(a)) + "|" + " ".join(a["api.acme-x.cells.test"][k] for k in ("subdomain","username","password")))' <<<"$accounts")"
+
+export FAKE=down
+check "a failed read of the stored accounts aborts and prints nothing" "1:" \
+  "$(out=$(CELL_DOMAIN=d CELL_NAMES_LABEL=l CELL_NAMES_TOKEN=t names_accounts_manifest auth 2>/dev/null) && echo "0:$out" || echo "1:$out")"
+
 export FAKE=oldtarget
 check "a target from before the gateway is kept" "v v v" "$(stored_backup_target; echo "$CELL_BACKUP_S3_ENDPOINT $CELL_BACKUP_S3_SECRET_KEY $CELL_BACKUP_PASSWORD")"
 export FAKE=value

@@ -24,14 +24,15 @@ if [ -f "$settings" ]; then
     [ -n "${!key:-}" ] || export "$key=$value"
   done <"$settings"
 fi
-: "${CELL_DOMAIN:?CELL_DOMAIN must be set}"
+: "${CELL_DOMAIN:=}"
+[ -n "$CELL_DOMAIN" ] || [ -n "${CELL_NAME:-}" ] || [ -f /etc/cell/names.env ] || die "set CELL_DOMAIN, or CELL_NAME for an address from the naming service"
 export CELL_STORAGE=${CELL_STORAGE:-longhorn} CELL_TLS=${CELL_TLS:-selfsigned}
 start=$(date +%s)
 
 log "host packages"
 export DEBIAN_FRONTEND=noninteractive
 missing=()
-for p in curl git openssl perl; do dpkg -s "$p" >/dev/null 2>&1 || missing+=("$p"); done
+for p in curl git openssl perl python3; do dpkg -s "$p" >/dev/null 2>&1 || missing+=("$p"); done
 if [ "${#missing[@]}" -gt 0 ]; then
   apt-get update -q
   apt-get install -yq "${missing[@]}"
@@ -39,6 +40,37 @@ fi
 
 # The address other machines join on (E-44).
 export CELL_NODE_IP=${CELL_NODE_IP:-$(ip -4 route get 1.1.1.1 | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')}
+# An address from the naming service (E-55): registered once, kept in
+# /etc/cell/names.env (root only); every run points it at this machine.
+names=/etc/cell/names.env
+if [ -z "$CELL_DOMAIN" ] && [ ! -f "$names" ]; then
+  : "${CELL_NAMES_URL:?CELL_NAME needs CELL_NAMES_URL}" "${CELL_NAMES_KEY:?CELL_NAME needs CELL_NAMES_KEY (a registration key)}"
+  [[ $CELL_NAME =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] || die "CELL_NAME: lowercase letters, digits and inner dashes"
+  log "address for $CELL_NAME from $CELL_NAMES_URL"
+  reg=$(curl -fsS -H @<(printf 'Authorization: Bearer %s\n' "$CELL_NAMES_KEY") -H 'Content-Type: application/json' \
+    -d "{\"name\":\"$CELL_NAME\",\"address\":\"$CELL_NODE_IP\"}" "$CELL_NAMES_URL/v0/cells") || die "the naming service refused the registration"
+  mkdir -p /etc/cell
+  # The answer becomes a file that later runs source as root: only checked
+  # values, quoted.
+  (umask 077 && exec python3 -c 'import json, re, shlex, sys
+r = json.load(sys.stdin)
+r["url"] = sys.argv[1]
+want = {"url": r"https://[A-Za-z0-9.:/-]+", "label": r"[a-z0-9-]+", "domain": r"[a-z0-9.-]+", "token": r"[0-9a-f]{64}"}
+for k, pattern in want.items():
+    if not isinstance(r.get(k), str) or not re.fullmatch(pattern, r[k]):
+        sys.exit("the naming service answered an invalid " + k)
+    print("CELL_NAMES_" + k.upper() + "=" + shlex.quote(r[k]))' "$CELL_NAMES_URL" <<<"$reg" >"$names.new") ||
+    die "could not keep the registration (see the line above)"
+  mv "$names.new" "$names" || die "could not keep the registration in $names"
+fi
+if [ -f "$names" ]; then
+  # shellcheck source=/dev/null
+  source "$names"
+  export CELL_NAMES_URL CELL_NAMES_LABEL CELL_NAMES_TOKEN CELL_DOMAIN=$CELL_NAMES_DOMAIN CELL_TLS=names
+  curl -fsS -o /dev/null -X PUT -H @<(printf 'Authorization: Bearer %s\n' "$CELL_NAMES_TOKEN") -H 'Content-Type: application/json' \
+    -d "{\"address\":\"$CELL_NODE_IP\"}" "$CELL_NAMES_URL/v0/cells/$CELL_NAMES_LABEL" || die "the naming service did not take this machine's address"
+  log "cell address $CELL_DOMAIN -> $CELL_NODE_IP"
+fi
 K3S_VERSION=$K3S_VERSION "$here/node.sh"
 mkdir -p /etc/cell
 for key in "${saved[@]}"; do printf '%s=%s\n' "$key" "${!key:-}"; done >"$settings"

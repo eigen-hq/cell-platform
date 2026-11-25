@@ -338,6 +338,9 @@ func (r *AppReconciler) install(ctx context.Context, app *cellv1.App, target *ba
 			return false, err.Error(), nil
 		}
 	}
+	if err := ensureACMEAccount(ctx, r.Client, cfg, host); err != nil {
+		return false, "", err
+	}
 	published, err := r.apply(ctx, ingress(app, host, svc)...)
 	if err != nil {
 		return false, "", err

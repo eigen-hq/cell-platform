@@ -1,0 +1,71 @@
+# The naming service (E-55), only in the cell that runs it for others (ours):
+# names.<domain> gives cells an address under NAMES_ZONE and writes their
+# certificate challenges. Settings in Secret names (bootstrap.sh).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cell-names
+  namespace: cell-system
+spec:
+  replicas: 1
+  # One process at a time: it serializes a cell's writes in memory.
+  strategy: {type: Recreate}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cell-names
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cell-names
+    spec:
+      containers:
+        - name: names
+          image: ${OPERATOR_IMAGE}
+          imagePullPolicy: IfNotPresent
+          command: [/names]
+          envFrom:
+            - secretRef: {name: names}
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 128Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cell-names
+  namespace: cell-system
+spec:
+  selector:
+    app.kubernetes.io/name: cell-names
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cell-names
+  namespace: cell-system
+  annotations:
+    cert-manager.io/cluster-issuer: cell
+spec:
+  ingressClassName: traefik
+  tls:
+    - secretName: names-tls
+      hosts: [names.${CELL_DOMAIN}]
+  rules:
+    - host: names.${CELL_DOMAIN}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: cell-names
+                port: {name: http}

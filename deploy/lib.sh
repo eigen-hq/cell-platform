@@ -58,17 +58,52 @@ stored_backup_target() {
   export CELL_BACKUP_PASSWORD
 }
 
-# backup_target_manifest prints the backup-target Secret: rclone.conf from
-# the first argument, KEY=VALUE pairs from the others. Values travel through
-# pipes, never through the argv of another process.
-backup_target_manifest() {
-  local conf=$1 kv
-  shift
-  printf 'apiVersion: v1\nkind: Secret\nmetadata:\n  name: backup-target\n  namespace: cell-system\ntype: Opaque\ndata:\n'
-  printf '  rclone.conf: %s\n' "$(printf '%s\n' "$conf" | base64 | tr -d '\n')"
+# data_manifest prints a Secret in namespace $1 named $2 with KEY=VALUE
+# pairs from the other arguments; values may span lines and keys may hold
+# dots. Values travel through pipes, never through the argv of another
+# process.
+data_manifest() {
+  local kv
+  printf 'apiVersion: v1\nkind: Secret\nmetadata:\n  name: %s\n  namespace: %s\ntype: Opaque\ndata:\n' "$2" "$1"
+  shift 2
   for kv in "$@"; do
     printf '  %s: %s\n' "${kv%%=*}" "$(printf '%s' "${kv#*=}" | base64 | tr -d '\n')"
   done
+}
+
+# backup_target_manifest prints the backup-target Secret: rclone.conf from
+# the first argument, KEY=VALUE pairs from the others.
+backup_target_manifest() {
+  local conf=$1
+  shift
+  data_manifest cell-system backup-target "rclone.conf=$conf"$'\n' "$@"
+}
+
+# names_accounts prints the acme-dns accounts of a cell with an address from
+# the naming service (E-55): the accounts in $1 (JSON, may be empty) plus one
+# for each platform host named in the other arguments. cert-manager looks an
+# account up by host; the operator adds the apps' hosts the same way.
+# Credentials come from the environment, not from argv.
+names_accounts() {
+  EXISTING=$1 python3 - "${@:2}" <<'PY'
+import json, os, sys
+accounts = json.loads(os.environ.get("EXISTING") or "{}")
+for sub in sys.argv[1:]:
+    host = sub + "." + os.environ["CELL_DOMAIN"]
+    accounts.setdefault(host, {"username": os.environ["CELL_NAMES_LABEL"], "password": os.environ["CELL_NAMES_TOKEN"],
+                               "fulldomain": host, "subdomain": sub, "allowfrom": []})
+print(json.dumps(accounts, sort_keys=True, separators=(",", ":")))
+PY
+}
+
+# names_accounts_manifest prints the cell-acme-dns Secret with the stored
+# accounts plus the platform hosts named in the arguments. A failed read
+# aborts: writing without the stored accounts would drop the apps' hosts.
+names_accounts_manifest() {
+  local existing accounts
+  existing=$(secret_value cert-manager cell-acme-dns accounts.json) || return
+  accounts=$(names_accounts "$existing" "$@") || return
+  data_manifest cert-manager cell-acme-dns accounts.json="$accounts"
 }
 
 # secret_manifest prints a Secret with KEY=VALUE pairs from the arguments.
