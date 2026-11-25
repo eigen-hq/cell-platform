@@ -185,7 +185,17 @@ One cluster across all machines, WireGuard in between (E-42); network for people
 | Machines of mixed CPU architecture: place apps only where their images run | open | |
 | Update of the platform to a release tag | running (E-59) | |
 | Short install address `get.eigen-platform.com` | running (E-59) | |
-| Prebuilt platform images from a public registry instead of building on the server | open | |
+| Prebuilt platform images from a public registry instead of building on the server | open | Image registry in the cell |
+
+### The platform's own development on a cell
+
+The platform's own development and releases run on a cell, as the first real user of it.
+
+| Feature | Status | Depends on |
+|---|---|---|
+| Git hosting and CI as apps of the cell (Forgejo with Forgejo Actions) | open | |
+| Image registry in the cell (Forgejo's container registry; Zot or Harbor if it falls short) | open | |
+| Releases, install address and platform images served from the cell | open | Git hosting, image registry |
 
 ## Belongs to the office UI
 
