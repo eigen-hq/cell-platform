@@ -10,6 +10,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -29,6 +30,8 @@ const (
 	authMiddle    = "authentik"
 	authentikSvc  = "authentik-server"
 	hibernateKey  = "cnpg.io/hibernation"
+	helmDeployer  = "helm-deployer"
+	appNetwork    = "cell-ingress"
 )
 
 // Namespace of an app.
@@ -46,12 +49,36 @@ func meta(app *cellv1.App, name string) metav1.ObjectMeta {
 	return metav1.ObjectMeta{Name: name, Namespace: Namespace(app.Name), Labels: labels(app)}
 }
 
+// namespaceObj is the app's namespace. Pods in it may not be privileged or
+// use the host's paths, network or processes, whoever writes them (the
+// operator or a chart): an app cannot reach past its namespace.
 func namespaceObj(app *cellv1.App, retained bool) *corev1.Namespace {
 	l := labels(app)
+	l["pod-security.kubernetes.io/enforce"] = "baseline"
 	if retained {
 		l[cellv1.LabelRetained] = "true"
 	}
 	return &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: Namespace(app.Name), Labels: l}}
+}
+
+// network lets into an app's pods only its own namespace, the ingress
+// (kube-system), the platform (cell-system: MCP gateway, operator) and the
+// database operator. Other apps cannot reach it, so the login proxy's
+// headers only ever come through the ingress or the gateway.
+func network(app *cellv1.App) *networkingv1.NetworkPolicy {
+	from := []networkingv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{}}}
+	for _, ns := range []string{"kube-system", cell.SystemNamespace, "cnpg-system"} {
+		from = append(from, networkingv1.NetworkPolicyPeer{NamespaceSelector: &metav1.LabelSelector{
+			MatchLabels: map[string]string{corev1.LabelMetadataName: ns},
+		}})
+	}
+	return &networkingv1.NetworkPolicy{
+		ObjectMeta: meta(app, appNetwork),
+		Spec: networkingv1.NetworkPolicySpec{
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+			Ingress:     []networkingv1.NetworkPolicyIngressRule{{From: from}},
+		},
+	}
 }
 
 // caBundle holds the cell CA alone (ca.crt) and together with the public
@@ -257,6 +284,9 @@ func helmWorkload(app *cellv1.App, src cellv1.HelmSource) ([]client.Object, erro
 	}
 	release := map[string]any{
 		"interval": "10m",
+		// Flux deploys the chart as the app's own deployer, which may change
+		// only the app's namespace (not the cluster, as Flux itself may).
+		"serviceAccountName": helmDeployer,
 		// Never left suspended by the operator, and drift (e.g. workloads a
 		// restore scaled to zero) is put back to the chart's state.
 		"suspend":        false,
@@ -293,7 +323,13 @@ func helmWorkload(app *cellv1.App, src cellv1.HelmSource) ([]client.Object, erro
 			"sourceRef": map[string]any{"kind": "HelmRepository", "name": name},
 		}}
 	}
-	return []client.Object{source, m("helm.toolkit.fluxcd.io/v2", "HelmRelease", app.Name, release)}, nil
+	deployer := &corev1.ServiceAccount{ObjectMeta: meta(app, helmDeployer)}
+	binding := &rbacv1.RoleBinding{
+		ObjectMeta: meta(app, helmDeployer),
+		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "admin"},
+		Subjects:   []rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Name: helmDeployer, Namespace: ns}},
+	}
+	return []client.Object{deployer, binding, source, m("helm.toolkit.fluxcd.io/v2", "HelmRelease", app.Name, release)}, nil
 }
 
 func sourceName(app *cellv1.App, parts ...string) string {

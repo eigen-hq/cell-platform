@@ -63,6 +63,7 @@ Stand 19.11.2026: Helm über Flux (E-18), Manifest geschärft (`app-manifest.md`
 | App aus Manifest, Subdomain, SSO ohne Handgriff | `make e2e`, `TestReferenceApps`: Login als Testnutzer über den authentik-Flow, danach fragt der Test die App, wer angemeldet ist | bestanden für Forgejo, Nextcloud, Eigenbau-Platzhalter |
 | Pod löschen | derselbe Test löscht alle App-Pods und wartet, bis die Sitzung wieder antwortet | bestanden |
 | Entfernen behält Daten | derselbe Test löscht die App, prüft Namespace und Volumes, installiert neu und meldet sich wieder an | bestanden |
+| Apps getrennt (E-45) | `make e2e`, `TestReferenceApps`: ein Pod außerhalb der Plattform erreicht den Dienst der App nicht, einer im Namespace der App schon; ein privilegierter Pod wird abgewiesen. Helm-Apps laufen als `helm-deployer` des Namespace (envtest) | bestanden (25.11.2026) für Forgejo, Nextcloud, Eigenbau-Platzhalter; voller `make e2e` danach 15 min grün |
 | Operator-Logik | `make test`: envtest mit echtem API-Server (Datenbank zuerst, Platzhalter, Login, Proxy, Helm, `NeedsAttention`, Entfernen) | bestanden |
 | Laufzeiten lokal | erste Installation inklusive Image-Download | Eigenbau-Platzhalter 10 s, Forgejo rund 2 min, Nextcloud rund 2 min |
 

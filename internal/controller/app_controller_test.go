@@ -19,6 +19,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -551,6 +552,29 @@ func TestHelmApp(t *testing.T) {
 	}
 	if prs, _, _ := unstructured.NestedSlice(hr.Object, "spec", "postRenderers"); len(prs) != 1 {
 		t.Error("no post-renderer keeping volumes")
+	}
+	// Flux deploys the chart as the namespace's admin, not as itself.
+	if sa, _, _ := unstructured.NestedString(hr.Object, "spec", "serviceAccountName"); sa != helmDeployer {
+		t.Errorf("release deploys as %q", sa)
+	}
+	var rb rbacv1.RoleBinding
+	if err := k8s.Get(ctx, client.ObjectKey{Namespace: "app-git", Name: helmDeployer}, &rb); err != nil || rb.RoleRef.Kind != "ClusterRole" || rb.RoleRef.Name != "admin" ||
+		len(rb.Subjects) != 1 || rb.Subjects[0].Name != helmDeployer || rb.Subjects[0].Namespace != "app-git" {
+		t.Errorf("deployer binding %+v: %v", rb, err)
+	}
+	var sa corev1.ServiceAccount
+	if err := k8s.Get(ctx, client.ObjectKey{Namespace: "app-git", Name: helmDeployer}, &sa); err != nil {
+		t.Error(err)
+	}
+	// Its pods stay in their namespace, and only the ingress and the
+	// platform reach them.
+	var ns corev1.Namespace
+	if err := k8s.Get(ctx, client.ObjectKey{Name: "app-git"}, &ns); err != nil || ns.Labels["pod-security.kubernetes.io/enforce"] != "baseline" {
+		t.Errorf("namespace labels %v: %v", ns.Labels, err)
+	}
+	var np networkingv1.NetworkPolicy
+	if err := k8s.Get(ctx, client.ObjectKey{Namespace: "app-git", Name: appNetwork}, &np); err != nil || len(np.Spec.Ingress) != 1 || len(np.Spec.Ingress[0].From) != 4 {
+		t.Errorf("network policy %+v: %v", np.Spec, err)
 	}
 	// A Ready condition for an older generation of the release is stale.
 	healthy.Store("git", true)

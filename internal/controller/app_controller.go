@@ -280,7 +280,7 @@ func (r *AppReconciler) install(ctx context.Context, app *cellv1.App, target *ba
 	if err != nil {
 		return false, "", err
 	}
-	if _, err := r.apply(ctx, namespaceObj(app, false), caBundle(app, cellCA, r.SystemCAs)); err != nil {
+	if _, err := r.apply(ctx, namespaceObj(app, false), network(app), caBundle(app, cellCA, r.SystemCAs)); err != nil {
 		return false, "", err
 	}
 	if target != nil && hasData(app) {

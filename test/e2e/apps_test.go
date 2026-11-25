@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 
@@ -116,6 +118,7 @@ func TestReferenceApps(t *testing.T) {
 					got, user, landed.Request.URL, landed.StatusCode, page)
 			}
 			t.Logf("%s runs at %s, %s logged in with single sign-on", ra.name, base, user)
+			isolated(t, tc, ra.name)
 
 			// A crash, played by deleting the app's pods.
 			ns := "app-" + ra.name
@@ -167,6 +170,76 @@ func TestReferenceApps(t *testing.T) {
 			}
 			t.Logf("%s removed (data kept in the cell) and reinstalled, login works again", ra.name)
 		})
+	}
+}
+
+// isolated checks that only the platform reaches the app: a pod outside it
+// (here in default) cannot call the app's service past the ingress and its
+// login, a pod in the app's own namespace can, and the namespace refuses
+// privileged pods.
+func isolated(t *testing.T, tc *testCell, app string) {
+	t.Helper()
+	ns := "app-" + app
+	var ings networkingv1.IngressList
+	if err := tc.kube.List(context.Background(), &ings, client.InNamespace(ns), client.MatchingLabels{cellv1.LabelApp: app}); err != nil {
+		t.Fatal(err)
+	}
+	var target string
+	for _, ing := range ings.Items {
+		for _, rule := range ing.Spec.Rules {
+			for _, p := range rule.HTTP.Paths {
+				if b := p.Backend.Service; b != nil && p.Path == "/" {
+					target = fmt.Sprintf("http://%s.%s.svc.cluster.local:%d/", b.Name, ns, b.Port.Number)
+				}
+			}
+		}
+	}
+	if target == "" {
+		t.Fatalf("no ingress backend for %s", app)
+	}
+	probe := func(from string) string {
+		t.Helper()
+		// Only a refused or silent connection means the network kept the
+		// call out; an HTTP answer, even an error, means it got through.
+		out, err := exec.Command(filepath.Join(repoRoot(), "bin", "kubectl"), "-n", from, "run", "probe-"+app, "--rm", "-i", "--quiet",
+			"--restart=Never", "--pod-running-timeout=2m", "--image=busybox:1.37", "--",
+			"sh", "-c", "wget -q -T 5 -O /dev/null "+target+" 2>&1 && echo PROBE:answered; echo PROBE:done").CombinedOutput()
+		text := string(out)
+		switch {
+		case err != nil || !strings.Contains(text, "PROBE:done"):
+			t.Fatalf("probe from %s did not run: %v %s", from, err, text)
+		case strings.Contains(text, "PROBE:answered") || strings.Contains(text, "server returned error"):
+			return "reached"
+		case strings.Contains(text, "Connection refused") || strings.Contains(text, "timed out"):
+			return "blocked"
+		}
+		t.Fatalf("probe from %s: unclear answer %s", from, text)
+		return ""
+	}
+	if got := probe(ns); got != "reached" {
+		t.Errorf("%s from its own namespace: %s", target, got)
+	}
+	if got := probe("default"); got != "blocked" {
+		t.Errorf("%s from outside the platform: %s", target, got)
+	}
+	// A chart's deployer is admin of its namespace only; a release it writes
+	// without naming an account runs as that deployer too.
+	if strings.Contains(kubectl(t, "-n", ns, "get", "serviceaccounts", "-o", "name"), "helm-deployer") {
+		as := "--as=system:serviceaccount:" + ns + ":helm-deployer"
+		for _, q := range [][]string{{"create", "clusterrolebindings"}, {"get", "secrets", "-n", "cell-system"}, {"create", "pods", "-n", "default"}} {
+			out, _ := exec.Command(filepath.Join(repoRoot(), "bin", "kubectl"), append([]string{"auth", "can-i", as}, q...)...).Output()
+			if strings.TrimSpace(string(out)) != "no" {
+				t.Errorf("helm-deployer of %s can %v: %s", app, q, out)
+			}
+		}
+		if args := kubectl(t, "-n", "flux-system", "get", "deploy", "helm-controller", "-o", "jsonpath={.spec.template.spec.containers[0].args}"); !strings.Contains(args, "--default-service-account=helm-deployer") || !strings.Contains(args, "--no-cross-namespace-refs=true") {
+			t.Errorf("helm-controller args %s", args)
+		}
+	}
+	out, err := exec.Command(filepath.Join(repoRoot(), "bin", "kubectl"), "-n", ns, "run", "privileged", "--image=busybox:1.37",
+		"--privileged", "--restart=Never", "--dry-run=server").CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "PodSecurity") {
+		t.Errorf("privileged pod in %s: %v %s", ns, err, out)
 	}
 }
 

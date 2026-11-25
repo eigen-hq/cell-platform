@@ -147,8 +147,14 @@ fi
 retry curl -fsS -o /dev/null "${cacert[@]}" --resolve "auth.$CELL_DOMAIN:443:$CELL_INGRESS_IP" \
   "https://auth.$CELL_DOMAIN/api/v3/flows/executor/default-authentication-flow/"
 log "Flux $FLUX_VERSION (source and helm controllers)"
-flux install --version="v$FLUX_VERSION" --components=source-controller,helm-controller --export |
-  kubectl apply --server-side -f - >/dev/null
+# Flux may write anywhere (cluster-admin), and namespace admins may write
+# HelmReleases. A release that names no ServiceAccount therefore runs as its
+# namespace's helm-deployer (only app namespaces have one, E-45), and
+# releases use sources of their own namespace only.
+flux=$(flux install --version="v$FLUX_VERSION" --components=source-controller,helm-controller --export |
+  perl -0777 -pe 's{(- --enable-leader-election\n)((?:(?!\n---\n).)*?image: ghcr\.io/fluxcd/helm-controller:)}{$1        - --default-service-account=helm-deployer\n        - --no-cross-namespace-refs=true\n$2}s')
+grep -q -- '^ *- --default-service-account=helm-deployer$' <<<"$flux" || die "could not lock helm-controller to the apps' deployers"
+kubectl apply --server-side -f - <<<"$flux" >/dev/null
 kubectl -n flux-system wait deploy --all --for=condition=Available --timeout=5m >/dev/null
 
 log "cluster DNS: *.$CELL_DOMAIN to the ingress"
