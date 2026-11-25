@@ -44,16 +44,29 @@ if [ "$CELL_STORAGE" = longhorn ]; then
   fi
 fi
 
-# The cell's web ports must be free on its address: never take them over.
-# web_ports_taken prints the listeners (ss -Hltn on stdin) that hold 80 or
-# 443 on the address, on all addresses, or as an IPv4-mapped IPv6 address.
-web_ports_taken() {
-  sed -E 's/\[::ffff:([0-9.]+)\]/\1/' | awk -v ip="$1" '$4 ~ "^(" ip "|0\\.0\\.0\\.0|\\*|\\[::\\]):(80|443)$" {print $4}' | sort -u | paste -sd' ' -
+# The cell's ports must be free on its address: never take them over.
+# ports_taken prints the listeners (ss -Hl output on stdin) that hold one of
+# the ports (a regex, default 80|443) on the address, on all addresses, or
+# as an IPv4-mapped IPv6 address.
+ports_taken() {
+  sed -E 's/\[::ffff:([0-9.]+)\]/\1/' | awk -v ip="$1" -v ports="${2:-80|443}" '$4 ~ "^(" ip "|0\\.0\\.0\\.0|\\*|\\[::\\]):(" ports ")$" {print $4}' |
+    sort -u | awk '{printf "%s%s", sep, $0; sep = " "}'
+}
+# taken_ports prints what holds the cell's ports on an address, nothing if
+# they are free: 80/443 for the ingress, udp/3478 for the mesh relay (E-56).
+taken_ports() {
+  local tcp udp
+  tcp=$(ss -Hltn '( sport = :80 or sport = :443 )' | ports_taken "$1") || return
+  udp=$(ss -Hlun '( sport = :3478 )' | ports_taken "$1" 3478) || return
+  printf '%s' "$tcp${udp:+ udp $udp}"
 }
 if [ "$role" = server ]; then
-  busy=$(ss -Hltn '( sport = :80 or sport = :443 )' | web_ports_taken "$CELL_NODE_IP")
+  busy=$(taken_ports "$CELL_NODE_IP") || {
+    echo "error: could not check ports 80/443 and 3478 on $CELL_NODE_IP (ss failed)." >&2
+    exit 1
+  }
   if [ -n "$busy" ]; then
-    echo "error: ports 80/443 on $CELL_NODE_IP are taken by another program ($busy)." >&2
+    echo "error: ports 80/443 (tcp) or 3478 (udp) on $CELL_NODE_IP are taken by another program ($busy)." >&2
     echo "Give the cell an address of its own: CELL_NODE_IP=<address> (E-53)." >&2
     exit 1
   fi

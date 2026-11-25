@@ -195,6 +195,13 @@ spec:
                 secretKeyRef:
                   name: identity
                   key: AUTHENTIK_BOOTSTRAP_TOKEN
+            # The mesh's login client (E-56); without it, the cell has no mesh.
+            - name: MESH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-oidc
+                  key: client_secret
+                  optional: true
           ports:
             - name: http
               containerPort: 8080

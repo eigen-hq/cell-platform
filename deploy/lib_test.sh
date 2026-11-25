@@ -32,17 +32,33 @@ check() { # description, expected, actual
   if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: want '$2', got '$3'"; fails=$((fails + 1)); fi
 }
 
+applied=$'configmap/cell-mesh configured\ndeployment.apps/cell-mesh unchanged\nsecret/mesh-router-state created'
+check "configured sees a changed resource" 0 "$(configured "$applied" configmap/cell-mesh && echo 0 || echo 1)"
+check "configured ignores an unchanged one" 1 "$(configured "$applied" deployment.apps/cell-mesh && echo 0 || echo 1)"
+check "configured ignores a new one" 1 "$(configured "$applied" secret/mesh-router-state && echo 0 || echo 1)"
+check "configured matches the whole name" 1 "$(configured "$applied" configmap/cell && echo 0 || echo 1)"
 export FAKE=value; check "secret_value decodes" "secret-pw" "$(secret_value ns s password)"
 export FAKE=notfound; check "secret_value on missing secret prints nothing" "" "$(secret_value ns s password)"
 export FAKE=down; check "secret_value aborts on API error" "1" "$( (secret_value ns s password >/dev/null 2>&1) && echo 0 || echo 1)"
 
 # node.sh's port check (node.sh runs on its own, so the function comes from there)
-source <(sed -n '/^web_ports_taken()/,/^}/p' "$here/node.sh")
+source <(sed -n '/^ports_taken()/,/^}/p; /^taken_ports()/,/^}/p' "$here/node.sh")
 listeners=$(printf 'LISTEN 0 4096 100.93.118.80:443 0.0.0.0:*\nLISTEN 0 4096 127.0.0.1:80 0.0.0.0:*\nLISTEN 0 4096 192.0.2.100:443 0.0.0.0:*\n')
-check "port check leaves other addresses alone" "" "$(web_ports_taken 192.0.2.10 <<<"$listeners")"
-check "port check finds the cell address" "192.0.2.10:443" "$(printf '%s\nLISTEN 0 1 192.0.2.10:443 0.0.0.0:*\n' "$listeners" | web_ports_taken 192.0.2.10)"
-check "port check finds a wildcard" "*:80" "$(printf 'LISTEN 0 1 *:80 *:*\n' | web_ports_taken 192.0.2.10)"
-check "port check finds an IPv4-mapped address" "192.0.2.10:443" "$(printf 'LISTEN 0 1 [::ffff:192.0.2.10]:443 [::]:*\n' | web_ports_taken 192.0.2.10)"
+check "port check leaves other addresses alone" "" "$(ports_taken 192.0.2.10 <<<"$listeners")"
+check "port check finds the cell address" "192.0.2.10:443" "$(printf '%s\nLISTEN 0 1 192.0.2.10:443 0.0.0.0:*\n' "$listeners" | ports_taken 192.0.2.10)"
+check "port check finds a wildcard" "*:80" "$(printf 'LISTEN 0 1 *:80 *:*\n' | ports_taken 192.0.2.10)"
+check "port check finds an IPv4-mapped address" "192.0.2.10:443" "$(printf 'LISTEN 0 1 [::ffff:192.0.2.10]:443 [::]:*\n' | ports_taken 192.0.2.10)"
+check "port check finds the relay port" "0.0.0.0:3478" "$(printf 'UNCONN 0 0 0.0.0.0:3478 0.0.0.0:*\n' | ports_taken 192.0.2.10 3478)"
+check "port check ignores other udp ports" "" "$(printf 'UNCONN 0 0 0.0.0.0:34780 0.0.0.0:*\n' | ports_taken 192.0.2.10 3478)"
+# ss fake: TCP_LISTENERS for -Hltn, UDP_LISTENERS for -Hlun.
+ss() { case $1 in -Hltn) printf '%s' "${TCP_LISTENERS:-}" ;; -Hlun) printf '%s' "${UDP_LISTENERS:-}" ;; esac; }
+check "free ports print nothing" "" "$(TCP_LISTENERS="" UDP_LISTENERS="" taken_ports 192.0.2.10)"
+check "free ports print nothing with other listeners" "" "$(TCP_LISTENERS="$listeners" UDP_LISTENERS=$'UNCONN 0 0 127.0.0.1:3478 0.0.0.0:*\n' taken_ports 192.0.2.10)"
+check "a taken relay port is named" " udp 0.0.0.0:3478" "$(UDP_LISTENERS=$'UNCONN 0 0 0.0.0.0:3478 0.0.0.0:*\n' taken_ports 192.0.2.10)"
+check "taken web and relay ports are named" "*:80 udp 0.0.0.0:3478" "$(TCP_LISTENERS=$'LISTEN 0 1 *:80 *:*\n' UDP_LISTENERS=$'UNCONN 0 0 0.0.0.0:3478 0.0.0.0:*\n' taken_ports 192.0.2.10)"
+ss() { return 42; }
+check "a failing ss fails the check" 1 "$( (set -o pipefail; taken_ports 192.0.2.10 >/dev/null) && echo 0 || echo 1)"
+unset -f ss
 
 accounts=$(CELL_DOMAIN=acme-x.cells.test CELL_NAMES_LABEL=acme-x CELL_NAMES_TOKEN=tok names_accounts '{"forgejo.acme-x.cells.test":{"subdomain":"forgejo"}}' auth api)
 check "names_accounts keeps the apps and adds platform hosts" 'api.acme-x.cells.test auth.acme-x.cells.test forgejo.acme-x.cells.test|api acme-x tok' \

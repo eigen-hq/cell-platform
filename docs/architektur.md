@@ -62,7 +62,7 @@ Eine Zelle ist ein k3s-Cluster mit allem, was ein Kunde braucht, auf einem oder 
 | Basis | Container betreiben, Selbstheilung, Rollouts | k3s (Annahme) |
 | Netz zwischen Rechnern | Pods auf verschiedenen Rechnern sprechen verschlüsselt miteinander | WireGuard aus k3s (`wireguard-native`, E-42) |
 | Images zwischen Rechnern | Plattform-Image ohne Registry auf jedem Rechner | eingebauter Spiegel von k3s (Spegel, E-42) |
-| Netz für Menschen | Zugang zur Zelle, Anbindung ans Firmennetz | Headscale in der Zelle (E-43), noch nicht gebaut |
+| Netz für Menschen | Zugang zur Zelle, Anbindung ans Firmennetz | Headscale in der Zelle (E-43, E-56) |
 | Ingress und TLS | Jede App unter eigener Subdomain | Traefik aus k3s, cert-manager |
 | App-Operator | Manifest lesen, Zustand herstellen und halten | Eigenentwicklung, Go mit Kubebuilder (Annahme) |
 | Identität | Ein Konto für alle Apps, Gruppen, Agenten-Konten | authentik (Annahme) |
@@ -163,8 +163,8 @@ Dazu der eine MCP-Endpunkt des Gateways für die Agenten in der Oberfläche: `ht
 - Der Agenten-Dienst hat keine Cluster-Rechte, nur ein API-Konto.
 - Beitrittsschlüssel gelten eine Stunde. Die API darf in `kube-system` nur solche Schlüssel anlegen und keine Secrets lesen (Rolle `cell-api-join-keys` und gleichnamige Admission-Policy).
 - Die Ports für das Netz zwischen den Rechnern (6443, 10250, 5001 TCP, 51820 UDP) sind offen. 6443 und 10250 verlangen Zertifikate, WireGuard Schlüssel; für den Spiegel auf 5001 ist das nicht geprüft. Eine Beschränkung auf die Adressen der anderen Rechner folgt.
-- „Nur im Firmennetz erreichbar" über das eigene Mesh (E-43) ist noch nicht gebaut (O-05).
+- Das Mesh läuft (E-56); „Apps nur im Mesh erreichbar" ist noch nicht gebaut.
 
 ## Noch nicht gebaut
 
-Rechner entfernen und Apps zwischen Rechnern verschieben, Mesh für Menschen und Firmennetz (E-43), zentraler Dienst für Flotte und Abrechnung, Kontext-Index, Build-Pipeline für Eigenbau-Apps, Migration von Bestandskunden, Betrieb offener Sprachmodelle in der Zelle.
+Rechner entfernen und Apps zwischen Rechnern verschieben, Apps nur im Mesh erreichbar, zentraler Dienst für Flotte und Abrechnung, Kontext-Index, Build-Pipeline für Eigenbau-Apps, Migration von Bestandskunden, Betrieb offener Sprachmodelle in der Zelle.

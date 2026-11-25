@@ -26,6 +26,11 @@ retry() {
 
 rand() { openssl rand -hex 24; }
 
+# configured tells from the output of kubectl apply whether a resource that
+# existed was changed (programs that read their configuration once need a
+# restart then).
+configured() { grep -qx "$2 configured" <<<"$1"; }
+
 # secret_value prints one key of a secret. A missing secret prints nothing;
 # any other error (API unreachable, forbidden) aborts.
 secret_value() {

@@ -35,6 +35,8 @@ import (
 const (
 	apiClient     = "cell-api"
 	consoleClient = "cell-console"
+	meshClient    = "cell-mesh"
+	meshGroup     = "cell-mesh"
 )
 
 func main() {
@@ -103,7 +105,23 @@ func run(log *slog.Logger) error {
 		}
 		// The console is for the people who run the cell: admins change it,
 		// viewers read it.
-		return identity.EnsureAccess(ctx, consoleClient, []string{cellapi.GroupAdmins, cellapi.GroupViewers})
+		if err := identity.EnsureAccess(ctx, consoleClient, []string{cellapi.GroupAdmins, cellapi.GroupViewers}); err != nil {
+			return err
+		}
+		// The mesh (E-56): members of cell-mesh and the admins join it with
+		// their cell login.
+		if secret := os.Getenv("MESH_CLIENT_SECRET"); secret != "" {
+			meshURL := "https://" + cellCfg.Host("mesh")
+			if err := identity.EnsureOIDC(ctx, authentik.OIDC{Slug: meshClient, Title: "Mesh", LaunchURL: meshURL,
+				ClientID: meshClient, ClientSecret: secret, RedirectURIs: []string{meshURL + "/oidc/callback"}}); err != nil {
+				return err
+			}
+			if err := identity.EnsureGroup(ctx, meshGroup); err != nil {
+				return err
+			}
+			return identity.EnsureAccess(ctx, meshClient, []string{cellapi.GroupAdmins, meshGroup})
+		}
+		return nil
 	}); err != nil {
 		return err
 	}

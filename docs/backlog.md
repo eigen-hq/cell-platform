@@ -163,7 +163,7 @@ Ein Cluster über alle Rechner, WireGuard dazwischen (E-42); Netz für Menschen 
 - Ausfall eines Rechners oder Standorts: was weiterläuft, was umzieht
 - Latenz je Standort
 - Verbindung zwischen den Rechnern (WireGuard, E-42)
-- Zugang für Menschen und Anbindung ans Firmennetz (Mesh, E-43)
+- Zugang für Menschen über das Mesh (läuft, E-56); Konsole zeigt, wie ein Gerät beitritt; Apps nur im Mesh erreichbar; Anbindung ans Firmennetz
 
 ### Naht zur Office-Oberfläche
 

@@ -1,0 +1,291 @@
+# The mesh (E-56): Headscale as the coordination server of a Tailscale-style
+# network for the people of the cell, at mesh.<domain>. Devices log in with
+# the cell identity (members of cell-mesh and the admins), talk to each
+# other directly and fall back to the cell's own relay (DERP over 443, STUN
+# on udp/3478 of the cell address). The router below brings the cell's own
+# address into the mesh, so a device reaches the cell's apps through it
+# even where that address is private (a cell inside a company network).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cell-mesh
+  namespace: cell-system
+data:
+  config.yaml: |
+    server_url: https://mesh.${CELL_DOMAIN}
+    listen_addr: 0.0.0.0:8080
+    metrics_listen_addr: 127.0.0.1:9090
+    grpc_listen_addr: 127.0.0.1:50443
+    disable_check_updates: true
+    noise:
+      private_key_path: /var/lib/headscale/noise_private.key
+    prefixes:
+      v4: 100.64.0.0/10
+      v6: fd7a:115c:a1e0::/48
+      allocation: sequential
+    derp:
+      server:
+        enabled: true
+        region_id: 999
+        region_code: cell
+        region_name: Cell
+        verify_clients: true
+        stun_listen_addr: 0.0.0.0:3478
+        private_key_path: /var/lib/headscale/derp_server_private.key
+        automatically_add_embedded_derp_region: true
+        ipv4: ${CELL_INGRESS_IP}
+      # Only the cell's own relay: no traffic through outside servers.
+      urls: []
+      paths: []
+      auto_update_enabled: false
+    database:
+      type: sqlite
+      sqlite:
+        path: /var/lib/headscale/db.sqlite
+        write_ahead_log: true
+    policy:
+      mode: file
+      path: /etc/headscale/policy.json
+    dns:
+      magic_dns: true
+      base_domain: mesh.internal
+      override_local_dns: false
+      nameservers:
+        global: []
+    oidc:
+      only_start_if_oidc_is_available: true
+      issuer: https://auth.${CELL_DOMAIN}/application/o/cell-mesh/
+      client_id: cell-mesh
+      client_secret_path: /etc/headscale/oidc/client_secret
+      scope: [openid, profile, email]
+      email_verified_required: false
+      pkce:
+        enabled: true
+    log:
+      level: info
+      format: text
+    unix_socket: /var/run/headscale/headscale.sock
+    unix_socket_permission: "0770"
+    logtail:
+      enabled: false
+  # Everyone in the mesh reaches everyone, and the cell; the cell's router
+  # gets its route to the cell address without a manual approval.
+  policy.json: |
+    {
+      "tagOwners": {"tag:cell": []},
+      "autoApprovers": {"routes": {"${CELL_INGRESS_IP}/32": ["tag:cell"]}},
+      "acls": [{"action": "accept", "src": ["*"], "dst": ["*:*"]}]
+    }
+  # Trust for the mesh and the identity: the system's roots plus, in cells
+  # with their own CA, that CA (ConfigMap cell-ca, optional).
+  bundle.sh: |
+    cat /etc/ssl/certs/ca-certificates.crt /cell-ca/ca.crt > /certs/bundle.crt 2>/dev/null ||
+      cat /etc/ssl/certs/ca-certificates.crt > /certs/bundle.crt
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cell-mesh
+  namespace: cell-system
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: {storage: 1Gi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cell-mesh
+  namespace: cell-system
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cell-mesh
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cell-mesh
+    spec:
+      initContainers:
+        - name: certs
+          image: tailscale/tailscale:${TAILSCALE_VERSION}
+          command: [sh, /etc/headscale/bundle.sh]
+          volumeMounts:
+            - {name: config, mountPath: /etc/headscale}
+            - {name: cell-ca, mountPath: /cell-ca}
+            - {name: certs, mountPath: /certs}
+      containers:
+        - name: headscale
+          image: headscale/headscale:${HEADSCALE_VERSION}
+          args: [serve]
+          env:
+            - name: SSL_CERT_FILE
+              value: /certs/bundle.crt
+          ports:
+            - {name: http, containerPort: 8080}
+            - {name: stun, containerPort: 3478, protocol: UDP}
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+          volumeMounts:
+            - {name: config, mountPath: /etc/headscale}
+            - {name: oidc, mountPath: /etc/headscale/oidc}
+            - {name: data, mountPath: /var/lib/headscale}
+            - {name: run, mountPath: /var/run/headscale}
+            - {name: certs, mountPath: /certs}
+          resources:
+            requests: {cpu: 20m, memory: 64Mi}
+            limits: {memory: 512Mi}
+      volumes:
+        - name: config
+          configMap: {name: cell-mesh}
+        - name: oidc
+          secret: {secretName: mesh-oidc}
+        - name: data
+          persistentVolumeClaim: {claimName: cell-mesh}
+        - name: run
+          emptyDir: {}
+        - name: certs
+          emptyDir: {}
+        - name: cell-ca
+          configMap: {name: cell-ca, optional: true}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cell-mesh
+  namespace: cell-system
+spec:
+  selector:
+    app.kubernetes.io/name: cell-mesh
+  ports:
+    - {name: http, port: 8080, targetPort: http}
+---
+# STUN of the relay, on the cell address only (like 80/443, E-53).
+apiVersion: v1
+kind: Service
+metadata:
+  name: cell-mesh-stun
+  namespace: cell-system
+spec:
+  type: ClusterIP
+  externalIPs: ["${CELL_INGRESS_IP}"]
+  selector:
+    app.kubernetes.io/name: cell-mesh
+  ports:
+    - {name: stun, port: 3478, targetPort: stun, protocol: UDP}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cell-mesh
+  namespace: cell-system
+  annotations:
+    cert-manager.io/cluster-issuer: cell
+spec:
+  ingressClassName: traefik
+  tls:
+    - secretName: mesh-tls
+      hosts: [mesh.${CELL_DOMAIN}]
+  rules:
+    - host: mesh.${CELL_DOMAIN}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: cell-mesh
+                port: {name: http}
+---
+# The cell in the mesh: a Tailscale node in userspace mode (nothing on the
+# machine's own network) that offers the cell address as a route. Its
+# state lives in Secret mesh-router-state; its first login uses the
+# one-time key bootstrap put into Secret mesh-router. The key carries the
+# tag tag:cell (a node with a key must not ask for tags itself).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mesh-router
+  namespace: cell-system
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mesh-router-state
+  namespace: cell-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mesh-router
+  namespace: cell-system
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [mesh-router-state]
+    verbs: [get, update, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mesh-router
+  namespace: cell-system
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: mesh-router}
+subjects:
+  - {kind: ServiceAccount, name: mesh-router, namespace: cell-system}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cell-mesh-router
+  namespace: cell-system
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cell-mesh-router
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cell-mesh-router
+    spec:
+      serviceAccountName: mesh-router
+      initContainers:
+        - name: certs
+          image: tailscale/tailscale:${TAILSCALE_VERSION}
+          command: [sh, /etc/headscale/bundle.sh]
+          volumeMounts:
+            - {name: config, mountPath: /etc/headscale}
+            - {name: cell-ca, mountPath: /cell-ca}
+            - {name: certs, mountPath: /certs}
+      containers:
+        - name: tailscale
+          image: tailscale/tailscale:${TAILSCALE_VERSION}
+          env:
+            - {name: TS_USERSPACE, value: "true"}
+            - {name: TS_KUBE_SECRET, value: mesh-router-state}
+            - {name: TS_AUTH_ONCE, value: "true"}
+            - {name: TS_HOSTNAME, value: cell}
+            - {name: TS_ROUTES, value: "${CELL_INGRESS_IP}/32"}
+            - {name: TS_EXTRA_ARGS, value: "--login-server=https://mesh.${CELL_DOMAIN}"}
+            - {name: SSL_CERT_FILE, value: /certs/bundle.crt}
+            - name: TS_AUTHKEY
+              valueFrom:
+                # Required: without it the router would start a login of its
+                # own and write state before bootstrap made the key.
+                secretKeyRef: {name: mesh-router, key: authkey}
+          volumeMounts:
+            - {name: certs, mountPath: /certs}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 256Mi}
+      volumes:
+        - name: config
+          configMap: {name: cell-mesh}
+        - name: certs
+          emptyDir: {}
+        - name: cell-ca
+          configMap: {name: cell-ca, optional: true}

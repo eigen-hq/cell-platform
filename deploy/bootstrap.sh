@@ -51,7 +51,7 @@ export CELL_DOMAIN AUTHENTIK_CHART_VERSION LONGHORN_VERSION OPERATOR_IMAGE RESTI
 export CELL_TLS=${CELL_TLS:-selfsigned}
 export CELL_ACME_EMAIL=${CELL_ACME_EMAIL:-}
 export CELL_ACME_SERVER=${CELL_ACME_SERVER:-https://acme-v02.api.letsencrypt.org/directory}
-CELL_INGRESS_IP=${CELL_INGRESS_IP:-127.0.0.1}
+export CELL_INGRESS_IP=${CELL_INGRESS_IP:-127.0.0.1}
 CELL_STORAGE=${CELL_STORAGE:-local-path}
 
 BASE_DIR="$here/base"
@@ -181,7 +181,7 @@ case $CELL_TLS in
     data_manifest cert-manager cell-names url="$CELL_NAMES_URL" label="$CELL_NAMES_LABEL" token="$CELL_NAMES_TOKEN" | kubectl apply -f - >/dev/null
     # ponytail: the operator adds app hosts to the same secret; a write of
     # it racing this one can drop an app's host until its next reconcile.
-    accounts=$(names_accounts_manifest auth api console mcp)
+    accounts=$(names_accounts_manifest auth api console mcp mesh)
     kubectl apply -f - <<<"$accounts" >/dev/null
     retry apply issuer-names.yaml
     ;;
@@ -256,7 +256,15 @@ kubectl -n cell-system rollout status deploy/cell-operator --timeout=5m >/dev/nu
 
 log "platform API https://api.$CELL_DOMAIN"
 apply change-approval.yaml
+# The mesh (E-56) only on a cell with an address of its own: its devices
+# need the cell's relay. The API makes its login client at start.
+mesh_new=0
+if [ "$CELL_INGRESS_IP" != 127.0.0.1 ] && [ -z "$(secret_value cell-system mesh-oidc client_secret)" ]; then
+  ensure_secret cell-system mesh-oidc Opaque client_secret="$(rand)"
+  mesh_new=1
+fi
 apply api.yaml
+[ "$mesh_new" = 0 ] || kubectl -n cell-system rollout restart deploy/cell-api >/dev/null
 kubectl -n cell-system rollout status deploy/cell-api --timeout=5m >/dev/null
 
 # The naming service, in the cell that runs it for others (E-55). A rerun
@@ -275,6 +283,29 @@ if [ -n "$names_zone" ]; then
   apply names.yaml
   case $changed in *unchanged*) ;; *) kubectl -n cell-system rollout restart deploy/cell-names >/dev/null ;; esac
   kubectl -n cell-system rollout status deploy/cell-names --timeout=5m >/dev/null
+fi
+
+if [ "$CELL_INGRESS_IP" != 127.0.0.1 ]; then
+  log "mesh https://mesh.$CELL_DOMAIN (Headscale $HEADSCALE_VERSION)"
+  if [ "$CELL_TLS" = selfsigned ]; then
+    kubectl -n cell-system create configmap cell-ca --from-file=ca.crt="$ca" --dry-run=client -o yaml |
+      kubectl apply -f - >/dev/null
+  fi
+  export HEADSCALE_VERSION TAILSCALE_VERSION
+  out=$(render mesh.yaml | kubectl apply -f -)
+  # Headscale reads its configuration (relay address, policy) only at start.
+  if configured "$out" configmap/cell-mesh; then kubectl -n cell-system rollout restart deploy/cell-mesh >/dev/null; fi
+  kubectl -n cell-system rollout status deploy/cell-mesh --timeout=5m >/dev/null
+  # The router's first login: a one-time key, made once. Its state then
+  # lives in mesh-router-state.
+  # ponytail: a lost state needs the mesh-router secret deleted and a rerun.
+  if [ -z "$(secret_value cell-system mesh-router authkey)" ]; then
+    key=$(kubectl -n cell-system exec deploy/cell-mesh -- headscale preauthkeys create --tags tag:cell --expiration 1h) ||
+      die "could not make the mesh router's key"
+    [ -n "$key" ] || die "the mesh made an empty key for its router"
+    data_manifest cell-system mesh-router authkey="$key" | kubectl apply -f - >/dev/null
+  fi
+  kubectl -n cell-system rollout status deploy/cell-mesh-router --timeout=5m >/dev/null
 fi
 
 log "ops agent"

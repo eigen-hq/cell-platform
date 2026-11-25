@@ -36,6 +36,7 @@ Stand 19.11.2026:
 | Ressourcen leere Zelle (VM) | `free -m`, `kubectl top` nach 60 s Ruhe | 3,4 GB belegt, 4,5 GB verfügbar, 0,36 CPU im Leerlauf; authentik allein 965 MiB, Longhorn rund 450 MiB |
 | Ressourcen leere Zelle (lokal) | `kubectl top` | Pods 1,05 GiB, Knoten 2,6 GiB (ohne Longhorn) |
 | Automatische Adresse (E-55) | Unit-Tests `internal/names`: Registrieren nur mit Schlüssel, Name und Adresse geprüft, Wildcard gesetzt, Umzug und Nachweise nur mit dem eigenen Token, Unterdomain streng geprüft, der neueste Nachweis ersetzt den vorigen, Hetzner-Client gegen eine nachgestellte API; `TestACMEAccounts` (Konto je App-Host), `deploy/lib_test.sh` (Plattform-Konten) | bestanden (25.11.2026); echtes Zertifikat über Hetzner DNS und Let's Encrypt noch nicht gezeigt, braucht Zone und Token |
+| Mesh (E-56) | Lokale Zelle, Mesh von Hand mit Adresse des Knotens: Headscale startet erst, wenn die Anmeldung bei authentik erreichbar ist; der Router meldet sich mit dem einmaligen Schlüssel an (Tag `tag:cell`), seine Route wird automatisch freigegeben; ein Test-Gerät tritt bei, findet das eigene Relay (`Nearest DERP: Cell`, UDP ja) und erreicht Traefik über die Route; `deploy/lib_test.sh` (UDP-Port-Prüfung) | bestanden (25.11.2026); Anmeldung eines Geräts über den Browser und Clients außerhalb der Zelle noch nicht gezeigt |
 
 ### Zelle über mehrere Rechner
 
