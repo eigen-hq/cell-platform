@@ -88,7 +88,7 @@ Gewünscht und ausprobiert wird in der Office-Oberfläche; die Plattform baut, b
 | Wiederherstellen als Kopie | offen | |
 | Backup-Ziel ändern | offen | |
 | Sicherung der ganzen Zelle oder ausgewählter Apps auf einmal | offen | |
-| App-eigene Sicherungen einbinden (Export der App, Wartungsmodus) | offen | O-10 |
+| App-eigene Sicherungen einbinden (Hooks im Manifest: Export der App, Wartungsmodus) | offen | E-52 |
 | Wiederherstellungstest | offen | |
 | Export aller Daten und Umzug auf eigene Infrastruktur | offen | |
 
@@ -99,9 +99,20 @@ Gewünscht und ausprobiert wird in der Office-Oberfläche; die Plattform baut, b
 | Änderungsverlauf mit Urheber und Ergebnis | läuft | |
 | Prüfprotokoll mit Export | Export des Änderungsverlaufs (CSV) läuft; Prüfprotokoll offen | |
 | Sicherheitsübersicht: zweiter Faktor, verwaiste Konten, Admins | offen | |
-| Was an Modellanbieter geht | offen | O-17 |
+| Was an Modellanbieter geht | offen | E-48 |
 | Wer kann was öffnen, was verlässt die Zelle | offen | Datenzugriff je App |
 | Eskalation an menschlichen Support (nur mit Zustimmung, befristet, protokolliert) | offen | |
+
+### Vor der ersten Kundenzelle (E-52)
+
+| Feature | Status | Hängt ab von |
+|---|---|---|
+| Eigenes Dienstkonto in authentik mit engen Rechten | offen | |
+| Fremde Images per Digest pinnen | offen | |
+| Kurze Tokens für das Tool-Gateway | offen | |
+| Wartezeit auf den Login-Proxy nicht auf die Frist der App anrechnen | offen | |
+| Neustart einer App als API-Aktion | offen | |
+| Konsole: Aktionen für Viewer ausblenden | offen | |
 
 ### Identität
 
@@ -160,7 +171,7 @@ Ein Cluster über alle Rechner, WireGuard dazwischen (E-42); Netz für Menschen 
 |---|---|---|
 | Anfragen-API: neue App, Feature-Wunsch, persönliche Testversion, mit Personenkreis und Datenzugriff; Status für die Anfragenden | offen | O-27 |
 | Ereignisse für die Office-Oberfläche (Anfrage freigegeben, App bereit) | offen | O-27 |
-| Gemeinsame Anmeldung | offen | O-25 |
+| Gemeinsame Anmeldung (eigener Client je Oberfläche) | offen | E-52 |
 | Office-Oberfläche als App der Zelle | offen | O-26 |
 
 ### Selbst betreiben
