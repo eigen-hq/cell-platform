@@ -102,7 +102,7 @@ You can also set the target without the console, for example from a script or by
 
 ## Add more machines
 
-Prerequisite: the new machine is in the same private network as the first one and meets the [requirements](#requirements). It needs no open ports; as a firewall, TCP 22 from your IP address is enough.
+Prerequisite: the new machine meets the [requirements](#requirements) (x86_64 or arm64). In the same private network as the first one, it needs no open ports. Without a private network, the machines talk over their public addresses; then open TCP 6443, 10250, 5001 and UDP 51820 on every machine, **only for the addresses of the other machines**.
 
 1. In the console: *Machines*, *Add machine*.
 2. Run the command shown on the new machine.
@@ -147,7 +147,7 @@ If an error occurs, the installation shows the failed step, the reason and the l
 | `*.cell.example.com has no DNS record` | The DNS record is missing or not active yet. Check the record, wait a few minutes, run again. |
 | `ports 80/443 (tcp) or 3478 (udp) ... are taken` | Another program is using the ports, for example a web server. Stop it or use a dedicated server. |
 | Step *Login page* takes longer than 10 minutes | Port 80 is not reachable from outside, so Let's Encrypt cannot verify the domain. Check the firewall. |
-| New machine does not appear | It is not in the private network of the first machine. |
+| New machine does not appear | It is not in the private network of the first machine, or, over public addresses, the firewall blocks the ports between the machines. |
 | Backup target: test fails | The console gives the reason, usually a wrong key, a wrong bucket name or a read-only key. |
 | Initial password not written down | On the server: `sudo k3s kubectl -n cell-system get secret identity -o jsonpath='{.data.AUTHENTIK_BOOTSTRAP_PASSWORD}' \| base64 -d` (valid until you change it) |
 | Backup key not written down | On the server: `sudo k3s kubectl -n cell-system get secret backup-target -o jsonpath='{.data.password}' \| base64 -d` |
@@ -163,7 +163,7 @@ You can run the installation again at any time; it changes only what is missing.
 | 80/TCP | Internet | Let's Encrypt verifies the domain; redirect to HTTPS |
 | 443/TCP | Internet | Console, sign-in, API, all apps, mesh |
 | 3478/UDP | Internet | Mesh: direct connections between devices and cell |
-| 6443, 10250, 5001/TCP, 51820/UDP | Private network only | Traffic between the machines of the cell. Never open to the internet. |
+| 6443, 10250, 5001/TCP, 51820/UDP | Other machines of the cell only | Traffic between the machines (private network or public addresses). Never open to the internet. |
 
 ### Settings
 

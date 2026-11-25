@@ -18,6 +18,9 @@ spec:
       labels:
         app.kubernetes.io/name: cell-names
     spec:
+      # The platform image is built on the first machine, for its architecture.
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: "true"
       containers:
         - name: names
           image: ${OPERATOR_IMAGE}

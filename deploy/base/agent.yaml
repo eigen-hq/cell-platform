@@ -19,6 +19,9 @@ spec:
         app.kubernetes.io/name: cell-agent
     spec:
       automountServiceAccountToken: false
+      # The platform image is built on the first machine, for its architecture.
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: "true"
       containers:
         - name: agent
           image: ${OPERATOR_IMAGE}

@@ -238,6 +238,9 @@ spec:
         app.kubernetes.io/name: cell-api
     spec:
       serviceAccountName: cell-api
+      # The platform image is built on the first machine, for its architecture.
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: "true"
       containers:
         - name: api
           image: ${OPERATOR_IMAGE}

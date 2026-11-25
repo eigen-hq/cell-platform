@@ -181,7 +181,8 @@ One cluster across all machines, WireGuard in between (E-42); network for people
 
 | Feature | Status | Depends on |
 |---|---|---|
-| Cell across two servers without a private network (node traffic over public addresses, firewall per server) | open | Add machine |
+| Cell across two servers without a private network (node traffic over public addresses, firewall per server) | running, not yet verified (E-61) | Add machine |
+| Machines of mixed CPU architecture: place apps only where their images run | open | |
 | Update of the platform to a release tag | running (E-59) | |
 | Short install address `get.eigen-platform.com` | running (E-59) | |
 | Prebuilt platform images from a public registry instead of building on the server | open | |

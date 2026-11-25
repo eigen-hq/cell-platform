@@ -104,6 +104,9 @@ spec:
         app.kubernetes.io/name: cell-operator
     spec:
       serviceAccountName: cell-operator
+      # The platform image is built on the first machine, for its architecture.
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: "true"
       containers:
         - name: operator
           image: ${OPERATOR_IMAGE}
