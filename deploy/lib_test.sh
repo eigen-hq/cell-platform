@@ -42,7 +42,7 @@ export FAKE=notfound; check "secret_value on missing secret prints nothing" "" "
 export FAKE=down; check "secret_value aborts on API error" "1" "$( (secret_value ns s password >/dev/null 2>&1) && echo 0 || echo 1)"
 
 # node.sh's port check (node.sh runs on its own, so the function comes from there)
-source <(sed -n '/^ports_taken()/,/^}/p; /^taken_ports()/,/^}/p' "$here/node.sh")
+source <(sed -n '/^node_iface()/p; /^ports_taken()/,/^}/p; /^taken_ports()/,/^}/p' "$here/node.sh")
 listeners=$(printf 'LISTEN 0 4096 100.93.118.80:443 0.0.0.0:*\nLISTEN 0 4096 127.0.0.1:80 0.0.0.0:*\nLISTEN 0 4096 192.0.2.100:443 0.0.0.0:*\n')
 check "port check leaves other addresses alone" "" "$(ports_taken 192.0.2.10 <<<"$listeners")"
 check "port check finds the cell address" "192.0.2.10:443" "$(printf '%s\nLISTEN 0 1 192.0.2.10:443 0.0.0.0:*\n' "$listeners" | ports_taken 192.0.2.10)"
@@ -56,6 +56,10 @@ check "free ports print nothing" "" "$(TCP_LISTENERS="" UDP_LISTENERS="" taken_p
 check "free ports print nothing with other listeners" "" "$(TCP_LISTENERS="$listeners" UDP_LISTENERS=$'UNCONN 0 0 127.0.0.1:3478 0.0.0.0:*\n' taken_ports 192.0.2.10)"
 check "a taken relay port is named" " udp 0.0.0.0:3478" "$(UDP_LISTENERS=$'UNCONN 0 0 0.0.0.0:3478 0.0.0.0:*\n' taken_ports 192.0.2.10)"
 check "taken web and relay ports are named" "*:80 udp 0.0.0.0:3478" "$(TCP_LISTENERS=$'LISTEN 0 1 *:80 *:*\n' UDP_LISTENERS=$'UNCONN 0 0 0.0.0.0:3478 0.0.0.0:*\n' taken_ports 192.0.2.10)"
+addrs=$'2: eth0    inet 192.0.2.10/32 scope global dynamic eth0\n3: enp7s0    inet 10.0.0.2/32 brd 10.0.0.2 scope global dynamic enp7s0\n4: tailscale0    inet 100.64.0.1/32 scope global tailscale0'
+check "flannel takes the private interface" enp7s0 "$(node_iface 10.0.0.2 <<<"$addrs")"
+check "flannel takes the public one on a single address" eth0 "$(node_iface 192.0.2.10 <<<"$addrs")"
+check "an address of another machine has no interface" "" "$(node_iface 10.0.0.20 <<<"$addrs")"
 ss() { return 42; }
 check "a failing ss fails the check" 1 "$( (set -o pipefail; taken_ports 192.0.2.10 >/dev/null) && echo 0 || echo 1)"
 unset -f ss

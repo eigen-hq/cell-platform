@@ -37,6 +37,7 @@ Stand 19.11.2026:
 | Ressourcen leere Zelle (lokal) | `kubectl top` | Pods 1,05 GiB, Knoten 2,6 GiB (ohne Longhorn) |
 | Automatische Adresse (E-55) | Unit-Tests `internal/names`: Registrieren nur mit Schlüssel, Name und Adresse geprüft, Wildcard gesetzt, Umzug und Nachweise nur mit dem eigenen Token, Unterdomain streng geprüft, der neueste Nachweis ersetzt den vorigen, Hetzner-Client gegen eine nachgestellte API; `TestACMEAccounts` (Konto je App-Host), `deploy/lib_test.sh` (Plattform-Konten) | bestanden (25.11.2026); echtes Zertifikat über Hetzner DNS und Let's Encrypt noch nicht gezeigt, braucht Zone und Token |
 | Mesh (E-56) | Lokale Zelle, Mesh von Hand mit Adresse des Knotens: Headscale startet erst, wenn die Anmeldung bei authentik erreichbar ist; der Router meldet sich mit dem einmaligen Schlüssel an (Tag `tag:cell`), seine Route wird automatisch freigegeben; ein Test-Gerät tritt bei, findet das eigene Relay (`Nearest DERP: Cell`, UDP ja) und erreicht Traefik über die Route (80 und 443), 6443 und 10250 der Zelle bleiben über das Mesh gesperrt (direkt erreichbar); der Mesh-Abschnitt von `bootstrap.sh` lief gegen die lokale Zelle; `make vm-test`: Einrichtung samt Mesh auf frischer Ubuntu-VM bestanden (777 s), zweiter Lauf unverändert (der spätere Longhorn-Schritt lief in eine Zeitüberschreitung, die Server-VM mit 5 GiB war überlastet); `deploy/lib_test.sh` (Port-Prüfung, auch mit GNU-Werkzeugen unter Ubuntu 24.04) | bestanden (25.11.2026); Anmeldung eines Geräts über den Browser und Clients außerhalb der Zelle noch nicht gezeigt |
+| Netz der Rechner getrennt von der Adresse der Zelle (E-57) | `bash -n`, `deploy/lib_test.sh`; Einrichtung mit `CELL_NODE_IP` (privat) und `CELL_INGRESS_IP` (öffentlich) | offen: wird auf den beiden VPS mit privatem Netz gezeigt |
 
 ### Zelle über mehrere Rechner
 
@@ -163,7 +164,7 @@ Stand 24.11.2026: Konsole in Svelte unter `https://console.<domain>`, ausgeliefe
 |---|---|
 | Jede App braucht eigene Handgriffe für den Login | Drei bewusst unterschiedliche Referenz-Apps; Muster ins Manifest ziehen |
 | Volumes liegen auf einem Rechner (eine Replik, E-14) | Fällt der Rechner aus, ist die App bis zu seiner Rückkehr weg; Backups außerhalb der Zelle; Repliken über Rechner sind ein eigener Schritt |
-| Ports zwischen den Rechnern offen | 6443, 10250 und WireGuard authentifiziert, 5001 (Spiegel) ungeprüft; Beschränkung auf die Adressen der anderen Rechner folgt |
+| Ports zwischen den Rechnern ohne Firewall offen | Rechner sprechen nur im gemeinsamen Netz (E-57); die Firewall sperrt 6443, 10250, 5001 und 51820 nach außen; ohne Firewall lauschen sie weiter auf allen Adressen |
 | Basisdienste brauchen zu viel Speicher für eine kleine VM | Gemessen (siehe Zelle per Befehl); notfalls Bausteine tauschen |
 | „Läuft" ist nicht „integriert" | Zwei Stufen im Katalog sichtbar machen: generisch und integriert |
 | Vertrauen in Agenten | Freigabe als Standard, Protokoll von Anfang an |

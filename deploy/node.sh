@@ -6,8 +6,12 @@
 #
 #   K3S_VERSION        k3s release (versions.env)
 #   CELL_STORAGE       longhorn (default) | local-path
-#   CELL_NODE_IP       address of this machine the others reach it on, one of
-#                      its own (default: the source address of the default route)
+#   CELL_NODE_IP       address of this machine in the network of the cell's
+#                      machines, one of its own (default: the source address
+#                      of the route to the server, on the server the default
+#                      route). Machines talk only there (E-57).
+#   CELL_INGRESS_IP    on the server: the cell's address, where it takes 80,
+#                      443 and udp/3478 (default: CELL_NODE_IP, E-53)
 #   CELL_JOIN_SERVER   the server's address; set, this machine joins as agent
 #   CELL_JOIN_TOKEN    join token (k3s secure format), with CELL_JOIN_SERVER
 set -euo pipefail
@@ -15,13 +19,20 @@ say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
 [ "$(id -u)" -eq 0 ] || { echo "error: run as root" >&2; exit 1; }
 : "${K3S_VERSION:?K3S_VERSION must be set}"
 CELL_STORAGE=${CELL_STORAGE:-longhorn}
-CELL_NODE_IP=${CELL_NODE_IP:-$(ip -4 route get 1.1.1.1 | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')}
-[ -n "$CELL_NODE_IP" ] || { echo "error: no address found, set CELL_NODE_IP" >&2; exit 1; }
 role=server
 if [ -n "${CELL_JOIN_SERVER:-}" ]; then
   : "${CELL_JOIN_TOKEN:?CELL_JOIN_TOKEN must be set to join}"
   role=agent
 fi
+CELL_NODE_IP=${CELL_NODE_IP:-$(ip -4 route get "${CELL_JOIN_SERVER:-1.1.1.1}" | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')}
+[ -n "$CELL_NODE_IP" ] || { echo "error: no address found, set CELL_NODE_IP" >&2; exit 1; }
+CELL_INGRESS_IP=${CELL_INGRESS_IP:-$CELL_NODE_IP}
+# node_iface prints the interface that holds an address (ip -o -4 addr on
+# stdin). Flannel takes the default route's interface unless told, so
+# WireGuard would leave through the public one (E-57).
+node_iface() { awk -v ip="$1" '{split($4, a, "/"); if (a[1] == ip) {print $2; exit}}'; }
+iface=$(ip -o -4 addr show | node_iface "$CELL_NODE_IP")
+[ -n "$iface" ] || { echo "error: $CELL_NODE_IP is not an address of this machine (CELL_NODE_IP)" >&2; exit 1; }
 
 say "host packages"
 export DEBIAN_FRONTEND=noninteractive
@@ -61,29 +72,29 @@ taken_ports() {
   printf '%s' "$tcp${udp:+ udp $udp}"
 }
 if [ "$role" = server ]; then
-  busy=$(taken_ports "$CELL_NODE_IP") || {
-    echo "error: could not check ports 80/443 and 3478 on $CELL_NODE_IP (ss failed)." >&2
+  busy=$(taken_ports "$CELL_INGRESS_IP") || {
+    echo "error: could not check ports 80/443 and 3478 on $CELL_INGRESS_IP (ss failed)." >&2
     exit 1
   }
   if [ -n "$busy" ]; then
-    echo "error: ports 80/443 (tcp) or 3478 (udp) on $CELL_NODE_IP are taken by another program ($busy)." >&2
-    echo "Give the cell an address of its own: CELL_NODE_IP=<address> (E-53)." >&2
+    echo "error: ports 80/443 (tcp) or 3478 (udp) on $CELL_INGRESS_IP are taken by another program ($busy)." >&2
+    echo "Give the cell an address of its own: CELL_INGRESS_IP=<address> (E-53)." >&2
     exit 1
   fi
 fi
 
 say "k3s $K3S_VERSION as $role on $CELL_NODE_IP"
-# Pod traffic between machines runs through WireGuard to each machine's
-# address; images move between machines through the embedded mirror, the
+# The machines talk on their node addresses only, in one network (E-57):
+# pod traffic through WireGuard, images between machines through the embedded mirror, the
 # platform's own under registry.cell.internal (E-42).
 mkdir -p /etc/rancher/k3s
 config=/etc/rancher/k3s/config.yaml
 if [ "$role" = server ]; then
   # No ServiceLB: it takes 80 and 443 on every address of every machine;
-  # the ingress takes them on CELL_NODE_IP alone (E-53).
-  want=$(printf 'write-kubeconfig-mode: "600"\nnode-ip: %s\nnode-external-ip: %s\nflannel-backend: wireguard-native\nflannel-external-ip: true\nembedded-registry: true\ndisable:\n  - servicelb\n' "$CELL_NODE_IP" "$CELL_NODE_IP")
+  # the ingress takes them on CELL_INGRESS_IP alone (E-53).
+  want=$(printf 'write-kubeconfig-mode: "600"\nnode-ip: %s\nflannel-iface: %s\nflannel-backend: wireguard-native\nembedded-registry: true\ndisable:\n  - servicelb\n' "$CELL_NODE_IP" "$iface")
 else
-  want=$(printf 'node-ip: %s\nnode-external-ip: %s\n' "$CELL_NODE_IP" "$CELL_NODE_IP")
+  want=$(printf 'node-ip: %s\nflannel-iface: %s\n' "$CELL_NODE_IP" "$iface")
 fi
 changed=0
 if [ "$(cat "$config" 2>/dev/null)" != "$want" ]; then

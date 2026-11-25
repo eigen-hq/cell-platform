@@ -49,7 +49,7 @@ flowchart TB
 Eine Zelle ist ein k3s-Cluster mit allem, was ein Kunde braucht, auf einem oder mehreren Rechnern (E-42). Sie ist in sich vollständig und kennt keine anderen Zellen.
 
 - Der erste Rechner ist der Server der Zelle (`deploy/install.sh`), jeder weitere kommt über die Konsole hinzu (E-44): Der Admin erzeugt einen Beitrittsbefehl, führt ihn auf dem neuen Rechner aus, und der Rechner lädt alles Nötige von der Zelle selbst.
-- Zwischen den Rechnern läuft der Datenverkehr der Pods verschlüsselt über WireGuard, direkt von Rechner zu Rechner. Images verteilen sie untereinander, ohne Registry.
+- Alle Rechner einer Zelle liegen in einem gemeinsamen Netz (E-57). Dort läuft der Datenverkehr der Pods verschlüsselt über WireGuard, direkt von Rechner zu Rechner. Images verteilen sie untereinander, ohne Registry.
 
 - Kunden sind auf VM-Ebene getrennt. Das ist wichtig, weil Eigenbau-Apps fremder Code sind.
 - Der gehostete und der selbst betriebene Fall sind technisch identisch.
@@ -162,7 +162,7 @@ Dazu der eine MCP-Endpunkt des Gateways für die Agenten in der Oberfläche: `ht
 - Zugangsdaten entstehen in der Zelle und liegen dort als Secrets.
 - Der Agenten-Dienst hat keine Cluster-Rechte, nur ein API-Konto.
 - Beitrittsschlüssel gelten eine Stunde. Die API darf in `kube-system` nur solche Schlüssel anlegen und keine Secrets lesen (Rolle `cell-api-join-keys` und gleichnamige Admission-Policy).
-- Die Ports für das Netz zwischen den Rechnern (6443, 10250, 5001 TCP, 51820 UDP) sind offen. 6443 und 10250 verlangen Zertifikate, WireGuard Schlüssel; für den Spiegel auf 5001 ist das nicht geprüft. Eine Beschränkung auf die Adressen der anderen Rechner folgt.
+- Aus dem Internet erreichbar sind nur 80 und 443 (TCP) und 3478 (UDP) auf der Adresse der Zelle (E-57). Die Ports zwischen den Rechnern (6443, 10250, 5001 TCP, 51820 UDP) nutzen die Rechner nur in ihrem gemeinsamen Netz; die Firewall sperrt sie nach außen. Sie lauschen weiter auf allen Adressen des Rechners: ohne Firewall wären sie offen (6443 und 10250 verlangen Zertifikate, WireGuard Schlüssel, der Spiegel auf 5001 ist ungeprüft).
 - Das Mesh läuft (E-56); „Apps nur im Mesh erreichbar" ist noch nicht gebaut.
 
 ## Noch nicht gebaut

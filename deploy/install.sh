@@ -4,8 +4,11 @@
 #   CELL_DOMAIN=cell.example.com CELL_TLS=acme CELL_ACME_EMAIL=ops@example.com ./install.sh
 #
 # Defaults: CELL_STORAGE=longhorn, CELL_TLS=selfsigned. CELL_NODE_IP is the
-# address other machines join on (default: the source address of the default
-# route). All other settings as in bootstrap.sh and node.sh. OPERATOR_IMAGE
+# address other machines join on, in the network the cell's machines share
+# (default: the source address of the default route); CELL_INGRESS_IP is the
+# cell's address for browsers and devices (default: CELL_NODE_IP). On a
+# server with a private network: CELL_NODE_IP=<private> CELL_INGRESS_IP=<public>
+# (E-57). All other settings as in bootstrap.sh and node.sh. OPERATOR_IMAGE
 # names the operator image; OPERATOR_IMAGE_TAR, if set, is an image archive
 # (docker save) imported first. Idempotent: a second run changes nothing.
 #
@@ -17,7 +20,7 @@ source "$here/versions.env"
 source "$here/lib.sh"
 [ "$(id -u)" -eq 0 ] || die "run as root"
 settings=/etc/cell/install.env
-saved=(CELL_DOMAIN CELL_TLS CELL_ACME_EMAIL CELL_ACME_SERVER CELL_STORAGE CELL_NODE_IP OPERATOR_IMAGE)
+saved=(CELL_DOMAIN CELL_TLS CELL_ACME_EMAIL CELL_ACME_SERVER CELL_STORAGE CELL_NODE_IP CELL_INGRESS_IP OPERATOR_IMAGE)
 if [ -f "$settings" ]; then
   # Saved settings fill in what this run does not set.
   while IFS='=' read -r key value; do
@@ -38,8 +41,9 @@ if [ "${#missing[@]}" -gt 0 ]; then
   apt-get install -yq "${missing[@]}"
 fi
 
-# The address other machines join on (E-44).
+# The address other machines join on (E-44) and the cell's own (E-57).
 export CELL_NODE_IP=${CELL_NODE_IP:-$(ip -4 route get 1.1.1.1 | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')}
+export CELL_INGRESS_IP=${CELL_INGRESS_IP:-$CELL_NODE_IP}
 # An address from the naming service (E-55): registered once, kept in
 # /etc/cell/names.env (root only); every run points it at this machine.
 names=/etc/cell/names.env
@@ -48,7 +52,7 @@ if [ -z "$CELL_DOMAIN" ] && [ ! -f "$names" ]; then
   [[ $CELL_NAME =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] || die "CELL_NAME: lowercase letters, digits and inner dashes"
   log "address for $CELL_NAME from $CELL_NAMES_URL"
   reg=$(curl -fsS -H @<(printf 'Authorization: Bearer %s\n' "$CELL_NAMES_KEY") -H 'Content-Type: application/json' \
-    -d "{\"name\":\"$CELL_NAME\",\"address\":\"$CELL_NODE_IP\"}" "$CELL_NAMES_URL/v0/cells") || die "the naming service refused the registration"
+    -d "{\"name\":\"$CELL_NAME\",\"address\":\"$CELL_INGRESS_IP\"}" "$CELL_NAMES_URL/v0/cells") || die "the naming service refused the registration"
   mkdir -p /etc/cell
   # The answer becomes a file that later runs source as root: only checked
   # values, quoted.
@@ -68,8 +72,8 @@ if [ -f "$names" ]; then
   source "$names"
   export CELL_NAMES_URL CELL_NAMES_LABEL CELL_NAMES_TOKEN CELL_DOMAIN=$CELL_NAMES_DOMAIN CELL_TLS=names
   curl -fsS -o /dev/null -X PUT -H @<(printf 'Authorization: Bearer %s\n' "$CELL_NAMES_TOKEN") -H 'Content-Type: application/json' \
-    -d "{\"address\":\"$CELL_NODE_IP\"}" "$CELL_NAMES_URL/v0/cells/$CELL_NAMES_LABEL" || die "the naming service did not take this machine's address"
-  log "cell address $CELL_DOMAIN -> $CELL_NODE_IP"
+    -d "{\"address\":\"$CELL_INGRESS_IP\"}" "$CELL_NAMES_URL/v0/cells/$CELL_NAMES_LABEL" || die "the naming service did not take this machine's address"
+  log "cell address $CELL_DOMAIN -> $CELL_INGRESS_IP"
 fi
 K3S_VERSION=$K3S_VERSION "$here/node.sh"
 mkdir -p /etc/cell
@@ -102,6 +106,6 @@ if [ -n "${OPERATOR_IMAGE_TAR:-}" ]; then
   retry has_image
 fi
 
-# The ingress takes the address the others join on, which node.sh checked.
-CELL_JOIN_SERVER=$CELL_NODE_IP CELL_INGRESS_IP=$CELL_NODE_IP "$here/bootstrap.sh"
+# The ingress takes the cell's address, which node.sh checked.
+CELL_JOIN_SERVER=$CELL_NODE_IP "$here/bootstrap.sh"
 log "cell installed in $(($(date +%s) - start))s"
