@@ -35,7 +35,9 @@ func (d *slowDNS) Get(ctx context.Context, name, typ string) ([]string, error) {
 
 var owners = map[string]string{}
 
-func (f fakeDNS) Get(_ context.Context, name, typ string) ([]string, error) { return f[name+" "+typ], nil }
+func (f fakeDNS) Get(_ context.Context, name, typ string) ([]string, error) {
+	return f[name+" "+typ], nil
+}
 func (f fakeDNS) Set(_ context.Context, cell, name, typ string, v []string, _ int) error {
 	f[name+" "+typ] = slices.Clone(v)
 	owners[name+" "+typ] = cell
@@ -90,7 +92,9 @@ func TestCells(t *testing.T) {
 	_, b := reg("reg-key", "acme", "10.0.0.6")
 
 	// A cell moves and answers challenges with its own token only.
-	auth := func(label, token string) map[string]string { return map[string]string{"Authorization": "Bearer " + token} }
+	auth := func(label, token string) map[string]string {
+		return map[string]string{"Authorization": "Bearer " + token}
+	}
 	if code, _ := call(t, h, "PUT", "/v0/cells/"+a["label"], auth(a["label"], b["token"]), map[string]string{"address": "10.0.0.7"}); code != 401 {
 		t.Errorf("move with another cell's token: %d", code)
 	}
