@@ -177,6 +177,12 @@ func (s *Server) wrap(rt route) http.HandlerFunc {
 					return
 				}
 				r = r.WithContext(ctx)
+				// An agent reads and changes only the app its task is about:
+				// what one app's logs say must not end up in another's.
+				if task := taskOf(ctx); strings.HasPrefix(rt.path, "/v0/apps/{name}") && r.PathValue("name") != task.App {
+					writeError(w, errorf(http.StatusForbidden, "task %s is about app %s, not %s", task.Name, task.App, r.PathValue("name")))
+					return
+				}
 			}
 		}
 		if err := rt.handle(w, r, c); err != nil {

@@ -502,7 +502,7 @@ func TestAppChanges(t *testing.T) {
 	if code != 202 || field(body, "risk") != "low" || field(body, "patch", "access", "groups").([]any)[0] != "finance" {
 		t.Errorf("set access: %d %v", code, body)
 	}
-	if code, _ = h.do("PUT", "/v0/apps/plain/access", "agent", map[string]any{"groups": []string{"finance"}}); code != 400 {
+	if code, _ = h.do("PUT", "/v0/apps/plain/access", "admin", map[string]any{"groups": []string{"finance"}}); code != 400 {
 		t.Errorf("groups without login: %d", code)
 	}
 	// A forgotten or null list never opens the app to everyone.
@@ -523,7 +523,7 @@ func TestAppChanges(t *testing.T) {
 	if code, body = h.do("POST", "/v0/apps/notes/restore", "agent", map[string]any{"backup": "notes-old"}); code != 202 || field(body, "restores") != "notes-old" {
 		t.Errorf("restore named: %d %v", code, body)
 	}
-	if code, _ = h.do("POST", "/v0/apps/plain/restore", "agent", map[string]any{}); code != 400 {
+	if code, _ = h.do("POST", "/v0/apps/plain/restore", "admin", map[string]any{}); code != 400 {
 		t.Errorf("restore without backups: %d", code)
 	}
 

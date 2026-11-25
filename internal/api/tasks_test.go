@@ -234,7 +234,9 @@ func TestDiagnosisReads(t *testing.T) {
 	}
 	for path, want := range map[string]int{
 		"/v0/apps/notes/logs?pod=nope": 404, "/v0/apps/notes/logs?tail=0": 400,
-		"/v0/apps/notes/logs?previous=maybe": 400, "/v0/apps/gone/logs": 404,
+		"/v0/apps/notes/logs?previous=maybe": 400,
+		// Only the app the agent's task is about.
+		"/v0/apps/gone/logs": 403, "/v0/apps/other/pods": 403, "/v0/apps/other/events": 403, "/v0/apps/other": 403,
 	} {
 		if code, _ := h.do("GET", path, "agent", nil); code != want {
 			t.Errorf("%s: %d, want %d", path, code, want)
