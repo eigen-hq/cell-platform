@@ -8,7 +8,7 @@ Structure of the platform. Building blocks marked "assumption" are proposals and
 2. **Declarative.** The desired state of every app is in a manifest. An operator creates it and keeps it.
 3. **Agents only through the API.** They propose changes to the desired state; the operator always does the execution.
 4. **Every change is reversible and logged.** Snapshot, change, health check, rollback on failure.
-5. **One cell per customer.** The same package runs in our cloud and on customer servers.
+5. **One cell per customer.** The same package runs on any server, hosted or the customer's own.
 6. **Compose instead of building anew.** Own code only for operator, API, agents and console.
 
 ## Overview

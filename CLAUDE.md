@@ -12,7 +12,6 @@ A platform that runs any self-hostable software per customer in a "cell" of its 
 2. `docs/architecture.md`
 3. `docs/app-manifest.md`
 4. `docs/decisions.md`
-5. `docs/context.md`: for product questions
 
 ## How we work
 

@@ -48,13 +48,12 @@ claude mcp add --transport http cell https://mcp.cell.localhost/mcp --header 'Au
 
 ## Reading order
 
-1. `docs/context.md` - what we build this for and for whom
-2. `docs/architecture.md` - how the platform is built
-3. `docs/status.md` - what runs today, with evidence
-4. `docs/installation.md` - requirements and installation on your own servers
-5. `docs/backlog.md` - all features with status
-6. `docs/app-manifest.md` - draft of the central abstraction
-7. `docs/decisions.md` - what is decided, what is an assumption, what is open
+1. `docs/architecture.md` - how the platform is built
+2. `docs/status.md` - what runs today, with evidence
+3. `docs/installation.md` - requirements and installation on your own servers
+4. `docs/backlog.md` - all features with status
+5. `docs/app-manifest.md` - draft of the central abstraction
+6. `docs/decisions.md` - what is decided, what is an assumption, what is open
 
 For coding agents, additionally: `CLAUDE.md`.
 

@@ -5,7 +5,7 @@ All features in one list, without phases (E-37). The order within an area follow
 ## The boundary
 
 - **Platform and console: technical operation.** Run, monitor, back up, check and approve apps. Here IT sees what happens in the cell and decides everything that applies to more than one person.
-- **Office UI: the work.** All employees use the apps there, request new ones, ask for features and try them out for themselves first. The office UI belongs to the co-founder, in separate repos.
+- **Office UI: the work.** All employees use the apps there, request new ones, ask for features and try them out for themselves first. The office UI lives in separate repos.
 - **The seam:** requests from the office UI arrive through the platform API. What affects only one person runs restricted, without approval. What applies to everyone goes through the approval by IT in the console. The platform enforces which app may see which data.
 
 Status:
@@ -130,6 +130,7 @@ What is wanted and tried out happens in the office UI; the platform builds, oper
 | Feature | Status | Depends on |
 |---|---|---|
 | Agent tasks with all steps | running | |
+| Free-form tasks for the ops agent from the console (e.g. "set up backups to this bucket"), acting through the API, with approval | open | |
 | Agents as accounts with permissions per app | open | |
 | Autonomy levels | open | |
 | Tool gateway for all apps | API running | O-18, O-19, O-20 |
@@ -140,6 +141,8 @@ What is wanted and tried out happens in the office UI; the platform builds, oper
 |---|---|---|
 | Run models in the cell | open | |
 | Models through the customer's own key | open | O-16 |
+| Set the model key and model in the console and the API, not only at install (`CELL_LLM_API_KEY`) | open | |
+| Provider-agnostic model access: agents speak one model API through a gateway in the cell, any provider or own model behind it; no agent code bound to one provider's SDK | open | O-30 |
 | Usage and costs, budget and limits per agent or department | open | |
 
 ### Cell
@@ -178,13 +181,14 @@ One cluster across all machines, WireGuard in between (E-42); network for people
 
 | Feature | Status | Depends on |
 |---|---|---|
-| Cell across both Hetzner VPS | open | Add machine |
-| Update of the platform to a release tag (build on the server from Git) | open | |
-| Git hosting and issues in our own cell, backlog as issues | open | Cell on the VPS |
+| Cell across two servers without a private network (node traffic over public addresses, firewall per server) | open | Add machine |
+| Update of the platform to a release tag | running (E-59) | |
+| Short install address `get.<platform domain>` instead of the GitHub URL | open | Platform domain |
+| Prebuilt platform images from a public registry instead of building on the server | open | |
 
 ## Belongs to the office UI
 
-Only what the platform provides for it is listed here. Planning and implementation are with the co-founder.
+Only what the platform provides for it is listed here.
 
 | Feature | What the platform provides |
 |---|---|
@@ -203,11 +207,3 @@ Only what the platform provides for it is listed here. Planning and implementati
 - Migration of existing IT landscapes
 - Billing, central service across several cells
 - Device management
-
-## Design
-
-- Brand look dark: https://claude.ai/artifact/URWKXNc7sU4avqh8JWoLWA
-- Brand look light: https://claude.ai/artifact/GpypdMvouCnaXyF9wC3Xst
-- Figma "Platform Console 02": https://www.figma.com/design/J1s8hrkim2aNxKgzxEaSe6
-
-The two brand looks and the Figma file show the new boundary (31 frames each in "Screens - Dark" and "Screens - Light"). New parts carry a gap marker there while they are open here.
