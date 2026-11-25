@@ -37,6 +37,40 @@ secret_value() {
   printf '%s' "$out" | base64 -d
 }
 
+# stored_backup_target keeps the backup target of an earlier run when the
+# environment names none: it sets stored to the stored rclone.conf, or, for
+# a target from before the backup gateway (S3 only), exports its
+# CELL_BACKUP_S3_* variables. A failed read aborts, so that a rerun never
+# mistakes an unreachable API for a cell without a target.
+stored_backup_target() {
+  stored=""
+  [ -z "${CELL_BACKUP_S3_ENDPOINT:-}${CELL_BACKUP_PATH:-}${CELL_BACKUP_RCLONE_CONFIG:-}" ] || return 0
+  stored=$(secret_value cell-system backup-target rclone.conf) || return
+  [ -z "$stored" ] || return 0
+  local endpoint kv v
+  endpoint=$(secret_value cell-system backup-target endpoint) || return
+  [ -n "$endpoint" ] || return 0
+  for kv in ENDPOINT:endpoint BUCKET:bucket REGION:region ACCESS_KEY:accessKey SECRET_KEY:secretKey PREFIX:prefix; do
+    v=$(secret_value cell-system backup-target "${kv#*:}") || return
+    export "CELL_BACKUP_S3_${kv%%:*}=$v"
+  done
+  CELL_BACKUP_PASSWORD=$(secret_value cell-system backup-target password) || return
+  export CELL_BACKUP_PASSWORD
+}
+
+# backup_target_manifest prints the backup-target Secret: rclone.conf from
+# the first argument, KEY=VALUE pairs from the others. Values travel through
+# pipes, never through the argv of another process.
+backup_target_manifest() {
+  local conf=$1 kv
+  shift
+  printf 'apiVersion: v1\nkind: Secret\nmetadata:\n  name: backup-target\n  namespace: cell-system\ntype: Opaque\ndata:\n'
+  printf '  rclone.conf: %s\n' "$(printf '%s\n' "$conf" | base64 | tr -d '\n')"
+  for kv in "$@"; do
+    printf '  %s: %s\n' "${kv%%=*}" "$(printf '%s' "${kv#*=}" | base64 | tr -d '\n')"
+  done
+}
+
 # secret_manifest prints a Secret with KEY=VALUE pairs from the arguments.
 # Values travel through a pipe, never through the argv of another process.
 secret_manifest() {

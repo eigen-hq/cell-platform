@@ -19,6 +19,8 @@ case "$FAKE:$*" in
   notfound:*) echo 'Error from server (NotFound): secrets "x" not found' >&2; exit 1 ;;
   down:*) echo 'The connection to the server was refused' >&2; exit 1 ;;
   value:*get*) printf '%s' "$(printf 'secret-pw' | base64)" ;;
+  oldtarget:*rclone*) ;;
+  oldtarget:*get*) printf '%s' "$(printf 'v' | base64)" ;;
 esac
 EOF
 chmod +x "$tmp/kubectl"
@@ -34,6 +36,16 @@ export FAKE=value; check "secret_value decodes" "secret-pw" "$(secret_value ns s
 export FAKE=notfound; check "secret_value on missing secret prints nothing" "" "$(secret_value ns s password)"
 export FAKE=down; check "secret_value aborts on API error" "1" "$( (secret_value ns s password >/dev/null 2>&1) && echo 0 || echo 1)"
 
+export FAKE=oldtarget
+check "a target from before the gateway is kept" "v v v" "$(stored_backup_target; echo "$CELL_BACKUP_S3_ENDPOINT $CELL_BACKUP_S3_SECRET_KEY $CELL_BACKUP_PASSWORD")"
+export FAKE=value
+check "a stored gateway target is kept" "secret-pw" "$(stored_backup_target; echo "$stored")"
+check "a target in the environment wins" "" "$(CELL_BACKUP_PATH=/b; stored_backup_target; echo "$stored")"
+export FAKE=notfound
+check "no stored target" "" "$(stored_backup_target; echo "$stored${CELL_BACKUP_S3_ENDPOINT:-}")"
+export FAKE=down
+check "a failed read of the stored target aborts" "1" "$( (stored_backup_target >/dev/null 2>&1) && echo 0 || echo 1)"
+
 : >"$FAKE_LOG"
 check "ensure_secret aborts on API error" "1" "$( (ensure_secret ns s Opaque a=b >/dev/null 2>&1) && echo 0 || echo 1)"
 check "ensure_secret does not create after API error" "0" "$(grep -c create "$FAKE_LOG" || true)"
@@ -44,6 +56,11 @@ ensure_secret ns s Opaque user=a password=hunter2
 check "ensure_secret creates a missing secret" "1" "$(grep -c 'create -f -' "$FAKE_LOG")"
 check "ensure_secret passes values via env file" "user=a password=hunter2" "$(paste -sd' ' "$FAKE_ENV")"
 check "ensure_secret keeps values out of argv" "0" "$(grep -c hunter2 "$FAKE_LOG" || true)"
+: >"$FAKE_LOG"
+: >"$FAKE_ENV"
+manifest=$(backup_target_manifest "[target] secret_access_key = s3secret" gatewayKey=masterkey "localVolume=hostPath: {path: \"/b\"}")
+check "backup_target_manifest encodes values" 'masterkey|hostPath: {path: "/b"}' "$(grep -E '^  (gatewayKey|localVolume):' <<<"$manifest" | awk '{print $2}' | while read -r v; do base64 -d <<<"$v"; echo; done | paste -sd'|' -)"
+check "backup_target_manifest keeps values out of argv" "0" "$(grep -cE 'masterkey|hunter3|s3secret' "$FAKE_LOG" || true)"
 
 BASE_DIR=$tmp
 printf 'host: ${CELL_DOMAIN}\n' >"$tmp/t.yaml"

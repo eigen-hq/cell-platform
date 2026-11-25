@@ -164,8 +164,7 @@ func TestMain(m *testing.M) {
 		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "cell-config", Namespace: "cell-system"},
 			Data: map[string]string{"domain": "cell.localhost", "tls": "acme", "storage": "local-path"}},
 		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "backup-target", Namespace: "cell-system"},
-			StringData: map[string]string{"endpoint": "http://s3.test:8080", "bucket": "backups", "region": "x",
-				"accessKey": "ak", "secretKey": "sk", "password": "pw", "prefix": "cell.localhost"}},
+			StringData: map[string]string{"password": "pw", "gatewayKey": "gk", "prefix": "cell.localhost"}},
 	} {
 		if err := k8s.Create(ctx, o); err != nil {
 			panic(err)

@@ -14,12 +14,17 @@
 #                      it, the cell takes no more machines, as the local one)
 #   OPERATOR_IMAGE     operator and API image, already present on the node (required)
 #   BRIDGE_IMAGE       loopback bridge image, needed for *.localhost cells
-#   CELL_BACKUP_S3_ENDPOINT, CELL_BACKUP_S3_BUCKET, CELL_BACKUP_S3_REGION,
-#   CELL_BACKUP_S3_ACCESS_KEY, CELL_BACKUP_S3_SECRET_KEY, CELL_BACKUP_PASSWORD
-#                      off-cell backup target (optional, all or none). The
-#                      password encrypts the backups; keep it outside the cell,
-#                      a restore into a new cell needs it.
-#   CELL_BACKUP_S3_PREFIX  path in the bucket (default: CELL_DOMAIN)
+#   Backup target (optional), one of:
+#   CELL_BACKUP_S3_ENDPOINT, CELL_BACKUP_S3_BUCKET, CELL_BACKUP_S3_ACCESS_KEY,
+#   CELL_BACKUP_S3_SECRET_KEY (CELL_BACKUP_S3_REGION optional)
+#                      an S3 bucket
+#   CELL_BACKUP_PATH   a directory on the first machine (a disk, a mounted NAS)
+#   CELL_BACKUP_RCLONE_CONFIG, CELL_BACKUP_RCLONE_ROOT
+#                      any rclone remote (SFTP, WebDAV, SMB, ...): a file with
+#                      a [target] section, and the path in it
+#   CELL_BACKUP_PASSWORD  needed with each: encrypts the backups; keep it
+#                      outside the cell, a restore into a new cell needs it
+#   CELL_BACKUP_PREFIX path in the target (default: CELL_DOMAIN)
 #   CELL_LLM_API_KEY   the customer's model key for the ops agent (optional;
 #                      without it, agent tasks wait). Kept as Secret
 #                      cell-agent-llm; unsetting it later leaves the Secret.
@@ -90,18 +95,53 @@ data:
   storage: "$CELL_STORAGE"
 EOF
 
-s3_vars=(CELL_BACKUP_S3_ENDPOINT CELL_BACKUP_S3_BUCKET CELL_BACKUP_S3_REGION CELL_BACKUP_S3_ACCESS_KEY CELL_BACKUP_S3_SECRET_KEY CELL_BACKUP_PASSWORD)
+# The backup target: S3, a path on the first machine or any rclone remote.
+# Only the backup gateway holds it (E-47); apps get keys of their own.
+s3_vars=(CELL_BACKUP_S3_ENDPOINT CELL_BACKUP_S3_BUCKET CELL_BACKUP_S3_ACCESS_KEY CELL_BACKUP_S3_SECRET_KEY)
+stored_backup_target
 s3_set=0
 for v in "${s3_vars[@]}"; do [ -n "${!v:-}" ] && s3_set=$((s3_set + 1)); done
-if [ "$s3_set" -eq "${#s3_vars[@]}" ]; then
-  log "backup target: $CELL_BACKUP_S3_ENDPOINT/$CELL_BACKUP_S3_BUCKET"
-  secret_manifest cell-system backup-target Opaque \
-    endpoint="$CELL_BACKUP_S3_ENDPOINT" bucket="$CELL_BACKUP_S3_BUCKET" \
-    region="$CELL_BACKUP_S3_REGION" accessKey="$CELL_BACKUP_S3_ACCESS_KEY" \
-    secretKey="$CELL_BACKUP_S3_SECRET_KEY" password="$CELL_BACKUP_PASSWORD" \
-    prefix="${CELL_BACKUP_S3_PREFIX:-$CELL_DOMAIN}" | kubectl apply -f - >/dev/null
+prefix=${CELL_BACKUP_PREFIX:-${CELL_BACKUP_S3_PREFIX:-$CELL_DOMAIN}}
+conf="" root=""
+export BACKUP_LOCAL_VOLUME="emptyDir: {}"
+if [ -n "$stored" ]; then
+  where="the stored target"
+  conf=$stored
+  root=$(secret_value cell-system backup-target root)
+  prefix=$(secret_value cell-system backup-target prefix)
+  CELL_BACKUP_PASSWORD=$(secret_value cell-system backup-target password)
+  BACKUP_LOCAL_VOLUME=$(secret_value cell-system backup-target localVolume)
+  BACKUP_LOCAL_VOLUME=${BACKUP_LOCAL_VOLUME:-"emptyDir: {}"}
+elif [ "$s3_set" -eq "${#s3_vars[@]}" ]; then
+  where="$CELL_BACKUP_S3_ENDPOINT/$CELL_BACKUP_S3_BUCKET"
+  conf=$(printf '[target]\ntype = s3\nprovider = Other\nendpoint = %s\naccess_key_id = %s\nsecret_access_key = %s\nregion = %s\ndirectory_markers = true\n' \
+    "$CELL_BACKUP_S3_ENDPOINT" "$CELL_BACKUP_S3_ACCESS_KEY" "$CELL_BACKUP_S3_SECRET_KEY" "${CELL_BACKUP_S3_REGION:-us-east-1}")
+  root="$CELL_BACKUP_S3_BUCKET/$prefix"
 elif [ "$s3_set" -ne 0 ]; then
-  die "backup target needs all of: ${s3_vars[*]}"
+  die "an S3 backup target needs all of: ${s3_vars[*]}"
+elif [ -n "${CELL_BACKUP_PATH:-}" ]; then
+  where="$CELL_BACKUP_PATH on the first machine"
+  conf=$(printf '[target]\ntype = local\n')
+  root="/backup/$prefix"
+  BACKUP_LOCAL_VOLUME="hostPath: {path: \"$CELL_BACKUP_PATH\", type: DirectoryOrCreate}"
+elif [ -n "${CELL_BACKUP_RCLONE_CONFIG:-}" ]; then
+  where="rclone remote from $CELL_BACKUP_RCLONE_CONFIG"
+  conf=$(cat "$CELL_BACKUP_RCLONE_CONFIG")
+  grep -q '^\[target\]' <<<"$conf" || die "$CELL_BACKUP_RCLONE_CONFIG has no [target] section"
+  root="${CELL_BACKUP_RCLONE_ROOT:+${CELL_BACKUP_RCLONE_ROOT%/}/}$prefix"
+fi
+if [ -n "$conf" ]; then
+  : "${CELL_BACKUP_PASSWORD:?a backup target needs CELL_BACKUP_PASSWORD}"
+  log "backup target: $where"
+  # The gateway key derives every app's key: made once, kept.
+  key=$(secret_value cell-system backup-target gatewayKey)
+  [ -n "$key" ] || key=$(rand)
+  changed=$(backup_target_manifest "$conf" root="$root" gatewayKey="$key" password="$CELL_BACKUP_PASSWORD" \
+    prefix="$prefix" localVolume="$BACKUP_LOCAL_VOLUME" | kubectl apply -f -)
+  export RCLONE_VERSION
+  apply backup-gateway.yaml
+  case $changed in *unchanged*) ;; *) kubectl -n cell-system rollout restart deploy/backup-gateway >/dev/null ;; esac
+  kubectl -n cell-system rollout status deploy/backup-gateway --timeout=5m >/dev/null
 fi
 
 log "TLS issuer: $CELL_TLS"

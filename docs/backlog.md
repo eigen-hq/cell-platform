@@ -87,6 +87,8 @@ Gewünscht und ausprobiert wird in der Office-Oberfläche; die Plattform baut, b
 | Wiederherstellen über den aktuellen Stand | läuft | |
 | Wiederherstellen als Kopie | offen | |
 | Backup-Ziel ändern | offen | |
+| Sicherung der ganzen Zelle oder ausgewählter Apps auf einmal | offen | |
+| App-eigene Sicherungen einbinden (Export der App, Wartungsmodus) | offen | O-10 |
 | Wiederherstellungstest | offen | |
 | Export aller Daten und Umzug auf eigene Infrastruktur | offen | |
 

@@ -224,7 +224,7 @@ func TestScheduledBackup(t *testing.T) {
 	for _, e := range c.Env {
 		env[e.Name] = e.Value
 	}
-	if env["RESTIC_REPOSITORY"] != "s3:http://s3.test:8080/backups/cell.localhost/apps/ledger/volumes" ||
+	if env["RESTIC_REPOSITORY"] != "s3:http://backup-gateway.cell-system.svc:8080/volumes" ||
 		env["DB_BACKUP"] != "20261119T030000" || !strings.HasPrefix(env["DB_SERVER"], "db-") {
 		t.Errorf("backup job env %v", env)
 	}
@@ -1674,7 +1674,7 @@ func TestChangeNameLimit(t *testing.T) {
 func TestRestoreWaitsForBackupCredentials(t *testing.T) {
 	ctx := context.Background()
 	targetSecret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: "cell-system", Name: "backup-target"},
-		Data: map[string][]byte{"endpoint": []byte("http://s3.test"), "bucket": []byte("b"), "password": []byte("pw"), "prefix": []byte("p")}}
+		Data: map[string][]byte{"password": []byte("pw"), "gatewayKey": []byte("gk"), "prefix": []byte("p")}}
 	app := &cellv1.App{ObjectMeta: metav1.ObjectMeta{Name: "keel"},
 		Spec:   cellv1.AppSpec{Needs: cellv1.Needs{Volumes: []cellv1.Volume{{Name: "files"}}}},
 		Status: cellv1.AppStatus{Conditions: []metav1.Condition{{Type: condWorkload, Status: metav1.ConditionTrue}}}}
@@ -1749,7 +1749,7 @@ func TestJobNameIsValid(t *testing.T) {
 func TestRestoreStartWaitsForAppConfiguration(t *testing.T) {
 	ctx := context.Background()
 	targetSecret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: "cell-system", Name: "backup-target"},
-		Data: map[string][]byte{"endpoint": []byte("http://s3.test"), "bucket": []byte("b"), "password": []byte("pw"), "prefix": []byte("p")}}
+		Data: map[string][]byte{"password": []byte("pw"), "gatewayKey": []byte("gk"), "prefix": []byte("p")}}
 	app := &cellv1.App{ObjectMeta: metav1.ObjectMeta{Name: "loom", UID: "loom-uid", Generation: 3},
 		Status: cellv1.AppStatus{WorkloadGeneration: 2}} // reverted spec (3) not applied yet
 	web := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: "app-loom", Name: "web"}, Spec: appsv1.DeploymentSpec{Replicas: ptr(int32(1))}}

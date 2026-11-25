@@ -77,6 +77,7 @@ Stand 19.11.2026: Backups über barman-cloud und restic (E-23 bis E-28), lokales
 |---|---|---|
 | Restore in frischer Zelle | `make dr-test`: Markierung in Datenbank und Volume von Forgejo, Backup, Zelle löschen und neu aufbauen, Forgejo installieren, Restore aus dem Bucket, danach Login mit der neuen Identität | Daten vollständig, Login funktioniert; rund 12 min inklusive Neuaufbau der Zelle |
 | Restore in derselben Zelle | `make e2e`, `TestBackupAndRestore`: Markierung, Backup, Markierung überschreiben, Restore | Forgejo und Nextcloud wieder auf dem Stand des Backups, je rund 100 s |
+| Backups über das Gateway (E-47) | `make e2e`, `TestBackupAndRestore` gegen `backup-gateway` mit dem lokalen S3-Ziel dahinter; vorab von Hand: App-Schlüssel sieht nur `<root>/apps/<app>/`, eine andere App sieht dort nichts, ein falsches Geheimnis bekommt 403; Unit-Test `TestAppSecret` hält Operator und Auth-Proxy gleich | bestanden (25.11.2026), Ablage im Ziel unverändert |
 | Fehlerhaftes Update | `make e2e`, `TestFailedUpdateRollsBack`: `ChangeRequest` auf eine Version, die es nicht gibt | nach 90 s Health-Frist zurück auf 15.0.11, Daten wie vorher, App `NeedsAttention`, `ChangeRequest` `RolledBack` |
 | Änderungsprotokoll | jeder `ChangeRequest` hält Urheber, Begründung, Risiko, Patch, vorige Spec, Backup, Restore, Ergebnis und Zeiten | geprüft in `make test` (envtest) und `make e2e` |
 | Steuerlogik | `make test`: geplantes Backup, Freigabe, erfolgreiche Änderung, Rollback mit Restore, Ablehnung | bestanden |

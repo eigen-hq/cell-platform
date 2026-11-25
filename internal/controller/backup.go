@@ -24,11 +24,14 @@ import (
 
 // Backups leave the cell: databases through the CloudNativePG barman-cloud
 // plugin (base backups plus continuous WAL), volumes through restic. Both
-// land in the bucket of the backup target under <prefix>/apps/<app>/. The
-// restic snapshot of a backup carries the database backup's coordinates as
-// tags, so a fresh cell finds everything from the bucket alone.
+// go through the backup gateway (deploy/base/backup-gateway.yaml), which
+// alone holds the target: an app's key reaches only <root>/apps/<app>/ of
+// it, where the "buckets" postgres and volumes are directories. The restic
+// snapshot of a backup carries the database backup's coordinates as tags,
+// so a fresh cell finds everything from the target alone.
 
 const (
+	gatewayRegion  = "us-east-1" // the gateway takes any; clients want one
 	backupSecret   = "backup-s3"
 	objectStore    = "backup"
 	barmanPlugin   = "barman-cloud.cloudnative-pg.io"
@@ -40,9 +43,13 @@ var (
 	gvkCNPGBackup  = schema.GroupVersionKind{Group: "postgresql.cnpg.io", Version: "v1", Kind: "Backup"}
 )
 
-// backupTarget is the cell-system/backup-target secret written by bootstrap.
+// gatewayURL is the backup gateway's S3 endpoint.
+const gatewayURL = "http://backup-gateway." + cell.SystemNamespace + ".svc:8080"
+
+// backupTarget is what apps need of the cell-system/backup-target secret
+// written by bootstrap; the target itself stays with the gateway.
 type backupTarget struct {
-	Endpoint, Bucket, Region, AccessKey, SecretKey, Password, Prefix string
+	Password, GatewayKey string
 }
 
 // loadTarget returns nil when the cell has no backup target.
@@ -56,19 +63,21 @@ func loadTarget(ctx context.Context, c client.Reader) (*backupTarget, error) {
 		return nil, err
 	}
 	d := func(k string) string { return string(s.Data[k]) }
-	t := &backupTarget{Endpoint: strings.TrimSuffix(d("endpoint"), "/"), Bucket: d("bucket"), Region: d("region"),
-		AccessKey: d("accessKey"), SecretKey: d("secretKey"), Password: d("password"), Prefix: strings.Trim(d("prefix"), "/")}
-	if t.Endpoint == "" || t.Bucket == "" || t.Password == "" || t.Prefix == "" {
-		return nil, fmt.Errorf("backup target is incomplete (endpoint, bucket, password and prefix are required)")
+	t := &backupTarget{Password: d("password"), GatewayKey: d("gatewayKey")}
+	if t.Password == "" || t.GatewayKey == "" {
+		return nil, fmt.Errorf("backup target is incomplete (password and gatewayKey are required)")
 	}
 	return t, nil
 }
 
-func (t *backupTarget) appPath(app string) string { return t.Prefix + "/apps/" + app }
-
-func (t *backupTarget) resticRepository(app string) string {
-	return "s3:" + t.Endpoint + "/" + t.Bucket + "/" + t.appPath(app) + "/volumes"
+// appSecret is an app's key at the gateway; the gateway's auth proxy
+// derives the same.
+func (t *backupTarget) appSecret(app string) string {
+	h := sha256.Sum256([]byte(t.GatewayKey + ":" + app))
+	return hex.EncodeToString(h[:])
 }
+
+const resticRepository = "s3:" + gatewayURL + "/volumes"
 
 // backupResources are the per-app credentials and, for apps with a
 // database, the barman object store.
@@ -78,8 +87,8 @@ func backupResources(app *cellv1.App, t *backupTarget) []client.Object {
 			ObjectMeta: meta(app, backupSecret),
 			StringData: map[string]string{
 				// barman-cloud and restic name the same things differently
-				"ACCESS_KEY_ID": t.AccessKey, "ACCESS_SECRET_KEY": t.SecretKey, "REGION": t.Region,
-				"AWS_ACCESS_KEY_ID": t.AccessKey, "AWS_SECRET_ACCESS_KEY": t.SecretKey, "AWS_DEFAULT_REGION": t.Region,
+				"ACCESS_KEY_ID": app.Name, "ACCESS_SECRET_KEY": t.appSecret(app.Name), "REGION": gatewayRegion,
+				"AWS_ACCESS_KEY_ID": app.Name, "AWS_SECRET_ACCESS_KEY": t.appSecret(app.Name), "AWS_DEFAULT_REGION": gatewayRegion,
 				"RESTIC_PASSWORD": t.Password,
 			},
 		},
@@ -94,8 +103,8 @@ func backupResources(app *cellv1.App, t *backupTarget) []client.Object {
 			"spec": map[string]any{
 				"retentionPolicy": "30d",
 				"configuration": map[string]any{
-					"destinationPath": "s3://" + t.Bucket + "/" + t.appPath(app.Name) + "/postgres",
-					"endpointURL":     t.Endpoint,
+					"destinationPath": "s3://postgres",
+					"endpointURL":     gatewayURL,
 					"s3Credentials": map[string]any{
 						"accessKeyId":     map[string]any{"name": backupSecret, "key": "ACCESS_KEY_ID"},
 						"secretAccessKey": map[string]any{"name": backupSecret, "key": "ACCESS_SECRET_KEY"},
@@ -169,7 +178,7 @@ func resticJob(app *cellv1.App, t *backupTarget, image, name, script string, cla
 		Image:   image,
 		Command: []string{"sh", "-c", resticPrelude + script},
 		Env: append([]corev1.EnvVar{
-			{Name: "RESTIC_REPOSITORY", Value: t.resticRepository(app.Name)},
+			{Name: "RESTIC_REPOSITORY", Value: resticRepository},
 			{Name: "RESTIC_CACHE_DIR", Value: "/tmp/restic-cache"},
 			{Name: "APP", Value: app.Name},
 			secret("AWS_ACCESS_KEY_ID"), secret("AWS_SECRET_ACCESS_KEY"), secret("AWS_DEFAULT_REGION"), secret("RESTIC_PASSWORD"),

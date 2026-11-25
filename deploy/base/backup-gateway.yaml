@@ -1,0 +1,81 @@
+# The backup gateway (E-47): the only holder of the backup target's
+# credentials. Apps reach it over S3 with a key of their own; its auth proxy
+# turns that key into a backend rooted at <root>/apps/<app> of the target,
+# so an app sees and writes only its own backups. The target is any rclone
+# remote, named "target" in the rclone.conf of Secret backup-target.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backup-gateway
+  namespace: cell-system
+data:
+  # Input: {"user": "<access key id>", ...}. The key id is the app's name,
+  # its secret sha256("<gateway key>:<app>") (see internal/controller).
+  proxy: |
+    #!/bin/sh
+    set -eu
+    user=$(tr -d '\n' | sed -n 's/.*"user" *: *"\([^"]*\)".*/\1/p')
+    case "$user" in '' | *[!a-z0-9-]* | -* | *-) echo "bad access key id" >&2; exit 1 ;; esac
+    secret=$(printf '%s:%s' "$(cat /target/gatewayKey)" "$user" | sha256sum | cut -c1-64)
+    printf '{"type":"alias","remote":"target:%s/apps/%s","_root":"","_secret_access_key":"%s"}\n' "$(cat /target/root)" "$user" "$secret"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backup-gateway
+  namespace: cell-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: backup-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: backup-gateway
+    spec:
+      # A path target lives on the first machine.
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: "true"
+      containers:
+        - name: rclone
+          image: rclone/rclone:${RCLONE_VERSION}
+          args: [serve, s3, --auth-proxy, /proxy/proxy, --addr, ":8080"]
+          env:
+            - name: RCLONE_CONFIG
+              value: /target/rclone.conf
+          ports:
+            - name: s3
+              containerPort: 8080
+          readinessProbe:
+            tcpSocket: {port: s3}
+          volumeMounts:
+            - {name: target, mountPath: /target, readOnly: true}
+            - {name: proxy, mountPath: /proxy, readOnly: true}
+            - {name: local, mountPath: /backup}
+          resources:
+            requests: {cpu: 20m, memory: 64Mi}
+            limits: {memory: 512Mi}
+      volumes:
+        - name: target
+          secret:
+            secretName: backup-target
+            items:
+              - {key: rclone.conf, path: rclone.conf}
+              - {key: root, path: root}
+              - {key: gatewayKey, path: gatewayKey}
+        - name: proxy
+          configMap: {name: backup-gateway, defaultMode: 0555}
+        - name: local
+          ${BACKUP_LOCAL_VOLUME}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backup-gateway
+  namespace: cell-system
+spec:
+  selector:
+    app.kubernetes.io/name: backup-gateway
+  ports:
+    - {name: s3, port: 8080, targetPort: s3}
