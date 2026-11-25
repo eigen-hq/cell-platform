@@ -167,6 +167,45 @@ for cols in 20 45 70 80 200; do
 done
 check "live line keeps the detail when it fits" "  x Identity                                 12m 05s  Longhorn: 5 of 8 ready" "$(ui_cl="" ui_dim="" ui_off="" ui_tick_line 120 x Identity "12m 05s" "Longhorn: 5 of 8 ready")"
 
+# Certificate failures name the CA's reason and the machine's own drop rules.
+kubectl() { printf '%b' "$FAKE_CHALLENGES"; }
+check "acme_reason reports a refused challenge" "invalid: Timeout during connect (likely firewall problem)" \
+  "$(FAKE_CHALLENGES='other.x invalid nope\nauth.x invalid Timeout during connect (likely firewall problem)\n' acme_reason auth.x)"
+check "acme_reason reports a failing check" "pending: failed to perform self check: connection timed out" \
+  "$(FAKE_CHALLENGES='auth.x pending failed to perform self check: connection timed out\n' acme_reason auth.x)"
+check "acme_reason is quiet without a reason" "" "$(FAKE_CHALLENGES='auth.x pending <none>\nauth.x valid <none>\n' acme_reason auth.x)"
+unset -f kubectl
+nft() { cat <<'RULES'
+table ip filter {
+	chain FORWARD {
+		type filter hook forward priority filter; policy drop;
+	}
+}
+table inet workstation_guard {
+	chain public_forward {
+		type filter hook forward priority filter - 10; policy accept;
+		iifname "eth0" ct state established,related return
+		iifname "eth0" counter packets 42 bytes 2512 drop
+	}
+	chain public_input {
+		type filter hook input priority filter; policy drop;
+	}
+}
+RULES
+}
+check "forward_drops names custom forward drops only" "nftables inet workstation_guard, chain public_forward" "$(forward_drops)"
+out=$(: >"$CELL_STEP_FILE"; CELL_TLS=acme CELL_DOMAIN=cell.x CELL_INGRESS_IP=192.0.2.1 cert_failed "Timeout during connect" 2>&1) && rc=0 || rc=$?
+check "cert_failed names reason, ports and the drop rule" "1:3" "$rc:$(grep -cE 'Timeout during connect|tcp 80, 443|workstation_guard, chain public_forward' <<<"$out")"
+nft() { echo "nft: broken" >&2; return 1; }
+out=$(set -e; : >"$CELL_STEP_FILE"; CELL_TLS=acme CELL_DOMAIN=cell.x CELL_INGRESS_IP=192.0.2.1 cert_failed "Timeout during connect" 2>&1) && rc=0 || rc=$?
+check "cert_failed keeps its message when nft fails" "1:2" "$rc:$(grep -cE 'Timeout during connect|tcp 80, 443' <<<"$out")"
+unset -f nft
+out=$(set -e; : >"$CELL_STEP_FILE"; PATH=/nonexistent CELL_TLS=acme CELL_DOMAIN=cell.x CELL_INGRESS_IP=192.0.2.1 cert_failed "Timeout during connect" 2>&1) && rc=0 || rc=$?
+check "cert_failed keeps its message without nft" "1:1" "$rc:$(grep -c 'Timeout during connect' <<<"$out")"
+out=$(: >"$CELL_STEP_FILE"; : >"$CELL_STEP_FILE.cmd"; RETRY_ATTEMPTS=1 retry false --flag 2>&1) && rc=0 || rc=$?
+check "retry names the failed command" "1:false --flag" "$rc:$(cat "$CELL_STEP_FILE.cmd")"
+: >"$CELL_STEP_FILE.cmd"
+
 # wait_ready counts available deployments; kubectl prints
 # "<replicas> <available> <generation> <observed generation>".
 kubectl() { printf '%b' "$FAKE_DEPLOYS"; }

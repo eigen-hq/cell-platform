@@ -18,7 +18,11 @@ retry() {
     n=$((n + 1))
     sleep "${RETRY_DELAY:-5}"
   done
-  "$@" # last attempt shows its errors and decides the result
+  "$@" && return 0 # the last attempt shows its errors
+  local rc=$?
+  # A failed run names this command, not retry's "$@".
+  [ -s "$CELL_STEP_FILE.cmd" ] || printf '%s' "$*" >"$CELL_STEP_FILE.cmd"
+  return "$rc"
 }
 
 # wait_ready <what> <namespace> <minutes> [deployment...] waits until the
@@ -40,6 +44,48 @@ wait_ready() {
     [ "$(date +%s)" -lt "$end" ] || die "$what did not become ready within $minutes minutes ($ready of $total services): kubectl -n $ns get pods"
     sleep 3
   done
+}
+
+# acme_reason <host> prints why the certificate for <host> is not there
+# yet, from its ACME challenge: "invalid: <reason>" once the CA refused it,
+# "pending: <reason>" while a check fails. Nothing without a reason.
+acme_reason() {
+  kubectl get challenge -A --no-headers -o custom-columns=HOST:.spec.dnsName,STATE:.status.state,WHY:.status.reason |
+    awk -v host="$1" '$1 == host && $2 != "valid" && $3 != "<none>" {state = $2; $1 = $2 = ""; sub(/^ +/, ""); print state ": " $0; exit}' |
+    cut -c1-400
+}
+
+# forward_drops lists nftables chains that drop forwarded traffic, other
+# than the tables iptables manages (k3s, Docker, ufw): the cell's ingress
+# is forwarded, so these can keep the internet out.
+forward_drops() {
+  local rules
+  # Only a hint: without nft, or if it fails (its error goes to the log), none.
+  command -v nft >/dev/null || return 0
+  rules=$(nft list ruleset) || return 0
+  awk <<<"$rules" '
+    /^table / {table = $2 " " $3}
+    /^[ \t]*chain / {chain = $2; fwd = 0}
+    /hook forward/ {fwd = 1}
+    fwd && /(^|[ \t;])drop([ \t;]|$)/ && table !~ / (filter|nat|raw|mangle|security)$/ {print "nftables " table ", chain " chain; fwd = 0}'
+}
+
+# cert_failed <reason> stops with why the login page has no certificate and
+# what the cell needs from the network.
+cert_failed() {
+  local drops here=""
+  [ "$CELL_TLS" = acme ] || die "the certificate for auth.$CELL_DOMAIN failed: $1"
+  drops=$(forward_drops) || drops=""
+  [ -z "$drops" ] || here=$(printf ' These rules here drop\n  forwarded traffic, and the ingress of the cell is forwarded:\n%s' "$(sed 's/^/    /' <<<"$drops")")
+  die "Let's Encrypt could not check auth.$CELL_DOMAIN:
+    $1
+
+  The cell needs these ports from the internet to $CELL_INGRESS_IP:
+    tcp 80, 443   certificates, console, apps
+    udp 3478      mesh
+  Check the provider's firewall and this machine's own.$here
+
+  Then run the installation again: it continues where it stopped."
 }
 
 rand() { openssl rand -hex 24; }

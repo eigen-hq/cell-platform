@@ -146,7 +146,7 @@ If an error occurs, the installation shows the failed step, the reason and the l
 |---|---|
 | `*.cell.example.com has no DNS record` | The DNS record is missing or not active yet. Check the record, wait a few minutes, run again. |
 | `ports 80/443 (tcp) or 3478 (udp) ... are taken` | Another program is using the ports, for example a web server. Stop it or use a dedicated server. |
-| Step *Login page* takes longer than 10 minutes | Port 80 is not reachable from outside, so Let's Encrypt cannot verify the domain. Check the firewall. |
+| `Let's Encrypt could not check auth...` (step *Login page*) | Port 80 does not reach the server from the internet, so Let's Encrypt cannot verify the domain. Check the provider's firewall and the server's own (ufw, nftables rules that drop forwarded traffic), then run the installation again: it requests the certificate at once. |
 | New machine does not appear | It is not in the private network of the first machine, or, over public addresses, the firewall blocks the ports between the machines. |
 | Backup target: test fails | The console gives the reason, usually a wrong key, a wrong bucket name or a read-only key. |
 | Initial password not written down | On the server: `sudo k3s kubectl -n cell-system get secret identity -o jsonpath='{.data.AUTHENTIK_BOOTSTRAP_PASSWORD}' \| base64 -d` (valid until you change it) |

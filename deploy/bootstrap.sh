@@ -227,14 +227,35 @@ if [ "$CELL_TLS" = selfsigned ]; then
   retry ca_ready
   cacert=(--cacert "$ca")
 fi
-# The flow executor answers with the first login stage once the default flows exist.
 if [ "$CELL_TLS" = selfsigned ]; then
   progress "waiting for the login page"
 else
   progress "certificate, then login page"
+  # After a failed attempt cert-manager waits an hour before the next; a new
+  # run (say after a firewall fix) tries at once. Ingresses recreate their
+  # certificates; the foreground deletion also removes the old challenges.
+  kubectl get certificate -A --no-headers \
+    -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,OWNER:.metadata.ownerReferences[0].kind,FAILED:.status.lastFailureTime |
+    awk '$3 == "Ingress" && $4 != "<none>" {print $1, $2}' |
+    while read -r ns name; do kubectl -n "$ns" delete certificate "$name" --cascade=foreground --timeout=2m >/dev/null; done
 fi
-retry curl -fsS -o /dev/null "${cacert[@]}" --resolve "auth.$CELL_DOMAIN:443:$CELL_INGRESS_IP" \
-  "https://auth.$CELL_DOMAIN/api/v3/flows/executor/default-authentication-flow/"
+# The flow executor answers with the first login stage once the default flows exist.
+login_ready() {
+  curl -fsS -o /dev/null "${cacert[@]}" --resolve "auth.$CELL_DOMAIN:443:$CELL_INGRESS_IP" \
+    "https://auth.$CELL_DOMAIN/api/v3/flows/executor/default-authentication-flow/"
+}
+for i in $(seq 72); do
+  login_ready 2>/dev/null && break
+  why=""
+  # A failed query is tried again with the next round; its error is in the log.
+  [ "$CELL_TLS" = selfsigned ] || why=$(acme_reason "auth.$CELL_DOMAIN") || why=""
+  case $why in invalid:*) cert_failed "${why#invalid: }" ;; esac
+  if [ "$i" -eq 72 ]; then
+    [ -z "$why" ] || cert_failed "${why#*: }"
+    login_ready || die "https://auth.$CELL_DOMAIN did not answer within 6 minutes: kubectl -n cell-system get pods,certificates"
+  fi
+  sleep 5
+done
 step "App delivery (Flux $FLUX_VERSION)"
 # Flux may write anywhere (cluster-admin), and namespace admins may write
 # HelmReleases. A release that names no ServiceAccount therefore runs as its
