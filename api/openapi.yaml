@@ -18,8 +18,9 @@ info:
 
     Roles come from identity groups: members of `cell-admins` may do
     everything, members of `cell-agents` read everything and propose
-    changes, every other user reads the catalog, the apps and the change
-    log.
+    changes, members of `cell-viewers` read everything. Every other account
+    of the identity (people who only use apps) has the role `none`: it may
+    ask `GET /v0/whoami` and gets 403 everywhere else.
 
     Agents work in tasks (`/v0/tasks`). Except for finding, claiming and
     finishing tasks, every call of an agent names the task it belongs to in
@@ -541,7 +542,7 @@ components:
       required: [username, role, groups]
       properties:
         username: {type: string}
-        role: {type: string, enum: [admin, agent, member]}
+        role: {type: string, enum: [admin, agent, viewer, none]}
         groups: {type: array, items: {type: string}}
     CatalogEntry:
       type: object

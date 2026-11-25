@@ -98,8 +98,12 @@ func run(log *slog.Logger) error {
 		if err := identity.EnsureGroup(ctx, cellapi.GroupAgents); err != nil {
 			return err
 		}
-		// The console is for the cell's admins only.
-		return identity.EnsureAccess(ctx, consoleClient, []string{cellapi.GroupAdmins})
+		if err := identity.EnsureGroup(ctx, cellapi.GroupViewers); err != nil {
+			return err
+		}
+		// The console is for the people who run the cell: admins change it,
+		// viewers read it.
+		return identity.EnsureAccess(ctx, consoleClient, []string{cellapi.GroupAdmins, cellapi.GroupViewers})
 	}); err != nil {
 		return err
 	}

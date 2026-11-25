@@ -63,7 +63,7 @@
         path = location.pathname; // the login came back to the page it left
         if (!token()) await signIn();
         const me = must(await api.GET("/v0/whoami"));
-        screen = me.role === "admin" ? { kind: "ready", me } : { kind: "refused", me };
+        screen = me.role === "admin" || me.role === "viewer" ? { kind: "ready", me } : { kind: "refused", me };
       } catch (e) {
         screen = { kind: "error", message: e instanceof Error ? e.message : String(e) };
       }
@@ -79,8 +79,8 @@
     <Button onclick={() => leave(signIn)}>Sign in again</Button>
   </Notice>
 {:else if screen.kind === "refused"}
-  <Notice title="This console is for admins">
-    <p>You are signed in as {screen.me.username}, but only members of cell-admins run the cell.</p>
+  <Notice title="This console is for the people who run the cell">
+    <p>You are signed in as {screen.me.username}, but you are in neither cell-viewers (read) nor cell-admins (run). Ask an admin for access.</p>
     <Button kind="quiet" onclick={() => leave(signOut)}>Sign out</Button>
   </Notice>
 {:else}
@@ -100,6 +100,9 @@
         </button>
       {/snippet}
     </TopBar>
+    {#if me.role === "viewer"}
+      <p class="readonly" role="status">You can look at everything here. Changes need an admin (cell-admins).</p>
+    {/if}
     {#if section === "/approvals"}
       <Approvals />
     {:else if section === "/apps"}
@@ -123,6 +126,14 @@
     max-width: 1240px;
     margin-inline: auto;
     padding: 14px max(16px, env(safe-area-inset-left, 0px)) 72px;
+  }
+  .readonly {
+    margin: 12px 0 0;
+    padding: 10px 16px;
+    border-radius: var(--radius-part);
+    background: var(--color-sunk);
+    color: var(--color-muted);
+    border-left: 4px solid var(--shelf-sun);
   }
   .me {
     display: flex;

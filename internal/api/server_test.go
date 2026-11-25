@@ -187,7 +187,7 @@ func newHarnessWith(t *testing.T, funcs interceptor.Funcs, objs ...client.Object
 		Identity: newFakeIdentity(),
 		Authenticate: func(_ context.Context, token string) (*Caller, error) {
 			switch token {
-			case "admin", "agent", "member":
+			case "admin", "agent", "viewer", "none":
 				return &Caller{Username: token + "-user", Role: token, Groups: []string{}}, nil
 			}
 			return nil, errors.New("bad token")
@@ -332,16 +332,23 @@ func TestAuthentication(t *testing.T) {
 	if code, body := h.do("GET", "/v0/whoami", "agent", nil); code != 200 || field(body, "role") != "agent" {
 		t.Errorf("whoami: %d %v", code, body)
 	}
-	if code, _ := h.do("POST", "/v0/apps", "member", map[string]any{"catalog": "notes"}); code != 403 {
-		t.Errorf("member installs: %d", code)
+	if code, _ := h.do("POST", "/v0/apps", "viewer", map[string]any{"catalog": "notes"}); code != 403 {
+		t.Errorf("viewer installs: %d", code)
 	}
-	if code, _ := h.do("GET", "/v0/users", "member", nil); code != 403 {
-		t.Errorf("member lists users: %d", code)
+	if code, _ := h.do("GET", "/v0/users", "viewer", nil); code != 200 {
+		t.Errorf("viewer lists users: %d", code)
+	}
+	// An account in no role group logs in, learns why it sees nothing.
+	if code, body := h.do("GET", "/v0/whoami", "none", nil); code != 200 || field(body, "role") != "none" {
+		t.Errorf("whoami without role: %d %v", code, body)
+	}
+	if code, body := h.do("GET", "/v0/apps", "none", nil); code != 403 || !strings.Contains(fmt.Sprint(body), "cell-viewers") {
+		t.Errorf("no role lists apps: %d %v", code, body)
 	}
 }
 
 func TestRoleOf(t *testing.T) {
-	for groups, want := range map[string]string{"": RoleMember, "staff": RoleMember, "cell-agents": RoleAgent, "staff cell-admins cell-agents": RoleAdmin} {
+	for groups, want := range map[string]string{"": RoleNone, "staff": RoleNone, "staff cell-viewers": RoleViewer, "cell-viewers cell-agents": RoleViewer, "cell-agents": RoleAgent, "staff cell-admins cell-agents": RoleAdmin} {
 		if got := RoleOf(strings.Fields(groups)); got != want {
 			t.Errorf("%q: %s, want %s", groups, got, want)
 		}
@@ -354,14 +361,14 @@ func TestRoleOf(t *testing.T) {
 // call of its own; the requester cannot set the approval.
 func TestInstallWaitsForApproval(t *testing.T) {
 	h := newHarness(t)
-	code, body := h.do("GET", "/v0/catalog", "member", nil)
+	code, body := h.do("GET", "/v0/catalog", "viewer", nil)
 	if code != 200 || len(body.([]any)) != 1 || field(body.([]any)[0], "auth") != "oidc" {
 		t.Fatalf("catalog: %d %v", code, body)
 	}
-	if code, body = h.do("GET", "/v0/catalog/notes", "member", nil); code != 200 || field(body, "manifest", "version") != "1.0" {
+	if code, body = h.do("GET", "/v0/catalog/notes", "viewer", nil); code != 200 || field(body, "manifest", "version") != "1.0" {
 		t.Errorf("catalog entry: %d %v", code, body)
 	}
-	if code, _ = h.do("GET", "/v0/catalog/nope", "member", nil); code != 404 {
+	if code, _ = h.do("GET", "/v0/catalog/nope", "viewer", nil); code != 404 {
 		t.Errorf("missing catalog entry: %d", code)
 	}
 
@@ -396,10 +403,10 @@ func TestInstallWaitsForApproval(t *testing.T) {
 	if err := h.kube.Get(context.Background(), client.ObjectKey{Name: name}, &cr); err != nil || cr.Spec.Approval.Decision != "Approved" || cr.Spec.Approval.By != "admin-user" {
 		t.Errorf("stored decision %+v %v", cr.Spec.Approval, err)
 	}
-	if code, body = h.do("GET", "/v0/changes/"+name, "member", nil); code != 200 || field(body, "name") != name {
+	if code, body = h.do("GET", "/v0/changes/"+name, "viewer", nil); code != 200 || field(body, "name") != name {
 		t.Errorf("get change: %d %v", code, body)
 	}
-	if code, _ = h.do("GET", "/v0/changes/nope", "member", nil); code != 404 {
+	if code, _ = h.do("GET", "/v0/changes/nope", "viewer", nil); code != 404 {
 		t.Errorf("missing change: %d", code)
 	}
 }
@@ -464,11 +471,11 @@ func TestAppChanges(t *testing.T) {
 		Spec: cellv1.BackupSpec{App: "notes"}, Status: cellv1.BackupStatus{Phase: cellv1.RunRunning}}
 	h := newHarness(t, installed("notes", "oidc"), installed("plain", "none"), old, newer, running)
 
-	code, body := h.do("GET", "/v0/apps", "member", nil)
+	code, body := h.do("GET", "/v0/apps", "viewer", nil)
 	if code != 200 || len(body.([]any)) != 2 || field(body.([]any)[0], "url") != "https://notes.cell.localhost" {
 		t.Fatalf("apps: %d %v", code, body)
 	}
-	if code, _ = h.do("GET", "/v0/apps/nope", "member", nil); code != 404 {
+	if code, _ = h.do("GET", "/v0/apps/nope", "viewer", nil); code != 404 {
 		t.Errorf("missing app: %d", code)
 	}
 
@@ -511,7 +518,7 @@ func TestAppChanges(t *testing.T) {
 			t.Errorf("access %v: %d", req, code)
 		}
 	}
-	if code, body = h.do("GET", "/v0/apps/notes/access", "member", nil); code != 200 || len(field(body, "groups").([]any)) != 0 {
+	if code, body = h.do("GET", "/v0/apps/notes/access", "viewer", nil); code != 200 || len(field(body, "groups").([]any)) != 0 {
 		t.Errorf("access before the change ran: %d %v", code, body)
 	}
 
@@ -537,11 +544,11 @@ func TestAppChanges(t *testing.T) {
 	}
 
 	// The change log, newest first and per app.
-	code, body = h.do("GET", "/v0/changes?app=notes", "member", nil)
+	code, body = h.do("GET", "/v0/changes?app=notes", "viewer", nil)
 	if code != 200 || len(body.([]any)) != 8 {
 		t.Errorf("change log: %d %v", code, body)
 	}
-	if code, body = h.do("GET", "/v0/changes?app=plain", "member", nil); code != 200 || len(body.([]any)) != 0 {
+	if code, body = h.do("GET", "/v0/changes?app=plain", "viewer", nil); code != 200 || len(body.([]any)) != 0 {
 		t.Errorf("change log of plain: %d %v", code, body)
 	}
 }
@@ -558,7 +565,7 @@ func TestBackups(t *testing.T) {
 	if code, _ = h.do("POST", "/v0/apps/notes/backups", "admin", nil); code != 409 {
 		t.Errorf("same second: %d", code)
 	}
-	if code, body = h.do("GET", "/v0/apps/notes/backups", "member", nil); code != 200 || len(body.([]any)) != 1 {
+	if code, body = h.do("GET", "/v0/apps/notes/backups", "viewer", nil); code != 200 || len(body.([]any)) != 1 {
 		t.Errorf("backups: %d %v", code, body)
 	}
 }
@@ -619,7 +626,7 @@ func TestIdentity(t *testing.T) {
 	if code, _ = h.do("PATCH", "/v0/groups/nope/members", "admin", map[string]any{"add": []string{"bob"}}); code != 404 {
 		t.Errorf("members of a missing group: %d", code)
 	}
-	if code, _ = h.do("PATCH", "/v0/groups/finance/members", "member", map[string]any{"add": []string{"bob"}}); code != 403 {
+	if code, _ = h.do("PATCH", "/v0/groups/finance/members", "viewer", map[string]any{"add": []string{"bob"}}); code != 403 {
 		t.Errorf("a member changes a group: %d", code)
 	}
 	code, body = patch(nil, []string{"bob", "carol"})
@@ -639,7 +646,7 @@ func TestIdentity(t *testing.T) {
 func TestEventStream(t *testing.T) {
 	h := newHarness(t)
 	req, _ := http.NewRequest("GET", h.srv.URL+"/v0/events", nil)
-	req.Header.Set("Authorization", "Bearer member")
+	req.Header.Set("Authorization", "Bearer viewer")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	resp, err := h.srv.Client().Do(req.WithContext(ctx))

@@ -51,8 +51,8 @@ func TestNodes(t *testing.T) {
 		fmt.Sprint(first["apps"]) != "[files]" || first["system"] != true || fmt.Sprint(second["apps"]) != "[notes]" || second["system"] != false {
 		t.Errorf("nodes: %v", list)
 	}
-	if code, _ := h.do("GET", "/v0/nodes", "member", nil); code != 403 {
-		t.Errorf("member lists nodes: %d", code)
+	if code, _ := h.do("GET", "/v0/nodes", "none", nil); code != 403 {
+		t.Errorf("no role lists nodes: %d", code)
 	}
 }
 

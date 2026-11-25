@@ -24,17 +24,20 @@ import (
 	"github.com/marcelheidebrecht/cell-platform/internal/cell"
 )
 
-// Roles, from identity groups.
+// Roles, from identity groups. An account in none of the groups logs in
+// but has no role: the identity also holds everyone who only uses apps.
 const (
 	RoleAdmin  = "admin"
 	RoleAgent  = "agent"
-	RoleMember = "member"
+	RoleViewer = "viewer"
+	RoleNone   = "none"
 
-	GroupAdmins = "cell-admins"
-	GroupAgents = cell.AgentGroup
+	GroupAdmins  = "cell-admins"
+	GroupViewers = "cell-viewers"
+	GroupAgents  = cell.AgentGroup
 )
 
-var rank = map[string]int{RoleMember: 1, RoleAgent: 2, RoleAdmin: 3}
+var rank = map[string]int{RoleNone: 0, RoleViewer: 1, RoleAgent: 2, RoleAdmin: 3}
 
 // Caller is the authenticated user of a request.
 type Caller struct {
@@ -44,15 +47,19 @@ type Caller struct {
 }
 
 // RoleOf maps identity groups to an API role: admins may do everything,
-// agents read and propose changes, everyone else reads apps and changes.
+// agents read and propose changes, viewers read, everyone else nothing.
+// A person among the viewers stays one also in cell-agents: agents are
+// the platform's own accounts, and a viewer reads outside of tasks.
 func RoleOf(groups []string) string {
 	switch {
 	case slices.Contains(groups, GroupAdmins):
 		return RoleAdmin
+	case slices.Contains(groups, GroupViewers):
+		return RoleViewer
 	case slices.Contains(groups, GroupAgents):
 		return RoleAgent
 	}
-	return RoleMember
+	return RoleNone
 }
 
 // Identity is what the API needs from the identity provider.
@@ -98,39 +105,39 @@ func (s *Server) routes() []route {
 		{"GET", "/healthz", "", s.healthz},
 		{"GET", "/openapi.yaml", "", s.openapi},
 		{"GET", "/v0/login", "", s.getLogin},
-		{"GET", "/v0/whoami", RoleMember, s.whoami},
-		{"GET", "/v0/catalog", RoleMember, s.listCatalog},
-		{"GET", "/v0/catalog/{name}", RoleMember, s.getCatalogEntry},
-		{"GET", "/v0/apps", RoleMember, s.listApps},
+		{"GET", "/v0/whoami", RoleNone, s.whoami},
+		{"GET", "/v0/catalog", RoleViewer, s.listCatalog},
+		{"GET", "/v0/catalog/{name}", RoleViewer, s.getCatalogEntry},
+		{"GET", "/v0/apps", RoleViewer, s.listApps},
 		{"POST", "/v0/apps", RoleAgent, s.installApp},
-		{"GET", "/v0/apps/{name}", RoleMember, s.getApp},
+		{"GET", "/v0/apps/{name}", RoleViewer, s.getApp},
 		{"PATCH", "/v0/apps/{name}", RoleAgent, s.updateApp},
 		{"DELETE", "/v0/apps/{name}", RoleAgent, s.removeApp},
-		{"GET", "/v0/apps/{name}/backups", RoleMember, s.listBackups},
+		{"GET", "/v0/apps/{name}/backups", RoleViewer, s.listBackups},
 		{"POST", "/v0/apps/{name}/backups", RoleAdmin, s.createBackup},
 		{"POST", "/v0/apps/{name}/restore", RoleAgent, s.restoreApp},
-		{"GET", "/v0/apps/{name}/access", RoleMember, s.getAccess},
+		{"GET", "/v0/apps/{name}/access", RoleViewer, s.getAccess},
 		{"PUT", "/v0/apps/{name}/access", RoleAgent, s.setAccess},
-		{"GET", "/v0/users", RoleAgent, s.listUsers},
+		{"GET", "/v0/users", RoleViewer, s.listUsers},
 		{"POST", "/v0/users", RoleAdmin, s.createUser},
 		{"POST", "/v0/users/{name}/tokens", RoleAdmin, s.createUserToken},
-		{"GET", "/v0/groups", RoleAgent, s.listGroups},
+		{"GET", "/v0/groups", RoleViewer, s.listGroups},
 		{"POST", "/v0/groups", RoleAdmin, s.createGroup},
 		{"PATCH", "/v0/groups/{name}/members", RoleAdmin, s.changeGroupMembers},
-		{"GET", "/v0/changes", RoleMember, s.listChanges},
-		{"GET", "/v0/changes/{name}", RoleMember, s.getChange},
+		{"GET", "/v0/changes", RoleViewer, s.listChanges},
+		{"GET", "/v0/changes/{name}", RoleViewer, s.getChange},
 		{"POST", "/v0/changes/{name}/approve", RoleAdmin, s.approveChange},
 		{"POST", "/v0/changes/{name}/reject", RoleAdmin, s.rejectChange},
-		{"GET", "/v0/events", RoleMember, s.events},
-		{"GET", "/v0/apps/{name}/pods", RoleAgent, s.listPods},
-		{"GET", "/v0/apps/{name}/logs", RoleAgent, s.appLogs},
-		{"GET", "/v0/apps/{name}/events", RoleAgent, s.appEvents},
-		{"GET", "/v0/tasks", RoleAgent, s.listTasks},
+		{"GET", "/v0/events", RoleViewer, s.events},
+		{"GET", "/v0/apps/{name}/pods", RoleViewer, s.listPods},
+		{"GET", "/v0/apps/{name}/logs", RoleViewer, s.appLogs},
+		{"GET", "/v0/apps/{name}/events", RoleViewer, s.appEvents},
+		{"GET", "/v0/tasks", RoleViewer, s.listTasks},
 		{"POST", "/v0/tasks", RoleAdmin, s.createTask},
-		{"GET", "/v0/tasks/{name}", RoleAgent, s.getTask},
+		{"GET", "/v0/tasks/{name}", RoleViewer, s.getTask},
 		{"POST", "/v0/tasks/{name}/claim", RoleAgent, s.claimTask},
 		{"POST", "/v0/tasks/{name}/finish", RoleAgent, s.finishTask},
-		{"GET", "/v0/nodes", RoleAgent, s.listNodes},
+		{"GET", "/v0/nodes", RoleViewer, s.listNodes},
 		{"POST", "/v0/nodes/joins", RoleAdmin, s.createJoin},
 		{"GET", "/v0/nodes/join.sh", "", s.joinScript},
 	}
@@ -166,7 +173,11 @@ func (s *Server) wrap(rt route) http.HandlerFunc {
 				writeError(w, errorf(http.StatusUnauthorized, "invalid token: %v", err))
 				return
 			}
-			if rank[c.Role] < rank[rt.role] {
+			if got, ok := rank[c.Role]; !ok || got < rank[rt.role] {
+				if c.Role == RoleNone {
+					writeError(w, errorf(http.StatusForbidden, "%s is in none of the groups %s, %s: ask an admin for access", c.Username, GroupViewers, GroupAdmins))
+					return
+				}
 				writeError(w, errorf(http.StatusForbidden, "needs role %s, you are %s", rt.role, c.Role))
 				return
 			}

@@ -108,10 +108,14 @@ func TestAgentsWorkInTasks(t *testing.T) {
 		t.Errorf("parallel calls: %v, %d steps", codes, n)
 	}
 
-	// Tasks hold what agents read (logs in results): not for members.
+	// Tasks hold what agents read (logs in results): for viewers, not for
+	// accounts without a role.
 	for _, path := range []string{"/v0/tasks", "/v0/tasks/notes-diagnose-1"} {
-		if code, _ := h.do("GET", path, "member", nil); code != 403 {
-			t.Errorf("member read %s: %d", path, code)
+		if code, _ := h.do("GET", path, "none", nil); code != 403 {
+			t.Errorf("no role reads %s: %d", path, code)
+		}
+		if code, _ := h.do("GET", path, "viewer", nil); code != 200 {
+			t.Errorf("viewer reads %s: %d", path, code)
 		}
 	}
 	_, body = h.do("GET", "/v0/tasks/notes-diagnose-1", "admin", nil)
@@ -173,7 +177,7 @@ func TestCreateTask(t *testing.T) {
 		req   map[string]any
 		code  int
 	}{
-		{"member", map[string]any{"kind": "diagnose", "app": "notes"}, 403},
+		{"viewer", map[string]any{"kind": "diagnose", "app": "notes"}, 403},
 		{"agent", map[string]any{"kind": "diagnose", "app": "notes"}, 403},
 		{"admin", map[string]any{"kind": "diagnose", "app": "gone"}, 404},
 		{"admin", map[string]any{"kind": "package", "app": "memo"}, 400},
@@ -213,8 +217,8 @@ func TestDiagnosisReads(t *testing.T) {
 	other.Namespace, other.Name = "app-other", "e2"
 	h := newHarness(t, installed("notes", "oidc"), pod("notes-old", old), pod("notes-new", metav1.NewTime(old.Add(time.Hour))), event, other)
 
-	if code, _ := h.do("GET", "/v0/apps/notes/pods", "member", nil); code != 403 {
-		t.Errorf("member read pods: %d", code)
+	if code, _ := h.do("GET", "/v0/apps/notes/pods", "none", nil); code != 403 {
+		t.Errorf("no role reads pods: %d", code)
 	}
 	code, body := h.do("GET", "/v0/apps/notes/pods", "agent", nil)
 	if code != 200 || len(body.([]any)) != 2 || field(body.([]any)[0], "name") != "notes-new" {
