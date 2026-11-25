@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Turns a fresh Ubuntu LTS VM into a cell. Run as root with a copy of deploy/:
 #
-#   CELL_DOMAIN=cell.example.com CELL_TLS=acme CELL_ACME_EMAIL=ops@example.com ./install.sh
+#   CELL_DOMAIN=cell.example.com CELL_ACME_EMAIL=ops@example.com ./install.sh
 #
-# Defaults: CELL_STORAGE=longhorn, CELL_TLS=selfsigned. CELL_NODE_IP is the
-# address other machines join on, in the network the cell's machines share
-# (default: the source address of the default route); CELL_INGRESS_IP is the
-# cell's address for browsers and devices (default: CELL_NODE_IP). On a
-# server with a private network: CELL_NODE_IP=<private> CELL_INGRESS_IP=<public>
-# (E-57). All other settings as in bootstrap.sh and node.sh. OPERATOR_IMAGE
+# Run in a terminal, it asks for the domain and the email when they are not
+# set. Defaults: CELL_STORAGE=longhorn; CELL_TLS=acme with CELL_ACME_EMAIL,
+# else selfsigned. CELL_INGRESS_IP is the cell's address for browsers and
+# devices (default: the source address of the default route); CELL_NODE_IP
+# the address other machines join on, in the network the machines share
+# (default: CELL_INGRESS_IP; with a private network, its address there,
+# E-57). All other settings as in bootstrap.sh and node.sh. OPERATOR_IMAGE
 # names the operator image; OPERATOR_IMAGE_TAR, if set, is an image archive
 # (docker save) imported first. Idempotent: a second run changes nothing.
 #
@@ -28,8 +29,17 @@ if [ -f "$settings" ]; then
   done <"$settings"
 fi
 : "${CELL_DOMAIN:=}"
+if [ -t 0 ]; then
+  for q in $(questions /etc/cell/names.env); do
+    case $q in
+      domain) read -rp "Domain of the cell (its apps live at <app>.<domain>), e.g. cell.example.com: " CELL_DOMAIN ;;
+      email) read -rp "Email for Let's Encrypt certificates (empty: self-signed certificates): " CELL_ACME_EMAIL ;;
+    esac
+  done
+fi
 [ -n "$CELL_DOMAIN" ] || [ -n "${CELL_NAME:-}" ] || [ -f /etc/cell/names.env ] || die "set CELL_DOMAIN, or CELL_NAME for an address from the naming service"
-export CELL_STORAGE=${CELL_STORAGE:-longhorn} CELL_TLS=${CELL_TLS:-selfsigned}
+[ -n "${CELL_ACME_EMAIL:-}" ] && : "${CELL_TLS:=acme}"
+export CELL_DOMAIN CELL_ACME_EMAIL CELL_STORAGE=${CELL_STORAGE:-longhorn} CELL_TLS=${CELL_TLS:-selfsigned}
 start=$(date +%s)
 
 log "host packages"
@@ -41,9 +51,27 @@ if [ "${#missing[@]}" -gt 0 ]; then
   apt-get install -yq "${missing[@]}"
 fi
 
-# The address other machines join on (E-44) and the cell's own (E-57).
-export CELL_NODE_IP=${CELL_NODE_IP:-$(ip -4 route get 1.1.1.1 | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')}
-export CELL_INGRESS_IP=${CELL_INGRESS_IP:-$CELL_NODE_IP}
+# The cell's own address (E-53) and the one other machines join on (E-44, E-57).
+export CELL_INGRESS_IP=${CELL_INGRESS_IP:-$(ip -4 route get 1.1.1.1 | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')}
+if [ -z "${CELL_NODE_IP:-}" ] && ! private_ip "$CELL_INGRESS_IP"; then
+  # A public address and one private network next to it: the machines talk
+  # in the private one.
+  mapfile -t private < <(ip -o -4 addr show | private_addrs /sys/class/net)
+  if [ "${#private[@]}" -eq 1 ]; then
+    CELL_NODE_IP=${private[0]}
+    log "machines of the cell talk on ${private[0]} (private network)"
+  fi
+fi
+export CELL_NODE_IP=${CELL_NODE_IP:-$CELL_INGRESS_IP}
+if [ "$CELL_TLS" = acme ] && [ -n "$CELL_DOMAIN" ]; then
+  # Let's Encrypt asks for each host of the cell: without the wildcard the
+  # install would wait on certificates that never come. Another address is
+  # fine behind a router that forwards the ports.
+  got=$(getent ahostsv4 "dns-check.$CELL_DOMAIN" | awk 'NR == 1 {print $1}') || true
+  [ -n "$got" ] || die "*.$CELL_DOMAIN has no DNS record. Add *.$CELL_DOMAIN A $CELL_INGRESS_IP and run again (new records can take a few minutes)."
+  [ "$got" = "$CELL_INGRESS_IP" ] ||
+    log "note: *.$CELL_DOMAIN points to $got, not to $CELL_INGRESS_IP; fine only if $got forwards 80 and 443 here"
+fi
 # An address from the naming service (E-55): registered once, kept in
 # /etc/cell/names.env (root only); every run points it at this machine.
 names=/etc/cell/names.env
@@ -109,3 +137,11 @@ fi
 # The ingress takes the cell's address, which node.sh checked.
 CELL_JOIN_SERVER=$CELL_NODE_IP "$here/bootstrap.sh"
 log "cell installed in $(($(date +%s) - start))s"
+# Each password is shown once, after the first run that completes with it.
+printf '\n  Console:  https://console.%s\n' "$CELL_DOMAIN"
+show_once /etc/cell/login-shown Login: cell-system identity AUTHENTIK_BOOTSTRAP_PASSWORD \
+  "User akadmin; change the password after the first login." || die "could not read the first login password (Secret cell-system/identity)"
+rc=0
+show_once /etc/cell/backup-shown Backups: cell-system backup-target password \
+  "The backup password: keep it outside the cell, restoring into a new cell needs it." || rc=$?
+[ "$rc" -ne 1 ] || die "could not read the backup password (Secret cell-system/backup-target)"

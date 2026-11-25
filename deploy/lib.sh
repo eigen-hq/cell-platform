@@ -26,6 +26,42 @@ retry() {
 
 rand() { openssl rand -hex 24; }
 
+# questions prints which settings install.sh asks for in a terminal: the
+# domain and the Let's Encrypt email of a cell with its own domain ($1 is
+# the registration file of a cell with an address from the naming service).
+questions() {
+  if [ -n "${CELL_NAME:-}" ] || [ -f "$1" ]; then return 0; fi
+  [ -n "${CELL_DOMAIN:-}" ] || echo domain
+  [ -n "${CELL_ACME_EMAIL:-}" ] || [ "${CELL_TLS:-acme}" != acme ] || echo email
+}
+
+# show_once prints a password from a secret as "label value [note]" once:
+# the marker file stops later prints. Returns 2 if there is none, 1 if it
+# could not be read; neither sets the marker.
+# Usage: show_once <marker> <label> <namespace> <secret> <key> [note]
+show_once() {
+  local v
+  [ ! -f "$1" ] || return 0
+  v=$(secret_value "$3" "$4" "$5") || return 1
+  [ -n "$v" ] || return 2
+  printf '  %-9s %s\n%s' "$2" "$v" "${6:+            $6
+}"
+  touch "$1"
+}
+
+private_ip() { [[ $1 =~ ^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.) ]]; }
+
+# private_addrs prints the private IPv4 addresses (ip -o -4 addr on stdin) of
+# network cards: interfaces with a device under the sysfs net dir $1, not
+# bridges or tunnels like docker0 or flannel.
+private_addrs() {
+  local dev cidr
+  while read -r _ dev _ cidr _; do
+    private_ip "${cidr%/*}" && [ -e "$1/$dev/device" ] && echo "${cidr%/*}"
+  done
+  return 0
+}
+
 # configured tells from the output of kubectl apply whether a resource that
 # existed was changed (programs that read their configuration once need a
 # restart then).

@@ -6,7 +6,7 @@
 # root; the first time with the settings of install.sh, later without (it
 # keeps them):
 #
-#   CELL_DOMAIN=cell.example.com CELL_TLS=acme CELL_ACME_EMAIL=ops@example.com deploy/release.sh v0.1.0
+#   CELL_DOMAIN=cell.example.com CELL_ACME_EMAIL=ops@example.com deploy/release.sh v0.1.0
 #   deploy/release.sh v0.2.0
 #
 # Use a clone for releases only: the update checks the tag out in it. Git

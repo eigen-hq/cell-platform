@@ -1,79 +1,179 @@
-# Installation auf eigenen Servern
+# Zelle installieren
 
-Was eine Zelle braucht und wie sie auf einen oder mehrere Server kommt.
+Diese Anleitung richtet eine Zelle auf einem eigenen Server ein. Danach erreichen Sie die Konsole unter `https://console.<Ihre Domain>` und können Apps installieren.
+
+Dauer: rund 30 Minuten, davon etwa 15 Minuten Warten auf die Einrichtung.
+
+## Überblick
+
+1. [Voraussetzungen prüfen](#voraussetzungen)
+2. [Server vorbereiten](#1-server-vorbereiten)
+3. [Zelle installieren](#2-zelle-installieren)
+4. [Anmelden](#3-anmelden)
+5. [Backups einrichten](#4-backups-einrichten)
+
+Danach nach Bedarf: [weitere Rechner](#weitere-rechner-hinzufügen), [Geräte ins Mesh](#geräte-verbinden).
 
 ## Voraussetzungen
 
-### Rechner
+| | Benötigt |
+|---|---|
+| Server | Frisch installiert, mit root-Zugang per SSH |
+| Betriebssystem | Ubuntu 24.04 LTS (empfohlen) |
+| Prozessor | x86_64, 4 Kerne (mindestens 2) |
+| Arbeitsspeicher | 8 GB (mindestens 4) |
+| Festplatte | 80 GB (mindestens 40) |
+| Domain | Eine Domain oder Subdomain, für die Sie DNS-Einträge setzen können, zum Beispiel `cell.example.com` |
+| E-Mail-Adresse | Für die Zertifikate von Let's Encrypt |
+| Zugang zur Plattform | Adresse des Repositorys und Release-Tag, zum Beispiel `v0.1.0` |
+| Backup-Ziel | Ein S3-Bucket außerhalb des Servers (kann nach der Installation folgen) |
 
-| | Mindestens | Empfohlen |
+> **Andere Systeme:** Ubuntu 22.04 LTS und Debian 12 oder 13 sollten ebenfalls funktionieren, sind aber noch nicht getestet. Ältere Versionen erhalten keine Sicherheitsupdates mehr und werden nicht unterstützt.
+
+## 1. Server vorbereiten
+
+Die Beispiele zeigen die Hetzner Cloud Console; bei anderen Anbietern heißen die Einstellungen ähnlich.
+
+1. **Server erstellen** mit Ubuntu 24.04.
+
+   Planen Sie mehr als einen Rechner? Legen Sie unter *Networks* ein privates Netz an und hängen Sie den Server an, **bevor** Sie installieren. Die Installation erkennt das Netz selbst.
+
+2. **Firewall anlegen** (*Firewalls*, *Create Firewall*) und dem Server zuweisen:
+
+   | Richtung | Protokoll | Port | Quelle |
+   |---|---|---|---|
+   | Eingehend | TCP | 80 | Überall |
+   | Eingehend | TCP | 443 | Überall |
+   | Eingehend | UDP | 3478 | Überall |
+   | Eingehend | TCP | 22 | Nur Ihre eigene IP-Adresse |
+
+   Ausgehende Regeln nicht eintragen: Dann ist ausgehender Verkehr erlaubt, den die Zelle braucht.
+
+3. **DNS-Eintrag setzen** bei Ihrem Domain-Anbieter:
+
+   | Name | Typ | Wert |
+   |---|---|---|
+   | `*.cell.example.com` | A | Öffentliche IPv4-Adresse des Servers |
+
+   Ein Eintrag genügt: Alle Dienste der Zelle liegen unter dieser Domain, etwa `console.cell.example.com`.
+
+## 2. Zelle installieren
+
+Melden Sie sich per SSH als root am Server an und führen Sie aus:
+
+```bash
+git clone <Repository-Adresse> /opt/cell
+cd /opt/cell
+deploy/release.sh v0.1.0
+```
+
+Die Installation fragt nach der Domain und der E-Mail-Adresse und richtet dann alles ein. Sie prüft vorher, ob der DNS-Eintrag stimmt und die Ports frei sind, und bricht mit einer Erklärung ab, falls nicht.
+
+Am Ende erscheint:
+
+```
+==> cell installed in 840s
+
+  Console:  https://console.cell.example.com
+  Login:    akadmin / 3f9c...
+```
+
+Notieren Sie das Passwort. Es erscheint nur einmal.
+
+## 3. Anmelden
+
+1. Öffnen Sie `https://console.cell.example.com`.
+2. Melden Sie sich als `akadmin` mit dem Passwort aus Schritt 2 an.
+3. Ändern Sie das Passwort unter `https://auth.cell.example.com`, Benutzereinstellungen.
+
+## 4. Backups einrichten
+
+Ohne Backup-Ziel sichert die Zelle nichts. Richten Sie es ein, bevor Sie Daten in Apps ablegen.
+
+1. Legen Sie einen S3-Bucket an, zum Beispiel in Hetzner Object Storage, und erzeugen Sie Zugangsschlüssel dafür.
+2. Führen Sie auf dem Server aus (Werte ersetzen):
+
+   ```bash
+   cd /opt/cell
+   CELL_BACKUP_S3_ENDPOINT=https://fsn1.your-objectstorage.com \
+   CELL_BACKUP_S3_REGION=fsn1 \
+   CELL_BACKUP_S3_BUCKET=<Bucket> \
+   CELL_BACKUP_S3_ACCESS_KEY=<Access Key> \
+   CELL_BACKUP_S3_SECRET_KEY=<Secret Key> \
+   deploy/release.sh v0.1.0
+   ```
+
+3. Am Ende erscheint das **Backup-Passwort**. Bewahren Sie es außerhalb der Zelle auf, zum Beispiel in einem Passwort-Manager.
+
+> **Wichtig:** Ohne das Backup-Passwort lässt sich kein Backup wiederherstellen. Es erscheint nur dieses eine Mal.
+
+## Weitere Rechner hinzufügen
+
+Voraussetzung: Der neue Rechner hängt im selben privaten Netz wie der erste und erfüllt die [Voraussetzungen](#voraussetzungen). Er braucht keine offenen Ports; als Firewall genügt TCP 22 von Ihrer IP-Adresse.
+
+1. In der Konsole: *Machines*, *Add machine*.
+2. Den angezeigten Befehl auf dem neuen Rechner als root ausführen.
+
+Der Rechner erscheint nach wenigen Minuten in der Konsole.
+
+## Geräte verbinden
+
+Über das Mesh erreichen Mitarbeitende die Zelle verschlüsselt von ihren Geräten aus.
+
+1. Tailscale installieren: [tailscale.com/download](https://tailscale.com/download).
+2. Auf dem Gerät ausführen:
+
+   ```bash
+   tailscale up --login-server=https://mesh.cell.example.com
+   ```
+
+3. Im Browser mit dem Konto der Zelle anmelden.
+
+Erlaubt sind Administratoren und Mitglieder der Gruppe `cell-mesh`. Gruppen verwalten Sie unter `https://auth.cell.example.com/if/admin/`.
+
+## Updates
+
+```bash
+cd /opt/cell
+deploy/release.sh <neues Release-Tag>
+```
+
+Alle Einstellungen bleiben erhalten.
+
+## Wenn etwas nicht klappt
+
+| Meldung oder Verhalten | Ursache und Lösung |
+|---|---|
+| `*.cell.example.com has no DNS record` | Der DNS-Eintrag fehlt oder ist noch nicht aktiv. Eintrag prüfen, einige Minuten warten, erneut ausführen. |
+| `ports 80/443 (tcp) or 3478 (udp) ... are taken` | Ein anderes Programm belegt die Ports, etwa ein Webserver. Es beenden oder einen eigenen Server nutzen. |
+| Installation hängt bei den Zertifikaten | Port 80 ist von außen nicht erreichbar. Firewall prüfen. |
+| Neuer Rechner erscheint nicht | Er hängt nicht im privaten Netz des ersten Rechners. |
+| Startpasswort nicht notiert | Auf dem Server: `k3s kubectl -n cell-system get secret identity -o jsonpath='{.data.AUTHENTIK_BOOTSTRAP_PASSWORD}' \| base64 -d` (gilt, bis Sie es ändern) |
+| Backup-Passwort nicht notiert | Auf dem Server: `k3s kubectl -n cell-system get secret backup-target -o jsonpath='{.data.password}' \| base64 -d` |
+
+Die Installation lässt sich jederzeit erneut ausführen; sie ändert nur, was fehlt.
+
+## Referenz
+
+### Ports
+
+| Port | Von | Zweck |
 |---|---|---|
-| CPU | 2 vCPU | 4 vCPU |
-| Arbeitsspeicher | 4 GB (die Plattform allein belegt rund 3 GB) | 8 GB |
-| Festplatte | 40 GB | 80 GB, je nach Daten der Apps |
-| Architektur | x86_64 | x86_64 (arm64 sollte laufen, ist aber nicht geprüft) |
+| 80/TCP | Internet | Let's Encrypt prüft die Domain; Weiterleitung auf HTTPS |
+| 443/TCP | Internet | Konsole, Anmeldung, API, alle Apps, Mesh |
+| 3478/UDP | Internet | Mesh: direkte Verbindungen zwischen Geräten und Zelle |
+| 6443, 10250, 5001/TCP, 51820/UDP | Nur privates Netz | Verkehr zwischen den Rechnern der Zelle. Nie aus dem Internet öffnen. |
 
-Weitere Rechner brauchen dasselbe, nur weniger Speicher: Auf ihnen laufen nur Apps.
+### Einstellungen
 
-### Betriebssystem
+Einstellungen werden als Umgebungsvariablen vor `deploy/release.sh` gesetzt und für spätere Läufe gespeichert.
 
-Ein frisches Ubuntu oder Debian mit Sicherheitsupdates:
-
-| System | Status |
-|---|---|
-| Ubuntu 24.04 LTS | geprüft |
-| Ubuntu 22.04 LTS, 26.04 LTS | sollte laufen |
-| Debian 12, 13 | sollte laufen, nicht geprüft |
-| Ältere Versionen, andere Distributionen | nicht unterstützt |
-
-Warum nicht älter: Kubernetes startet seit Version 1.35 nur noch mit cgroup v2 (Ubuntu ab 21.10, Debian ab 11), und ein System ohne Sicherheitsupdates kommt für Kundendaten nicht in Frage. Andere Distributionen fehlen, weil die Einrichtung `apt` nutzt.
-
-Alles Weitere installiert die Einrichtung selbst: k3s, die Pakete `curl`, `git`, `openssl`, `perl`, `python3`, für Longhorn `open-iscsi` und `nfs-common`, für den Bau des Plattform-Images Docker. Sie läuft als root.
-
-### Netz
-
-Alle Rechner einer Zelle liegen in einem gemeinsamen Netz, zum Beispiel einem privaten Netz des Anbieters (E-57). Aus dem Internet erreichbar ist nur der erste Rechner, und nur so:
-
-| Port | Wofür |
-|---|---|
-| 80/TCP | Let's Encrypt prüft hier die Domain; Browser werden auf HTTPS umgeleitet |
-| 443/TCP | Konsole, Login, API, alle Apps, Anmeldung und Relay des Mesh |
-| 3478/UDP | Geräte im Mesh fragen nach ihrer öffentlichen Adresse, um sich direkt zu verbinden |
-| 22/TCP | SSH, nur von der eigenen Adresse (gehört nicht zur Plattform) |
-
-Weitere Rechner brauchen keine offenen Ports. Die Rechner sprechen untereinander nur im gemeinsamen Netz (6443, 10250, 5001/TCP, 51820/UDP); diese Ports dürfen aus dem Internet nicht erreichbar sein. Ausgehend braucht die Zelle das Internet: für Images, Zertifikate, das Sprachmodell und das Backup-Ziel.
-
-Die Ports 80, 443 und 3478 müssen auf der Adresse der Zelle frei sein. Andere Dienste auf dem Rechner stören nicht, solange sie andere Adressen nutzen (E-53).
-
-### Was sonst gebraucht wird
-
-- **Eine Domain**, deren Name und alle Unternamen (`cell.example.com`, `*.cell.example.com`) auf die öffentliche Adresse des ersten Rechners zeigen, und eine E-Mail-Adresse für Let's Encrypt.
-- **Ein Backup-Ziel außerhalb der Zelle**, zum Beispiel eine Storage Box (SFTP), ein S3-Bucket oder ein NAS, und ein langes Backup-Passwort, das außerhalb der Zelle aufbewahrt wird. Ohne dieses Passwort lässt sich nichts wiederherstellen.
-- **Optional ein Anthropic-Schlüssel** für den Ops-Agenten. Ohne ihn läuft die Plattform, Agenten-Aufgaben warten.
-
-## Installation am Beispiel Hetzner
-
-1. Server anlegen (Ubuntu 24.04), bei mehreren Rechnern ein privates Netz anlegen und alle Server anhängen.
-2. Firewall für den ersten Server: eingehend TCP 80, TCP 443 und UDP 3478 von überall, TCP 22 nur von der eigenen Adresse. Weitere Server: eingehend nur TCP 22 von der eigenen Adresse. Ausgehend nichts eintragen (alles erlaubt). Private Netze filtert die Hetzner-Firewall nicht.
-3. DNS: A-Einträge für `cell.example.com` und `*.cell.example.com` auf die öffentliche Adresse des ersten Servers.
-4. Backup-Ziel: eine `rclone.conf` mit einem Abschnitt `[target]`, zum Beispiel für die Storage Box.
-5. Auf dem ersten Server als root:
-
-   ```
-   git clone <Repo> /opt/cell && cd /opt/cell
-   CELL_DOMAIN=cell.example.com CELL_TLS=acme CELL_ACME_EMAIL=ops@example.com \
-   CELL_NODE_IP=<private Adresse> CELL_INGRESS_IP=<öffentliche Adresse> \
-   CELL_BACKUP_RCLONE_CONFIG=/root/rclone.conf CELL_BACKUP_RCLONE_ROOT=cell-backups \
-   CELL_BACKUP_PASSWORD=<Backup-Passwort> CELL_LLM_API_KEY=<Schlüssel> \
-   deploy/release.sh <Release-Tag>
-   ```
-
-   Ohne privates Netz entfallen `CELL_NODE_IP` und `CELL_INGRESS_IP`. Die Einrichtung dauert rund 15 Minuten; ein zweiter Lauf ändert nichts. Updates: `deploy/release.sh <neuer Tag>`.
-6. Erster Login unter `https://console.cell.example.com` als `akadmin`. Das Passwort:
-
-   ```
-   k3s kubectl -n cell-system get secret identity -o jsonpath='{.data.AUTHENTIK_BOOTSTRAP_PASSWORD}' | base64 -d
-   ```
-
-7. Weitere Rechner: in der Konsole „Machines", „Add machine", den Befehl auf dem neuen Server als root ausführen.
-8. Geräte ins Mesh: Tailscale-App installieren, `tailscale up --login-server=https://mesh.cell.example.com`, im Browser mit dem Zellen-Konto anmelden.
+| Variable | Bedeutung | Standard |
+|---|---|---|
+| `CELL_DOMAIN` | Domain der Zelle | wird abgefragt |
+| `CELL_ACME_EMAIL` | E-Mail für Let's Encrypt | wird abgefragt; leer: selbstsignierte Zertifikate |
+| `CELL_INGRESS_IP` | Öffentliche Adresse der Zelle | Adresse der Standardroute |
+| `CELL_NODE_IP` | Adresse für den Verkehr zwischen den Rechnern | Adresse im privaten Netz, sonst `CELL_INGRESS_IP` |
+| `CELL_BACKUP_S3_*` | Backup-Ziel (`ENDPOINT`, `REGION`, `BUCKET`, `ACCESS_KEY`, `SECRET_KEY`) | kein Backup |
+| `CELL_BACKUP_PASSWORD` | Verschlüsselt die Backups | wird erzeugt |
+| `CELL_LLM_API_KEY` | Anthropic-Schlüssel für den Ops-Agenten | ohne: Agenten-Aufgaben warten |

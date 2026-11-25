@@ -23,8 +23,9 @@
 #   CELL_BACKUP_RCLONE_CONFIG, CELL_BACKUP_RCLONE_ROOT
 #                      any rclone remote (SFTP, WebDAV, SMB, ...): a file with
 #                      a [target] section, and the path in it
-#   CELL_BACKUP_PASSWORD  needed with each: encrypts the backups; keep it
-#                      outside the cell, a restore into a new cell needs it
+#   CELL_BACKUP_PASSWORD  encrypts the backups (default: the stored one, else
+#                      a new one); keep it outside the cell, a restore into a
+#                      new cell needs it
 #   CELL_BACKUP_PREFIX path in the target (default: CELL_DOMAIN)
 #   CELL_TLS=names     certificates through the naming service (E-55), with
 #   CELL_NAMES_URL, CELL_NAMES_LABEL, CELL_NAMES_TOKEN  from the cell's
@@ -147,7 +148,10 @@ elif [ -n "${CELL_BACKUP_RCLONE_CONFIG:-}" ]; then
   root="${CELL_BACKUP_RCLONE_ROOT:+${CELL_BACKUP_RCLONE_ROOT%/}/}$prefix"
 fi
 if [ -n "$conf" ]; then
-  : "${CELL_BACKUP_PASSWORD:?a backup target needs CELL_BACKUP_PASSWORD}"
+  # Without one given, the stored password, else a new one (install.sh shows
+  # it once). A new password for an existing repository would lock it.
+  [ -n "${CELL_BACKUP_PASSWORD:-}" ] || CELL_BACKUP_PASSWORD=$(secret_value cell-system backup-target password)
+  [ -n "$CELL_BACKUP_PASSWORD" ] || CELL_BACKUP_PASSWORD=$(rand)
   log "backup target: $where"
   # The gateway key derives every app's key: made once, kept.
   key=$(secret_value cell-system backup-target gatewayKey)

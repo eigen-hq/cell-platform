@@ -60,6 +60,20 @@ addrs=$'2: eth0    inet 192.0.2.10/32 scope global dynamic eth0\n3: enp7s0    in
 check "flannel takes the private interface" enp7s0 "$(node_iface 10.0.0.2 <<<"$addrs")"
 check "flannel takes the public one on a single address" eth0 "$(node_iface 192.0.2.10 <<<"$addrs")"
 check "an address of another machine has no interface" "" "$(node_iface 10.0.0.20 <<<"$addrs")"
+mkdir -p "$tmp/net/eth0/device" "$tmp/net/enp7s0/device" "$tmp/net/docker0"
+addrs4=$'2: eth0    inet 192.0.2.10/32 scope global eth0\n3: enp7s0    inet 10.0.0.2/32 scope global enp7s0\n4: docker0    inet 172.17.0.1/16 scope global docker0\n5: tailscale0    inet 100.64.0.1/32 scope global tailscale0'
+check "the private network card is found" 10.0.0.2 "$(private_addrs "$tmp/net" <<<"$addrs4")"
+check "no private network, no address" "" "$(private_addrs "$tmp/net" <<<"${addrs4/10.0.0.2/203.0.113.5}")"
+check "172.16/12 is private" 0 "$(private_ip 172.31.0.1; echo $?)"
+check "172.32 is not private" 1 "$(private_ip 172.32.0.1; echo $?)"
+check "a new cell is asked domain and email" "domain email" "$(unset CELL_DOMAIN CELL_ACME_EMAIL CELL_TLS CELL_NAME; questions "$tmp/none" | xargs)"
+check "a given domain is still asked the email" email "$(CELL_DOMAIN=c.example.com; unset CELL_ACME_EMAIL CELL_TLS CELL_NAME; questions "$tmp/none" | xargs)"
+check "acme without email is asked the email" email "$(CELL_DOMAIN=c.example.com CELL_TLS=acme; unset CELL_ACME_EMAIL CELL_NAME; questions "$tmp/none" | xargs)"
+check "self-signed is asked nothing" "" "$(CELL_DOMAIN=c.example.com CELL_TLS=selfsigned; unset CELL_ACME_EMAIL CELL_NAME; questions "$tmp/none")"
+check "a cell from the naming service is asked nothing" "" "$(touch "$tmp/names"; unset CELL_DOMAIN CELL_ACME_EMAIL CELL_TLS CELL_NAME; questions "$tmp/names")"
+check "a password is shown once with its note" $'  Login:    secret-pw\n            note\n|' "$(FAKE=value show_once "$tmp/shown" Login: ns s k note; echo "|"; FAKE=value show_once "$tmp/shown" Login: ns s k note)"
+check "a missing password returns 2 and is not marked" "2 no" "$(FAKE=notfound show_once "$tmp/m2" L ns s k; echo "$? $([ -f "$tmp/m2" ] && echo yes || echo no)")"
+check "an unreadable password fails and is not marked" "1 no" "$(FAKE=down show_once "$tmp/m1" L ns s k 2>/dev/null; echo "$? $([ -f "$tmp/m1" ] && echo yes || echo no)")"
 ss() { return 42; }
 check "a failing ss fails the check" 1 "$( (set -o pipefail; taken_ports 192.0.2.10 >/dev/null) && echo 0 || echo 1)"
 unset -f ss

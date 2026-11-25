@@ -23,7 +23,7 @@ make cell-down   # lokale Zelle löschen
 Auf einem eigenen Server (als root, in einem Klon nur für Releases; Voraussetzungen und Schritte in `docs/installation.md`):
 
 ```
-CELL_DOMAIN=cell.example.com CELL_TLS=acme CELL_ACME_EMAIL=ops@example.com deploy/release.sh v0.1.0
+CELL_DOMAIN=cell.example.com CELL_ACME_EMAIL=ops@example.com deploy/release.sh v0.1.0
 deploy/release.sh v0.2.0  # Update: Tag holen, Image auf dem Server bauen, installieren
 ```
 
