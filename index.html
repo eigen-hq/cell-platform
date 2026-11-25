@@ -2,7 +2,10 @@
 # Installs a cell on this machine, or updates it, from a release of the
 # platform:
 #
-#   curl -fsSL https://raw.githubusercontent.com/eigen-hq/cell-platform/main/get.sh | sudo bash
+#   curl -fsSL https://get.eigen-platform.com | sudo bash
+#
+# That address serves a copy of this file (GitHub Pages, branch pages):
+# update the copy whenever this file changes.
 #
 # CELL_VERSION picks a release (default: the latest), for example
 # ... | sudo CELL_VERSION=v0.2.0 bash. Other settings pass through to
