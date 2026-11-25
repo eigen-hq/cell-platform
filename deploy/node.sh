@@ -44,6 +44,21 @@ if [ "$CELL_STORAGE" = longhorn ]; then
   fi
 fi
 
+# The cell's web ports must be free on its address: never take them over.
+# web_ports_taken prints the listeners (ss -Hltn on stdin) that hold 80 or
+# 443 on the address, on all addresses, or as an IPv4-mapped IPv6 address.
+web_ports_taken() {
+  sed -E 's/\[::ffff:([0-9.]+)\]/\1/' | awk -v ip="$1" '$4 ~ "^(" ip "|0\\.0\\.0\\.0|\\*|\\[::\\]):(80|443)$" {print $4}' | sort -u | paste -sd' ' -
+}
+if [ "$role" = server ]; then
+  busy=$(ss -Hltn '( sport = :80 or sport = :443 )' | web_ports_taken "$CELL_NODE_IP")
+  if [ -n "$busy" ]; then
+    echo "error: ports 80/443 on $CELL_NODE_IP are taken by another program ($busy)." >&2
+    echo "Give the cell an address of its own: CELL_NODE_IP=<address> (E-53)." >&2
+    exit 1
+  fi
+fi
+
 say "k3s $K3S_VERSION as $role on $CELL_NODE_IP"
 # Pod traffic between machines runs through WireGuard to each machine's
 # address; images move between machines through the embedded mirror, the
@@ -51,7 +66,9 @@ say "k3s $K3S_VERSION as $role on $CELL_NODE_IP"
 mkdir -p /etc/rancher/k3s
 config=/etc/rancher/k3s/config.yaml
 if [ "$role" = server ]; then
-  want=$(printf 'write-kubeconfig-mode: "600"\nnode-ip: %s\nnode-external-ip: %s\nflannel-backend: wireguard-native\nflannel-external-ip: true\nembedded-registry: true\n' "$CELL_NODE_IP" "$CELL_NODE_IP")
+  # No ServiceLB: it takes 80 and 443 on every address of every machine;
+  # the ingress takes them on CELL_NODE_IP alone (E-53).
+  want=$(printf 'write-kubeconfig-mode: "600"\nnode-ip: %s\nnode-external-ip: %s\nflannel-backend: wireguard-native\nflannel-external-ip: true\nembedded-registry: true\ndisable:\n  - servicelb\n' "$CELL_NODE_IP" "$CELL_NODE_IP")
 else
   want=$(printf 'node-ip: %s\nnode-external-ip: %s\n' "$CELL_NODE_IP" "$CELL_NODE_IP")
 fi

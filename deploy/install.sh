@@ -70,5 +70,6 @@ if [ -n "${OPERATOR_IMAGE_TAR:-}" ]; then
   retry has_image
 fi
 
-CELL_JOIN_SERVER=$CELL_NODE_IP CELL_INGRESS_IP=${CELL_INGRESS_IP:-127.0.0.1} "$here/bootstrap.sh"
+# The ingress takes the address the others join on, which node.sh checked.
+CELL_JOIN_SERVER=$CELL_NODE_IP CELL_INGRESS_IP=$CELL_NODE_IP "$here/bootstrap.sh"
 log "cell installed in $(($(date +%s) - start))s"

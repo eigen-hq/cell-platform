@@ -36,6 +36,14 @@ export FAKE=value; check "secret_value decodes" "secret-pw" "$(secret_value ns s
 export FAKE=notfound; check "secret_value on missing secret prints nothing" "" "$(secret_value ns s password)"
 export FAKE=down; check "secret_value aborts on API error" "1" "$( (secret_value ns s password >/dev/null 2>&1) && echo 0 || echo 1)"
 
+# node.sh's port check (node.sh runs on its own, so the function comes from there)
+source <(sed -n '/^web_ports_taken()/,/^}/p' "$here/node.sh")
+listeners=$(printf 'LISTEN 0 4096 100.93.118.80:443 0.0.0.0:*\nLISTEN 0 4096 127.0.0.1:80 0.0.0.0:*\nLISTEN 0 4096 192.0.2.100:443 0.0.0.0:*\n')
+check "port check leaves other addresses alone" "" "$(web_ports_taken 192.0.2.10 <<<"$listeners")"
+check "port check finds the cell address" "192.0.2.10:443" "$(printf '%s\nLISTEN 0 1 192.0.2.10:443 0.0.0.0:*\n' "$listeners" | web_ports_taken 192.0.2.10)"
+check "port check finds a wildcard" "*:80" "$(printf 'LISTEN 0 1 *:80 *:*\n' | web_ports_taken 192.0.2.10)"
+check "port check finds an IPv4-mapped address" "192.0.2.10:443" "$(printf 'LISTEN 0 1 [::ffff:192.0.2.10]:443 [::]:*\n' | web_ports_taken 192.0.2.10)"
+
 export FAKE=oldtarget
 check "a target from before the gateway is kept" "v v v" "$(stored_backup_target; echo "$CELL_BACKUP_S3_ENDPOINT $CELL_BACKUP_S3_SECRET_KEY $CELL_BACKUP_PASSWORD")"
 export FAKE=value

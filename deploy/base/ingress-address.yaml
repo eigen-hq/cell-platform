@@ -1,0 +1,15 @@
+# The ingress takes ports 80 and 443 only on the cell's own address
+# (E-53): kube-proxy forwards traffic to that address, other addresses of
+# the machine (Tailscale, Docker, localhost) stay with what runs there.
+# k3s's ServiceLB, which takes the ports on every address, is off (node.sh).
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    service:
+      spec:
+        type: ClusterIP
+        externalIPs: ["${CELL_INGRESS_IP}"]

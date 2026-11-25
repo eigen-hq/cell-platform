@@ -72,12 +72,12 @@ log "admin token for the platform API"
 # admin's app password comes from the identity like in test/e2e.
 api_session=$(cat <<'EOF'
 set -euo pipefail
-d=$1
+d=$1 ip=$2
 kc() { k3s kubectl "$@"; }
 kc -n cert-manager get secret cell-ca -o jsonpath='{.data.ca\.crt}' | base64 -d >/tmp/cell-ca.crt
 bt=$(kc -n cell-system get secret identity -o jsonpath='{.data.AUTHENTIK_BOOTSTRAP_TOKEN}' | base64 -d)
 get() { python3 -c "import json,sys; print(json.load(sys.stdin)$1)"; }
-c() { curl -fsS --cacert /tmp/cell-ca.crt --resolve "auth.$d:443:127.0.0.1" --resolve "api.$d:443:127.0.0.1" "$@"; }
+c() { curl -fsS --cacert /tmp/cell-ca.crt --resolve "auth.$d:443:$ip" --resolve "api.$d:443:$ip" "$@"; }
 ak() { c -H "Authorization: Bearer $bt" -H 'Content-Type: application/json' "https://auth.$d/api/v3/$1" "${@:2}"; }
 pk=$(ak 'core/users/?username=akadmin' | get '["results"][0]["pk"]')
 ak core/tokens/vm-test/ -X DELETE >/dev/null 2>&1 || true
@@ -87,8 +87,8 @@ c -d grant_type=client_credentials -d client_id=cell-api -d username=akadmin --d
   "https://auth.$d/application/o/token/" | get '["access_token"]' >/tmp/api-token
 EOF
 )
-on "$vm1" sudo bash -c "$api_session" _ "$domain"
-api() { on "$vm1" sudo bash -c 'curl -fsS --cacert /tmp/cell-ca.crt --resolve "api.$1:443:127.0.0.1" -H "Authorization: Bearer $(cat /tmp/api-token)" "${@:3}" "https://api.$1$2"' _ "$domain" "$@"; }
+on "$vm1" sudo bash -c "$api_session" _ "$domain" "$ip1"
+api() { on "$vm1" sudo bash -c 'curl -fsS --cacert /tmp/cell-ca.crt --resolve "api.$1:443:$2" -H "Authorization: Bearer $(cat /tmp/api-token)" "${@:4}" "https://api.$1$3"' _ "$domain" "$ip1" "$@"; }
 
 log "$vm2 joins through the API"
 cmd=$(api /v0/nodes/joins -X POST | python3 -c 'import json,sys; print(json.load(sys.stdin)["command"])')
@@ -121,6 +121,12 @@ for vm in "$vm1" "$vm2"; do
   on "$vm" ip link show flannel-wg >/dev/null || fail "$vm has no WireGuard link"
 done
 echo "ok: flannel-wg on both"
+
+log "the cell keeps to its own address (E-53)"
+for vm in "$vm1" "$vm2"; do
+  ! on "$vm" curl -sk -o /dev/null --max-time 5 https://127.0.0.1/ || fail "$vm: the cell answers on 127.0.0.1:443"
+done
+echo "ok: 443 on other addresses stays free"
 
 log "image and pod traffic on $node2"
 kc apply -f - >/dev/null <<EOF

@@ -51,6 +51,7 @@ Stand 24.11.2026:
 | Server-Installation | derselbe Lauf, erster Rechner | 47 s VM-Start, 438 s bis zur Login-Seite; zweiter Lauf ändert nichts |
 | Ressourcen | `kubectl top` nach 60 s Ruhe | Server 3,6 GiB, Agent 0,8 GiB |
 | API und Schlüssel | `make test`, `TestNodes`, `TestJoin` gegen `api/openapi.yaml`: nur Admins holen Schlüssel, er ist ein Bootstrap-Token mit einer Stunde Gültigkeit; die Policy `cell-api-join-keys` lässt die API in `kube-system` nichts anderes anlegen und nichts lesen (gegen die lokale Zelle geprüft) | bestanden |
+| Eigene Adresse für 80/443 (E-53) | Ubuntu-VM (Lima), `install.sh`: Login antwortet auf der Adresse der Zelle (302), 443 auf localhost bleibt frei, kein ServiceLB; `node.sh` bricht ab, wenn ein anderes Programm 443 auf der Adresse hält. Der volle `make vm-test` lief bis zur Identität und brach dort am 13 min langen Download des Postgres-Images ab | bestanden (25.11.2026); voller `make vm-test` wartet auf den täglichen Lauf |
 
 ### App-Manifest und Operator
 

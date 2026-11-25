@@ -8,7 +8,8 @@
 #   CELL_TLS           selfsigned (default) | acme
 #   CELL_ACME_EMAIL    required for acme
 #   CELL_ACME_SERVER   default: Let's Encrypt production
-#   CELL_INGRESS_IP    address the ingress answers on (default 127.0.0.1)
+#   CELL_INGRESS_IP    the only address the ingress takes 80/443 on (E-53;
+#                      default 127.0.0.1: the local cell, where k3d forwards)
 #   CELL_STORAGE       local-path (default) | longhorn
 #   CELL_JOIN_SERVER   address more machines join the cell on (optional; without
 #                      it, the cell takes no more machines, as the local one)
@@ -142,6 +143,13 @@ if [ -n "$conf" ]; then
   apply backup-gateway.yaml
   case $changed in *unchanged*) ;; *) kubectl -n cell-system rollout restart deploy/backup-gateway >/dev/null ;; esac
   kubectl -n cell-system rollout status deploy/backup-gateway --timeout=5m >/dev/null
+fi
+
+if [ "$CELL_INGRESS_IP" != 127.0.0.1 ]; then
+  log "ingress on $CELL_INGRESS_IP only"
+  apply ingress-address.yaml
+  ingress_on() { [ "$(kubectl -n kube-system get svc traefik -o jsonpath='{.spec.externalIPs[0]}')" = "$CELL_INGRESS_IP" ]; }
+  retry ingress_on
 fi
 
 log "TLS issuer: $CELL_TLS"
