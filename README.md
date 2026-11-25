@@ -20,7 +20,7 @@ make vm-test     # Abnahme auf zwei frischen Ubuntu-VMs (Lima, lokal), die zweit
 make cell-down   # lokale Zelle löschen
 ```
 
-Auf einem eigenen Server (als root, in einem Klon nur für Releases):
+Auf einem eigenen Server (als root, in einem Klon nur für Releases; Voraussetzungen und Schritte in `docs/installation.md`):
 
 ```
 CELL_DOMAIN=cell.example.com CELL_TLS=acme CELL_ACME_EMAIL=ops@example.com deploy/release.sh v0.1.0
@@ -50,9 +50,10 @@ claude mcp add --transport http cell https://mcp.cell.localhost/mcp --header 'Au
 1. `docs/kontext.md` – wofür und für wen wir das bauen
 2. `docs/architektur.md` – wie die Plattform aufgebaut ist
 3. `docs/stand.md` – was heute läuft, mit Nachweisen
-4. `docs/backlog.md` – alle Features mit Status
-5. `docs/app-manifest.md` – Entwurf der zentralen Abstraktion
-6. `docs/entscheidungen.md` – was entschieden ist, was Annahme ist, was offen ist
+4. `docs/installation.md` – Voraussetzungen und Installation auf eigenen Servern
+5. `docs/backlog.md` – alle Features mit Status
+6. `docs/app-manifest.md` – Entwurf der zentralen Abstraktion
+7. `docs/entscheidungen.md` – was entschieden ist, was Annahme ist, was offen ist
 
 Für Coding Agents zusätzlich: `CLAUDE.md`.
 
