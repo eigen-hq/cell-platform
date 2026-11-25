@@ -112,8 +112,10 @@ func S3RcloneConf(endpoint, accessKey, secretKey, region string) (string, error)
 		region = DefaultRegion
 	}
 	for name, v := range map[string]string{"endpoint": endpoint, "access key": accessKey, "secret key": secretKey, "region": region} {
-		if v == "" || strings.ContainsFunc(v, func(r rune) bool { return r <= ' ' || r == 0x7f }) {
-			return "", fmt.Errorf("the %s is empty or holds spaces or control characters", name)
+		// Quotes, %(name)s and comment marks mean more than the value to
+		// rclone's config parser: the file would differ from the check.
+		if v == "" || strings.ContainsFunc(v, func(r rune) bool { return r <= ' ' || r == 0x7f }) || strings.ContainsAny(v, "\"'`%\\#;") {
+			return "", fmt.Errorf("the %s is empty or holds spaces, control characters or any of \"'`%%\\#;", name)
 		}
 	}
 	// Byte for byte bootstrap's (no final line break), so that a rerun of

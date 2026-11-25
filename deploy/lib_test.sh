@@ -206,6 +206,19 @@ out=$(: >"$CELL_STEP_FILE"; : >"$CELL_STEP_FILE.cmd"; RETRY_ATTEMPTS=1 retry fal
 check "retry names the failed command" "1:false --flag" "$rc:$(cat "$CELL_STEP_FILE.cmd")"
 : >"$CELL_STEP_FILE.cmd"
 
+# A failed Secret apply keeps the Secret's values out of the log.
+kubectl() { cat >/dev/null; printf 'Error from server (Invalid): error when applying patch:\n{"data":{"password":"aHVudGVyMg=="}}\naHVudGVyMg==\n' >&2; return 1; }
+out=$(data_manifest ns s password=hunter2 | apply_secret 2>&1) && rc=0 || rc=$?
+check "apply_secret withholds the Secret on failure" "1:0:1" "$rc:$(grep -c 'aHVudGVyMg' <<<"$out"):$(grep -c 'Error from server (Invalid)' <<<"$out")"
+unset -f kubectl
+# The install log is root's alone, also when an older one was readable.
+printf old >"$tmp/install.log"; chmod 644 "$tmp/install.log"
+( CELL_STEP_DIR=""; CELL_STEP_FILE=$tmp/ui-step; CELL_UI_LOG=""; ui_start "$tmp/install.log" ) 3>/dev/null
+check "ui_start makes the log private" "600" "$(stat -c %a "$tmp/install.log" 2>/dev/null || stat -f %Lp "$tmp/install.log")"
+ln -s "$tmp/elsewhere" "$tmp/link.log"
+out=$( (CELL_STEP_DIR=""; CELL_STEP_FILE=$tmp/ui-step; CELL_UI_LOG=""; ui_start "$tmp/link.log") 2>&1) && rc=0 || rc=$?
+check "ui_start refuses a linked log" "1:no" "$rc:$([ -e "$tmp/elsewhere" ] && echo yes || echo no)"
+
 # wait_ready counts available deployments; kubectl prints
 # "<replicas> <available> <generation> <observed generation>".
 kubectl() { printf '%b' "$FAKE_DEPLOYS"; }

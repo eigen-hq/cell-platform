@@ -39,7 +39,8 @@ func TestDescribeBackupTarget(t *testing.T) {
 	}
 
 	// A value that would add an option of its own is refused.
-	for _, bad := range []string{"key\nendpoint = https://evil", "key with space", ""} {
+	// So is one rclone's parser would read as more than itself.
+	for _, bad := range []string{"key\nendpoint = https://evil", "key with space", "", `"""k"""`, "`k`", "%(access_key_id)s", "k;x", "k#x"} {
 		if _, err := S3RcloneConf("https://s3.test", "AKID", bad, ""); err == nil {
 			t.Errorf("secret key %q accepted", bad)
 		}

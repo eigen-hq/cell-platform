@@ -357,11 +357,17 @@ func (r *BackupTargetReconciler) gatewayRolledOut(ctx context.Context, sum strin
 		st.Replicas == want && st.UpdatedReplicas == want && st.ReadyReplicas == want && st.AvailableReplicas == want, nil
 }
 
-// checkScript writes a small object under the target's root and deletes
-// it: that fails on a wrong key, a missing bucket and a key that may only
-// read. ROOT is an env value, never part of the script.
+// checkScript writes a small object under the target's root, reads it
+// back, finds it in a listing and deletes it, as backups and restores do:
+// that fails on a wrong key, a missing bucket and a key that may only read
+// or may not list. ROOT is an env value, never part of the script.
 const checkScript = `set -eu
-echo "written by the cell to check its backup target; safe to delete" | rclone rcat "target:$ROOT/.cell-check"
+want="written by the cell to check its backup target; safe to delete"
+echo "$want" | rclone rcat "target:$ROOT/.cell-check"
+got=$(rclone cat "target:$ROOT/.cell-check") || exit 1
+[ "$got" = "$want" ] || { echo "reading the test object back gave other content" >&2; exit 1; }
+list=$(rclone lsf "target:$ROOT") || exit 1
+printf '%s\n' "$list" | grep -qxF .cell-check || { echo "the test object is missing from the listing: the key may not list the bucket" >&2; exit 1; }
 rclone deletefile "target:$ROOT/.cell-check"`
 
 // checkJob checks the target of the request with rclone. The remote is

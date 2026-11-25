@@ -23,9 +23,13 @@ if [ -n "${CELL_UI_LOG:-}" ]; then
 fi
 # The current step, shared by install.sh and the scripts it runs:
 # "<start> <label>", or "!" once die reported a failure.
+# Its siblings (.notes, .cmd, .progress, .lock) live with it in a private
+# directory.
 if [ -z "${CELL_STEP_FILE:-}" ]; then
-  CELL_STEP_FILE=$(mktemp)
-  export CELL_STEP_FILE
+  CELL_STEP_DIR=$(mktemp -d)
+  CELL_STEP_FILE=$CELL_STEP_DIR/step
+  : >"$CELL_STEP_FILE"
+  export CELL_STEP_DIR CELL_STEP_FILE
 fi
 
 ui() { printf "$@" >&"$ui_fd"; }
@@ -121,7 +125,10 @@ ui_log_tail() {
 ui_start() {
   [ -z "${CELL_UI_LOG:-}" ] || return 0
   mkdir -p "$(dirname "$1")"
+  # Root's log, never someone's link; an older one gets its mode fixed.
+  [ ! -L "$1" ] || die "$1 is a symbolic link: remove it and run again"
   (umask 077 && touch "$1")
+  chmod 600 "$1"
   export CELL_UI_LOG=$1
   exec 3>&1 >>"$CELL_UI_LOG" 2>&1
   ui_fd=3 ui_efd=3
@@ -192,6 +199,6 @@ ui_exit() {
       ui_log_tail
     fi
   fi
-  rm -f "$CELL_STEP_FILE" "$CELL_STEP_FILE.notes" "$CELL_STEP_FILE.cmd" "$CELL_STEP_FILE.progress" "$CELL_STEP_FILE.lock"
+  if [ -n "${CELL_STEP_DIR:-}" ]; then rm -rf "$CELL_STEP_DIR"; else rm -f "$CELL_STEP_FILE" "$CELL_STEP_FILE".*; fi
   exit "$rc"
 }

@@ -161,7 +161,7 @@ if [ -n "$conf" ]; then note "target: $where"; else note "no target yet: set one
 key=$(secret_value cell-system backup-target gatewayKey)
 [ -n "$key" ] || key=$(rand)
 changed=$(backup_target_manifest "$conf" root="$root" gatewayKey="$key" password="$CELL_BACKUP_PASSWORD" \
-  prefix="$prefix" localVolume="$BACKUP_LOCAL_VOLUME" | kubectl apply -f -)
+  prefix="$prefix" localVolume="$BACKUP_LOCAL_VOLUME" | apply_secret)
 apply backup-gateway.yaml
 case $changed in *unchanged*) ;; *) kubectl -n cell-system rollout restart deploy/backup-gateway >/dev/null ;; esac
 kubectl -n cell-system rollout status deploy/backup-gateway --timeout=5m >/dev/null
@@ -188,11 +188,11 @@ case $CELL_TLS in
     : "${CELL_NAMES_URL:?CELL_TLS=names needs CELL_NAMES_URL}" "${CELL_NAMES_LABEL:?CELL_TLS=names needs CELL_NAMES_LABEL}"
     : "${CELL_NAMES_TOKEN:?CELL_TLS=names needs CELL_NAMES_TOKEN}"
     export CELL_NAMES_URL CELL_NAMES_LABEL CELL_NAMES_TOKEN
-    data_manifest cert-manager cell-names url="$CELL_NAMES_URL" label="$CELL_NAMES_LABEL" token="$CELL_NAMES_TOKEN" | kubectl apply -f - >/dev/null
+    data_manifest cert-manager cell-names url="$CELL_NAMES_URL" label="$CELL_NAMES_LABEL" token="$CELL_NAMES_TOKEN" | apply_secret >/dev/null
     # ponytail: the operator adds app hosts to the same secret; a write of
     # it racing this one can drop an app's host until its next reconcile.
     accounts=$(names_accounts_manifest auth api console mcp mesh)
-    kubectl apply -f - <<<"$accounts" >/dev/null
+    apply_secret <<<"$accounts" >/dev/null
     retry apply issuer-names.yaml
     ;;
   *) die "unknown CELL_TLS=$CELL_TLS" ;;

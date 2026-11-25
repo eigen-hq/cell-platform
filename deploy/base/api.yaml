@@ -107,7 +107,7 @@ spec:
         object.metadata.name.startsWith('bootstrap-token-') &&
         has(object.data) && 'auth-extra-groups' in object.data &&
         object.data['auth-extra-groups'] == 'c3lzdGVtOmJvb3RzdHJhcHBlcnM6azNzOmRlZmF1bHQtbm9kZS10b2tlbg==' &&
-        'expiration' in object.data
+        'expiration' in object.data && size(object.data['expiration']) >= 20
       message: "the platform API only creates join keys for machines (k3s bootstrap tokens with an expiry)"
 ---
 apiVersion: admissionregistration.k8s.io/v1

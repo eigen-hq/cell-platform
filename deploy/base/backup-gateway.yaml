@@ -60,6 +60,7 @@ spec:
         - name: target
           secret:
             secretName: backup-target
+            defaultMode: 0400
             items:
               - {key: rclone.conf, path: rclone.conf}
               - {key: root, path: root}

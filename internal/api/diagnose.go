@@ -12,8 +12,8 @@ import (
 )
 
 // What an admin looks at when an app is in trouble: its pods, their logs
-// and the events in its namespace. Read-only, for admins and agents (logs
-// can hold anything an app prints).
+// and the events in its namespace. Read-only; viewers read it too (E-46),
+// although logs can hold anything an app prints.
 
 type exitView struct {
 	Reason   string    `json:"reason"`

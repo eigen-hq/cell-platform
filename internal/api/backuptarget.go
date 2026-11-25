@@ -38,6 +38,10 @@ var (
 	credentials = regexp.MustCompile(`^[\x21-\x7e]{1,256}$`) // printable, no spaces
 )
 
+// configSyntax holds what rclone's config parser reads as more than the
+// value itself: quotes it strips, %(name)s it fills in, comments.
+const configSyntax = "\"'`%\\#;"
+
 func (q *backupTargetRequest) check() error {
 	u, err := url.Parse(q.Endpoint)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil ||
@@ -55,8 +59,9 @@ func (q *backupTargetRequest) check() error {
 	if !bucketName.MatchString(q.Bucket) || strings.Contains(q.Bucket, "..") {
 		return fmt.Errorf("bucket: 3 to 63 lowercase letters, digits, . and -")
 	}
-	if !credentials.MatchString(q.AccessKey) || !credentials.MatchString(q.SecretKey) {
-		return fmt.Errorf("accessKey and secretKey: 1 to 256 printable characters without spaces")
+	if !credentials.MatchString(q.AccessKey) || !credentials.MatchString(q.SecretKey) ||
+		strings.ContainsAny(q.AccessKey+q.SecretKey, configSyntax) {
+		return fmt.Errorf("accessKey and secretKey: 1 to 256 printable characters without spaces or any of %s", configSyntax)
 	}
 	if q.Prefix != "" {
 		for _, p := range strings.Split(q.Prefix, "/") {

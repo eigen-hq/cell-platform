@@ -164,6 +164,21 @@ stored_backup_target() {
   export CELL_BACKUP_PASSWORD
 }
 
+# apply_secret applies the Secret manifest on stdin and prints what kubectl
+# says. A failed apply can quote the manifest, values and all: of its
+# message only kubectl's kind of error reaches the log.
+apply_secret() {
+  local out rc=0
+  out=$(kubectl apply -f - 2>&1) || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    printf '%s\n' "$out"
+    return 0
+  fi
+  printf 'applying a Secret failed (exit %s, %s); the rest of the message is withheld, it can hold the values\n' "$rc" \
+    "$(head -n 1 <<<"$out" | grep -oE '^(error|Error from server( \([A-Za-z]+\))?)' || echo "no error kind")" >&2
+  return "$rc"
+}
+
 # data_manifest prints a Secret in namespace $1 named $2 with KEY=VALUE
 # pairs from the other arguments; values may span lines and keys may hold
 # dots. Values travel through pipes, never through the argv of another
