@@ -183,7 +183,7 @@ One cluster across all machines, WireGuard in between (E-42); network for people
 |---|---|---|
 | Cell across two servers without a private network (node traffic over public addresses, firewall per server) | open | Add machine |
 | Update of the platform to a release tag | running (E-59) | |
-| Short install address `get.<platform domain>` instead of the GitHub URL | open | Platform domain |
+| Short install address `get.eigen-platform.com` | running (E-59) | |
 | Prebuilt platform images from a public registry instead of building on the server | open | |
 
 ## Belongs to the office UI
