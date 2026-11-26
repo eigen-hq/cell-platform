@@ -22,7 +22,11 @@ export type TargetForm = {
   accessKey: string;
   secretKey: string;
   prefix: string;
+  privateNetwork: boolean; // plain http to a private IP, on purpose (E-68)
 };
+
+/** Plain http is a choice the form asks for; the cell refuses it otherwise. */
+export const plainHttp = (f: TargetForm) => f.provider === "other" && /^http:\/\//i.test(f.endpoint.trim());
 
 /** The request the form sends; pasted keys often end in a line break. */
 export function requestOf(f: TargetForm): Request {
@@ -34,6 +38,7 @@ export function requestOf(f: TargetForm): Request {
     accessKey: f.accessKey.trim(),
     secretKey: f.secretKey.trim(),
     prefix: f.prefix.trim().replace(/^\/+|\/+$/g, "") || undefined,
+    ...(plainHttp(f) && f.privateNetwork ? { privateNetwork: true } : {}),
   };
 }
 

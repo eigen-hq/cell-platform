@@ -167,7 +167,7 @@ func recoveryDatabase(app *cellv1.App, from cellv1.DatabaseBackup, archive, rest
 	spec["externalClusters"] = []any{map[string]any{
 		"name": "origin",
 		"plugin": map[string]any{"name": barmanPlugin, "parameters": map[string]any{
-			"barmanObjectName": objectStore, "serverName": from.ServerName,
+			"barmanObjectName": archiveStore(from.ServerName), "serverName": from.ServerName,
 		}},
 	}}
 	return u

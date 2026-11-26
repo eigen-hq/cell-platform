@@ -65,6 +65,9 @@ func TestBackupTarget(t *testing.T) {
 		"prefix slash":    with("prefix", "/a"),
 		"prefix quote":    with("prefix", `a"`),
 		"region capitals": with("region", "EU"),
+		"plain http":      with("endpoint", "http://10.0.0.5:9000"),
+		"http host name":  map[string]any{"endpoint": "http://minio.lan", "privateNetwork": true, "bucket": "b-1", "accessKey": "AK", "secretKey": "k"},
+		"http public ip":  map[string]any{"endpoint": "http://203.0.113.5", "privateNetwork": true, "bucket": "b-1", "accessKey": "AK", "secretKey": "k"},
 	} {
 		if code, _ := h.do("PUT", "/v0/backup-target", "admin", bad); code != 400 {
 			t.Errorf("%s: %d", name, code)
@@ -86,11 +89,27 @@ func TestBackupTarget(t *testing.T) {
 	}
 	d := req.StringData
 	if d["endpoint"] != "https://fsn1.your-objectstorage.com" || d["region"] != "us-east-1" || d["bucket"] != "cell-backups" || d["prefix"] != "" ||
-		d["secretKey"] != "s3cr3t/+=" || d["requester"] != "admin-user" || d["requestedAt"] != "2026-11-19T12:00:00Z" {
+		d["secretKey"] != "s3cr3t/+=" || d["requester"] != "admin-user" || d["requestedAt"] != "2026-11-19T12:00:00Z" || d["privateNetwork"] != "false" {
 		t.Errorf("request: %v", d)
 	}
 	if code, _ := h.do("PUT", "/v0/backup-target", "admin", good); code != 409 {
 		t.Errorf("second check while one runs: %d", code)
+	}
+
+	// Plain http on a private network, asked for on purpose.
+	if err := h.kube.Delete(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	private := with("endpoint", "http://10.0.0.5:9000")
+	private["privateNetwork"] = true
+	if code, body := h.do("PUT", "/v0/backup-target", "admin", private); code != 202 {
+		t.Fatalf("private http: %d %v", code, body)
+	}
+	if err := h.kube.Get(context.Background(), client.ObjectKey{Namespace: "cell-system", Name: cell.BackupTargetRequest}, &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.StringData["privateNetwork"] != "true" || req.StringData["endpoint"] != "http://10.0.0.5:9000" {
+		t.Errorf("private request: %v", req.StringData)
 	}
 }
 

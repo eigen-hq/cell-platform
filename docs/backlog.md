@@ -113,9 +113,9 @@ What is wanted and tried out happens in the office UI; the platform builds, oper
 | Do not count the wait for the login proxy against the deadline of the app | running, not yet verified (E-75) | |
 | Restart of an app as an API action | running | E-73 |
 | Console: hide actions for viewers | running | E-72 |
-| Encrypt database backups and their WAL in the cell before they leave it (today only volume backups are encrypted with the backup key) | open | |
-| Backup targets over HTTPS only, plain HTTP only for a private network on purpose | open | |
-| A target set again by the installer goes through the operator's checked switch under the gateway lock | open | |
+| Encrypt database backups and their WAL in the cell before they leave it (today only volume backups are encrypted with the backup key) | running, not yet verified (E-67) | |
+| Backup targets over HTTPS only, plain HTTP only for a private network on purpose | running, not yet verified (E-68) | |
+| A target set again by the installer goes through the operator's checked switch under the gateway lock | running, not yet verified (E-69) | |
 | Join keys: the joining machine reads the key without the command line, the key expires on join, the policy bounds its lifetime | running, not yet verified on a real cell (E-64) | |
 | Namespaced permissions for operator and API instead of cluster-wide ones | running, not yet verified (E-70) | |
 | Signed releases: the installer checks the release and its downloads against a signature | running, release key committed; not yet verified (E-65) | |

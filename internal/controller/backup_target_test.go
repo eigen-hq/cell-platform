@@ -38,6 +38,7 @@ func TestBackupTargetCheck(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithObjects(target, gateway, request("req-1", "s3cr3t")).Build()
 	now := time.Date(2026, 11, 25, 10, 0, 30, 0, time.UTC)
 	r := &BackupTargetReconciler{Client: c, Reader: c, RcloneImage: "rclone:test", Now: func() time.Time { return now }}
+	answered := "" // the request the status answers; the installer tells its own result by it
 	step := func() cell.BackupTarget {
 		t.Helper()
 		if _, err := r.Reconcile(ctx, ctrl.Request{}); err != nil {
@@ -47,6 +48,7 @@ func TestBackupTargetCheck(t *testing.T) {
 		if err := c.Get(ctx, client.ObjectKey{Namespace: "cell-system", Name: cell.BackupTargetStatus}, &cm); err != nil {
 			t.Fatal(err)
 		}
+		answered = cm.Data[cell.BackupTargetStatusRequestKey]
 		raw := cm.Data[cell.BackupTargetStatusKey]
 		if strings.Contains(raw, "s3cr3t") || strings.Contains(raw, "wrong") {
 			t.Fatalf("the status holds a secret key: %s", raw)
@@ -97,6 +99,9 @@ func TestBackupTargetCheck(t *testing.T) {
 	s = step()
 	if !s.Configured || s.Kind != "s3" || s.Bucket != "bk" || s.Region != "fsn1" || s.AccessKey != "AKID" || s.Check.State != cell.CheckPassed || !s.Check.At.Equal(now) {
 		t.Fatalf("passed: %+v %+v", s, s.Check)
+	}
+	if answered != "req-1" {
+		t.Errorf("passed answers %q", answered)
 	}
 	var got corev1.Secret
 	if err := c.Get(ctx, client.ObjectKeyFromObject(target), &got); err != nil {
@@ -149,8 +154,8 @@ func TestBackupTargetCheck(t *testing.T) {
 		t.Errorf("a failed check changed the target: %v %q", err, got.Data["rclone.conf"])
 	}
 	// Another reconcile keeps the result.
-	if s = step(); s.Check.State != cell.CheckFailed {
-		t.Errorf("result lost: %+v", s.Check)
+	if s = step(); s.Check.State != cell.CheckFailed || answered != "req-2" {
+		t.Errorf("result lost: %+v %q", s.Check, answered)
 	}
 	// A check whose request went away ends instead of running forever.
 	if err := c.Create(ctx, request("req-3", "s3cr3t")); err != nil {
@@ -160,11 +165,39 @@ func TestBackupTargetCheck(t *testing.T) {
 	if err := c.Delete(ctx, request("req-3", "")); err != nil {
 		t.Fatal(err)
 	}
-	if s = step(); s.Check.State != cell.CheckFailed || !strings.Contains(s.Check.Message, "went away") {
-		t.Errorf("orphaned check: %+v", s.Check)
+	if s = step(); s.Check.State != cell.CheckFailed || !strings.Contains(s.Check.Message, "went away") || answered != "req-3" {
+		t.Errorf("orphaned check: %+v %q", s.Check, answered)
 	}
 	if err := c.Get(ctx, client.ObjectKey{Namespace: "cell-system", Name: checkJobName}, &batchv1.Job{}); !apierrors.IsNotFound(err) {
 		t.Errorf("orphaned check's job left behind: %v", err)
+	}
+
+	// Plain http only on a private network, asked for on purpose (E-68):
+	// whoever wrote the request, a refused one starts no Job.
+	plain := func(uid, endpoint, private string) *corev1.Secret {
+		q := request(uid, "s3cr3t")
+		q.Data["endpoint"], q.Data["privateNetwork"] = []byte(endpoint), []byte(private)
+		return q
+	}
+	for i, q := range []*corev1.Secret{plain("req-4", "http://10.0.0.5:9000", ""), plain("req-5", "http://minio.lan:9000", "true")} {
+		if err := c.Create(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+		if s = step(); s.Check.State != cell.CheckFailed || !strings.Contains(s.Check.Message, "http") {
+			t.Errorf("plain http %d: %+v", i, s.Check)
+		}
+		if err := c.Get(ctx, client.ObjectKey{Namespace: "cell-system", Name: checkJobName}, &batchv1.Job{}); !apierrors.IsNotFound(err) {
+			t.Errorf("plain http %d started a check: %v", i, err)
+		}
+	}
+	if err := c.Create(ctx, plain("req-6", "http://10.0.0.5:9000", "true")); err != nil {
+		t.Fatal(err)
+	}
+	if s = step(); s.Check.State != cell.CheckRunning {
+		t.Errorf("private http: %+v", s.Check)
+	}
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "cell-system", Name: checkJobName}, &batchv1.Job{}); err != nil {
+		t.Errorf("private http started no check: %v", err)
 	}
 }
 

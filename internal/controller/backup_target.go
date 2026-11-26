@@ -89,7 +89,9 @@ func (r *BackupTargetReconciler) Reconcile(ctx context.Context, _ ctrl.Request) 
 	}
 	var before cell.BackupTarget
 	var cm corev1.ConfigMap
+	answered := ""
 	if err := r.Reader.Get(ctx, system(cell.BackupTargetStatus), &cm); err == nil {
+		answered = cm.Data[cell.BackupTargetStatusRequestKey]
 		if raw := cm.Data[cell.BackupTargetStatusKey]; raw != "" {
 			if err := json.Unmarshal([]byte(raw), &before); err != nil {
 				return ctrl.Result{}, err
@@ -122,6 +124,7 @@ func (r *BackupTargetReconciler) Reconcile(ctx context.Context, _ ctrl.Request) 
 		if check, done, err = r.check(ctx, &target, &req); err != nil {
 			return ctrl.Result{}, err
 		}
+		answered = string(req.UID)
 	}
 	status := cell.DescribeBackupTarget(target.Data)
 	status.Check = check
@@ -129,7 +132,11 @@ func (r *BackupTargetReconciler) Reconcile(ctx context.Context, _ ctrl.Request) 
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	apply := corev1ac.ConfigMap(cell.BackupTargetStatus, cell.SystemNamespace).WithData(map[string]string{cell.BackupTargetStatusKey: string(raw)})
+	data := map[string]string{cell.BackupTargetStatusKey: string(raw)}
+	if answered != "" {
+		data[cell.BackupTargetStatusRequestKey] = answered
+	}
+	apply := corev1ac.ConfigMap(cell.BackupTargetStatus, cell.SystemNamespace).WithData(data)
 	if err := r.Apply(ctx, apply, client.FieldOwner(fieldOwner), client.ForceOwnership); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -197,6 +204,11 @@ func (r *BackupTargetReconciler) check(ctx context.Context, target, req *corev1.
 	conf, err := cell.S3RcloneConf(d("endpoint"), d("accessKey"), d("secretKey"), d("region"))
 	if err != nil || d("bucket") == "" {
 		return ended(cell.CheckFailed, "the request is incomplete; ask again")
+	}
+	// The API checked it too; the request is checked here again, whoever
+	// wrote it (the installer does as well).
+	if err := cell.CheckBackupEndpoint(d("endpoint"), d("privateNetwork") == "true"); err != nil {
+		return ended(cell.CheckFailed, err.Error())
 	}
 
 	job := checkJob(r.RcloneImage, root)

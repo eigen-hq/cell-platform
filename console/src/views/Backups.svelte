@@ -5,7 +5,7 @@
   import { onMount } from "svelte";
   import { api, must } from "../lib/api/client";
   import type { components } from "../lib/api/schema";
-  import { checking, hetznerEndpoint, hetznerRegions, requestOf, shown, type TargetForm } from "../lib/backup";
+  import { checking, hetznerEndpoint, hetznerRegions, plainHttp, requestOf, shown, type TargetForm } from "../lib/backup";
   import { newest, STALE } from "../lib/newest";
   import { ago } from "../lib/time";
   import Button from "../lib/ui/Button.svelte";
@@ -41,7 +41,7 @@
     return () => clearInterval(t);
   });
 
-  let form = $state<TargetForm>({ provider: "hetzner", region: "fsn1", endpoint: "", otherRegion: "", bucket: "", accessKey: "", secretKey: "", prefix: "" });
+  let form = $state<TargetForm>({ provider: "hetzner", region: "fsn1", endpoint: "", otherRegion: "", bucket: "", accessKey: "", secretKey: "", prefix: "", privateNetwork: false });
   let sending = $state(false);
   let formError = $state("");
 
@@ -172,6 +172,9 @@
           {:else}
             <label>Endpoint<input type="url" bind:value={form.endpoint} required placeholder="https://s3.example.com" autocomplete="off" spellcheck="false" /></label>
             <label>Region <small>optional</small><input bind:value={form.otherRegion} placeholder="us-east-1" autocomplete="off" spellcheck="false" /></label>
+            {#if plainHttp(form)}
+              <label class="pick"><input type="checkbox" bind:checked={form.privateNetwork} />Plain http on a private network, on purpose <small>only to a private IP address</small></label>
+            {/if}
           {/if}
           <label>Bucket<input bind:value={form.bucket} required placeholder="cell-backups" autocomplete="off" spellcheck="false" /></label>
           <label>Folder in the bucket <small>optional</small><input bind:value={form.prefix} placeholder={target.prefix || "the cell's domain"} autocomplete="off" spellcheck="false" /></label>

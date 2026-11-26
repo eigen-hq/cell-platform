@@ -18,7 +18,9 @@
 #   Backup target (optional; the console sets one too), one of:
 #   CELL_BACKUP_S3_ENDPOINT, CELL_BACKUP_S3_BUCKET, CELL_BACKUP_S3_ACCESS_KEY,
 #   CELL_BACKUP_S3_SECRET_KEY (CELL_BACKUP_S3_REGION optional)
-#                      an S3 bucket
+#                      an S3 bucket, over https; plain http only with
+#                      CELL_BACKUP_S3_PRIVATE_NETWORK=true and an IP address
+#                      of a private network as the endpoint's host (E-68)
 #   CELL_BACKUP_PATH   a directory on the first machine (a disk, a mounted NAS)
 #   CELL_BACKUP_RCLONE_CONFIG, CELL_BACKUP_RCLONE_ROOT
 #                      any rclone remote (SFTP, WebDAV, SMB, ...): a file with
@@ -58,6 +60,9 @@ CELL_STORAGE=${CELL_STORAGE:-local-path}
 BASE_DIR="$here/base"
 # shellcheck source=lib.sh
 source "$here/lib.sh"
+# A target named here is checked before anything changes; a stored one,
+# also one from before the gateway, stays as it is (E-68).
+[ -z "${CELL_BACKUP_S3_ENDPOINT:-}" ] || s3_env_ok
 
 # Namespaces first, with a label owned by our own field manager. Without an
 # owned field, the next server-side apply would rewrite their managed fields.
@@ -127,6 +132,7 @@ EOF
 # key, and the gateway runs: setting a target then changes nothing else.
 step "Backups"
 s3_vars=(CELL_BACKUP_S3_ENDPOINT CELL_BACKUP_S3_BUCKET CELL_BACKUP_S3_ACCESS_KEY CELL_BACKUP_S3_SECRET_KEY)
+backup_password_kept
 stored_backup_target
 s3_set=0
 for v in "${s3_vars[@]}"; do [ -n "${!v:-}" ] && s3_set=$((s3_set + 1)); done
@@ -159,16 +165,22 @@ elif [ -n "${CELL_BACKUP_RCLONE_CONFIG:-}" ]; then
   grep -q '^\[target\]' <<<"$conf" || die "$CELL_BACKUP_RCLONE_CONFIG has no [target] section"
   root="${CELL_BACKUP_RCLONE_ROOT:+${CELL_BACKUP_RCLONE_ROOT%/}/}$prefix"
 fi
+# A cell with a gateway keeps its target; one named again goes through
+# the operator's checked switch (E-69), below.
+keep_live_backup_target
 if [ -n "$conf" ]; then note "target: $where"; else note "no target yet: set one in the console under Backups"; fi
-# Without one given, the stored password, else a new one (install.sh shows
-# it once). A new password for an existing repository would lock it.
-[ -n "${CELL_BACKUP_PASSWORD:-}" ] || CELL_BACKUP_PASSWORD=$(secret_value cell-system backup-target password)
-[ -n "$CELL_BACKUP_PASSWORD" ] || CELL_BACKUP_PASSWORD=$(rand)
-# The gateway key derives every app's key: made once, kept.
-key=$(secret_value cell-system backup-target gatewayKey)
-[ -n "$key" ] || key=$(rand)
-changed=$(backup_target_manifest "$conf" root="$root" gatewayKey="$key" password="$CELL_BACKUP_PASSWORD" \
-  prefix="$prefix" localVolume="$BACKUP_LOCAL_VOLUME" | apply_secret)
+changed=unchanged
+if [ -z "$backup_kept" ]; then
+  # Without one given, the stored password, else a new one (install.sh shows
+  # it once). A new password for an existing repository would lock it.
+  [ -n "${CELL_BACKUP_PASSWORD:-}" ] || CELL_BACKUP_PASSWORD=$(secret_value cell-system backup-target password)
+  [ -n "$CELL_BACKUP_PASSWORD" ] || CELL_BACKUP_PASSWORD=$(rand)
+  # The gateway key derives every app's key: made once, kept.
+  key=$(secret_value cell-system backup-target gatewayKey)
+  [ -n "$key" ] || key=$(rand)
+  changed=$(backup_target_manifest "$conf" root="$root" gatewayKey="$key" password="$CELL_BACKUP_PASSWORD" \
+    prefix="$prefix" localVolume="$BACKUP_LOCAL_VOLUME" | apply_secret)
+fi
 apply backup-gateway.yaml
 case $changed in *unchanged*) ;; *) kubectl -n cell-system rollout restart deploy/backup-gateway >/dev/null ;; esac
 kubectl -n cell-system rollout status deploy/backup-gateway --timeout=5m >/dev/null
@@ -314,6 +326,7 @@ step "Operator"
 kubectl apply --server-side -f "$here/crd/" >/dev/null
 apply operator.yaml
 kubectl -n cell-system rollout status deploy/cell-operator --timeout=5m >/dev/null
+[ -z "$backup_request" ] || request_backup_target
 
 step "Platform API"
 apply change-approval.yaml

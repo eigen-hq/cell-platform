@@ -193,6 +193,132 @@ stored_backup_target() {
   export CELL_BACKUP_PASSWORD
 }
 
+# backup_endpoint_ok tells whether $1 may be an S3 backup target's endpoint
+# (E-68): https, or plain http only with $2 = true and an IP address of a
+# private network as its host, never a host name. The API and the operator
+# have the same rule (cell.CheckBackupEndpoint); both test
+# internal/cell/testdata/endpoints.txt.
+backup_endpoint_ok() {
+  python3 - "$1" "$2" <<'PY'
+import ipaddress, sys, urllib.parse
+endpoint, private = sys.argv[1], sys.argv[2] == "true"
+# urlsplit drops line breaks and tabs; the endpoint goes into rclone.conf.
+if any(c <= " " or c >= "\x7f" for c in endpoint):
+    sys.exit(1)
+try:
+    u = urllib.parse.urlsplit(endpoint)
+    host = u.hostname or ""
+except ValueError:
+    sys.exit(1)
+if u.scheme == "https":
+    sys.exit(0)
+if u.scheme != "http" or not private or "%" in host:
+    sys.exit(1)
+try:
+    ip = ipaddress.ip_address(host)
+except ValueError:
+    sys.exit(1)
+if ip.version == 6 and ip.ipv4_mapped:
+    ip = ip.ipv4_mapped
+nets = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16", "100.64.0.0/10", "::1/128", "fe80::/10", "fc00::/7"]
+sys.exit(0 if any(ip in ipaddress.ip_network(n) for n in nets) else 1)
+PY
+}
+
+# s3_env_ok stops the installer before it changes anything when the
+# CELL_BACKUP_S3_* variables name an endpoint it refuses (E-68) or hold
+# what rclone's config parser reads as more than the value, as
+# cell.S3RcloneConf refuses it.
+s3_env_ok() {
+  local v bad="[\"'\`%\\#;]"
+  for v in CELL_BACKUP_S3_ENDPOINT CELL_BACKUP_S3_ACCESS_KEY CELL_BACKUP_S3_SECRET_KEY CELL_BACKUP_S3_REGION; do
+    [[ ${!v:-x} =~ ^[[:graph:]]+$ && ! ${!v:-x} =~ $bad ]] || die "$v holds spaces, control characters or any of $bad"
+  done
+  backup_endpoint_ok "$CELL_BACKUP_S3_ENDPOINT" "${CELL_BACKUP_S3_PRIVATE_NETWORK:-false}" ||
+    die "CELL_BACKUP_S3_ENDPOINT must be https; plain http only with CELL_BACKUP_S3_PRIVATE_NETWORK=true and an IP address of a private network (10/8, 172.16/12, 192.168/16, loopback, link-local, 100.64/10, fc00::/7) as its host"
+}
+
+# backup_password_kept stops a run whose CELL_BACKUP_PASSWORD differs from
+# the cell's backup key: the key encrypts every backup and never changes.
+backup_password_kept() {
+  local kept
+  kept=$(secret_value cell-system backup-target password)
+  [ -z "${CELL_BACKUP_PASSWORD:-}" ] || [ -z "$kept" ] || [ "$CELL_BACKUP_PASSWORD" = "$kept" ] ||
+    die "CELL_BACKUP_PASSWORD differs from the cell's backup key; the key encrypts the backups and never changes"
+}
+
+# keep_live_backup_target runs after bootstrap chose conf, root, prefix and
+# BACKUP_LOCAL_VOLUME from the environment. On a cell with a gateway only
+# the operator writes the target (E-69): backup_kept=1 tells bootstrap to
+# leave Secret backup-target as it is, so a switch meanwhile is never
+# undone. A target named again goes through the operator's checked switch,
+# as one set in the console: backup_request=1 asks request_backup_target to
+# hand the S3 target over once the new operator runs. A directory or rclone
+# remote is set only at the first installation. The same target again
+# changes nothing. A failed read aborts, as in stored_backup_target.
+keep_live_backup_target() {
+  backup_request="" backup_kept=""
+  local key was_conf was_root was_prefix was_volume
+  key=$(secret_value cell-system backup-target gatewayKey) || return
+  [ -n "$key" ] || return 0
+  backup_kept=1
+  [ -z "$stored" ] && [ -n "$conf" ] || return 0
+  was_conf=$(secret_value cell-system backup-target rclone.conf) || return
+  was_root=$(secret_value cell-system backup-target root) || return
+  was_prefix=$(secret_value cell-system backup-target prefix) || return
+  was_volume=$(secret_value cell-system backup-target localVolume) || return
+  was_volume=${was_volume:-"emptyDir: {}"}
+  # Without a prefix named, the cell's own (the console may have set one).
+  if [ -z "${CELL_BACKUP_PREFIX:-}${CELL_BACKUP_S3_PREFIX:-}" ] && [ -n "$was_prefix" ]; then
+    root=${root%"$prefix"}$was_prefix prefix=$was_prefix
+  fi
+  [ "$conf" != "$was_conf" ] || [ "$root" != "$was_root" ] || [ "$BACKUP_LOCAL_VOLUME" != "$was_volume" ] || return 0
+  [ -n "${CELL_BACKUP_S3_ENDPOINT:-}" ] ||
+    die "a directory or rclone remote is the backup target only at the first installation; another S3 bucket goes through the console (Backups) or CELL_BACKUP_S3_*"
+  backup_request=1
+  where="the stored target; the operator checks $where and switches to it after the Operator step"
+  conf=$was_conf root=$was_root prefix=$was_prefix BACKUP_LOCAL_VOLUME=$was_volume
+}
+
+# request_backup_target asks the operator to check the CELL_BACKUP_S3_*
+# target and switch to it under the gateway lock, the path the API takes
+# (E-60, E-69), and waits for the result. Values go through stdin, never
+# the command line.
+request_backup_target() {
+  local at out kind uid private=false deadline=$((SECONDS + 1200))
+  [ "${CELL_BACKUP_S3_PRIVATE_NETWORK:-}" != true ] || private=true
+  at=$(python3 -c 'import datetime; print(datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"))')
+  if ! out=$(data_manifest cell-system backup-target-request endpoint="$CELL_BACKUP_S3_ENDPOINT" region="${CELL_BACKUP_S3_REGION:-}" \
+    bucket="$CELL_BACKUP_S3_BUCKET" prefix="${CELL_BACKUP_PREFIX:-${CELL_BACKUP_S3_PREFIX:-}}" \
+    accessKey="$CELL_BACKUP_S3_ACCESS_KEY" secretKey="$CELL_BACKUP_S3_SECRET_KEY" privateNetwork="$private" \
+    requester=installer requestedAt="$at" | kubectl create -f - -o 'jsonpath={.metadata.uid}' 2>&1); then
+    kind=$(head -n 1 <<<"$out" | grep -oE '^(error|Error from server( \([A-Za-z]+\))?)' || echo "no error kind")
+    [ "$kind" != "Error from server (AlreadyExists)" ] ||
+      die "a backup target is being checked already; wait for its result in the console under Backups, then run again"
+    die "asking the operator for the backup target failed ($kind); the rest of the message is withheld, it can hold the keys"
+  fi
+  uid=$out
+  [ -n "$uid" ] || die "the backup target request has no UID"
+  progress "the operator checks the target and switches to it"
+  # ponytail: a fixed 20 min; the switch waits for running backups first.
+  while :; do
+    out=$(kubectl -n cell-system get secret backup-target-request --ignore-not-found -o name) ||
+      die "could not read the backup target request"
+    [ -n "$out" ] || break
+    [ "$SECONDS" -lt "$deadline" ] || die "the backup target is still being checked after 20 min; the console shows the check under Backups"
+    sleep 5
+  done
+  # The result of this request, told by its UID: a later one may have ended too.
+  out=$(kubectl -n cell-system get configmap backup-target-status -o json | UID_ASKED=$uid python3 -c 'import json, os, sys
+d = json.load(sys.stdin).get("data") or {}
+c = json.loads(d.get("target.json") or "{}").get("check") or {}
+print("another check answered last" if d.get("request") != os.environ["UID_ASKED"] else
+      "passed" if c.get("state") == "passed" else "not passed: " + (c.get("message") or "no result"))') ||
+    die "could not read the result of the backup target check"
+  [ "$out" = passed ] || die "the operator did not switch to the backup target: $out"
+  note "target: $CELL_BACKUP_S3_ENDPOINT/$CELL_BACKUP_S3_BUCKET, checked and switched to by the operator"
+}
+
 # apply_secret applies the Secret manifest on stdin and prints what kubectl
 # says. A failed apply can quote the manifest, values and all: of its
 # message only kubectl's kind of error reaches the log.

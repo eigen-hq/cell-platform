@@ -174,6 +174,15 @@ func (r *AppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		// app has to pass its health check again afterwards.
 		app.Status.Phase, app.Status.PausedBy, app.Status.WorkloadGeneration = act.phase, act.pausedBy, 0
 		r.condition(&app, condReady, false, string(act.phase), act.reason)
+		// The next restore waits for the backup credentials and stores to
+		// match the target (backupReady), also those an update added (E-67).
+		if target, err := loadTarget(ctx, r); err != nil {
+			return ctrl.Result{}, err
+		} else if target != nil && hasData(&app) {
+			if _, err := r.apply(ctx, backupResources(&app, target)...); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
 		if err := r.updateStatus(ctx, &app, before); err != nil {
 			return ctrl.Result{}, err
 		}

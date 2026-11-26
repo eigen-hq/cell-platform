@@ -29,11 +29,19 @@ import (
 // it, where the "buckets" postgres and volumes are directories. The restic
 // snapshot of a backup carries the database backup's coordinates as tags,
 // so a fresh cell finds everything from the target alone.
+//
+// restic encrypts the volumes itself. The database archive is encrypted by
+// the gateway (E-67): an app's second key, "<app>.db", reaches an rclone
+// crypt remote at <root>/apps/<app>/crypt, keyed by the backup password
+// alone. Archives named "crypt-..." live there (ObjectStore backup-crypt),
+// older "db-..." ones stay plain where they are (ObjectStore backup).
 
 const (
 	gatewayRegion  = "us-east-1" // the gateway takes any; clients want one
 	backupSecret   = "backup-s3"
 	objectStore    = "backup"
+	cryptStore     = "backup-crypt"
+	cryptArchive   = "crypt-"
 	barmanPlugin   = "barman-cloud.cloudnative-pg.io"
 	resticDataRoot = "/data"
 )
@@ -94,45 +102,60 @@ func backupResources(app *cellv1.App, t *backupTarget) []client.Object {
 				// barman-cloud and restic name the same things differently
 				"ACCESS_KEY_ID": app.Name, "ACCESS_SECRET_KEY": t.appSecret(app.Name), "REGION": gatewayRegion,
 				"AWS_ACCESS_KEY_ID": app.Name, "AWS_SECRET_ACCESS_KEY": t.appSecret(app.Name), "AWS_DEFAULT_REGION": gatewayRegion,
-				"RESTIC_PASSWORD": t.Password,
+				"RESTIC_PASSWORD":     t.Password,
+				"CRYPT_ACCESS_KEY_ID": app.Name + ".db", "CRYPT_ACCESS_SECRET_KEY": t.appSecret(app.Name + ".db"),
 			},
 		},
 	}
 	if app.Spec.Needs.Database == nil {
 		return objs
 	}
-	return append(objs,
-		&unstructured.Unstructured{Object: map[string]any{
+	store := func(name, prefix string) client.Object {
+		return &unstructured.Unstructured{Object: map[string]any{
 			"apiVersion": "barmancloud.cnpg.io/v1", "kind": "ObjectStore",
-			"metadata": map[string]any{"name": objectStore, "namespace": Namespace(app.Name), "labels": toAny(labels(app))},
+			"metadata": map[string]any{"name": name, "namespace": Namespace(app.Name), "labels": toAny(labels(app))},
 			"spec": map[string]any{
 				"retentionPolicy": "30d",
+				// The plugin's catalog check also records the last base
+				// backup; backupArchive waits for it (archiveConfirm).
+				"instanceSidecarConfiguration": map[string]any{"retentionPolicyIntervalSeconds": int64(catalogCheck / time.Second)},
 				"configuration": map[string]any{
 					"destinationPath": "s3://postgres",
 					"endpointURL":     gatewayURL,
 					"s3Credentials": map[string]any{
-						"accessKeyId":     map[string]any{"name": backupSecret, "key": "ACCESS_KEY_ID"},
-						"secretAccessKey": map[string]any{"name": backupSecret, "key": "ACCESS_SECRET_KEY"},
+						"accessKeyId":     map[string]any{"name": backupSecret, "key": prefix + "ACCESS_KEY_ID"},
+						"secretAccessKey": map[string]any{"name": backupSecret, "key": prefix + "ACCESS_SECRET_KEY"},
 						"region":          map[string]any{"name": backupSecret, "key": "REGION"},
 					},
 					"wal":  map[string]any{"compression": "gzip"},
 					"data": map[string]any{"compression": "gzip"},
 				},
 			},
-		}},
-	)
+		}}
+	}
+	// The plain store stays for the archives from before E-67.
+	return append(objs, store(objectStore, ""), store(cryptStore, "CRYPT_"))
 }
 
-// newServerName names a fresh WAL archive. Every database cluster gets its
-// own: the archive of a restored cluster must not mix with its origin's.
+// newServerName names a fresh WAL archive, always an encrypted one. Every
+// database cluster gets its own: the archive of a restored cluster must not
+// mix with its origin's.
 func newServerName(now time.Time) string {
-	return "db-" + now.UTC().Format("20060102t150405")
+	return cryptArchive + now.UTC().Format("20060102t150405")
+}
+
+// archiveStore is the ObjectStore an archive lives in.
+func archiveStore(serverName string) string {
+	if strings.HasPrefix(serverName, cryptArchive) {
+		return cryptStore
+	}
+	return objectStore
 }
 
 func archiverPlugin(serverName string) map[string]any {
 	return map[string]any{
 		"name": barmanPlugin, "isWALArchiver": true,
-		"parameters": map[string]any{"barmanObjectName": objectStore, "serverName": serverName},
+		"parameters": map[string]any{"barmanObjectName": archiveStore(serverName), "serverName": serverName},
 	}
 }
 
