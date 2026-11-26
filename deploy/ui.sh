@@ -11,7 +11,15 @@
 
 # Errors go to stderr without the log: a die inside $(...) must not vanish.
 if [ -n "${CELL_UI_LOG:-}" ]; then ui_fd=3 ui_efd=3; else ui_fd=1 ui_efd=2; fi
-if [ -t "$ui_fd" ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != dumb ]; then
+# ui_foreground: this script is the terminal's foreground job. Piped into
+# sudo, it may run in the background of sudo's terminal, where the first
+# touch of the terminal (stty in the ticker) stops it for good.
+ui_foreground() {
+  local pg tpg
+  read -r pg tpg <<<"$(ps -o pgid=,tpgid= -p $$ 2>/dev/null)" || return 1
+  [ -n "$tpg" ] && [ "$pg" = "$tpg" ]
+}
+if [ -t "$ui_fd" ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != dumb ] && ui_foreground; then
   ui_tty=1 ui_dim=$'\033[2m' ui_bold=$'\033[1m' ui_ok=$'\033[32m' ui_err=$'\033[31m' ui_off=$'\033[0m' ui_cl=$'\r\033[K'
 else
   ui_tty="" ui_dim="" ui_bold="" ui_ok="" ui_err="" ui_off="" ui_cl=""

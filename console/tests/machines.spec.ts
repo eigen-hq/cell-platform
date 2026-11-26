@@ -17,7 +17,7 @@ test("the admin sees the machines and gets a join command", async ({ page, baseU
   await expect(page.getByText("this cell takes no more machines")).toBeVisible();
 
   // The key comes apart from the command, to paste when it asks (E-64).
-  const command = "curl -fsSL https://api.cell.example/v0/nodes/join.sh | sudo bash";
+  const command = 's=$(curl -fsSL https://api.cell.example/v0/nodes/join.sh) && sudo bash -c "$s"';
   const key = `abcdef.${"x".repeat(16)}`;
   await page.route("**/v0/nodes/joins", (route) =>
     route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ command, key, expiresAt: "2030-01-01T12:00:00Z" }) }),

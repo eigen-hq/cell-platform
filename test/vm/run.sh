@@ -93,7 +93,7 @@ api() { on "$vm1" sudo bash -c 'curl -fsS --cacert /tmp/cell-ca.crt --resolve "a
 log "$vm2 joins through the API"
 { read -r cmd; read -r key; } < <(api /v0/nodes/joins -X POST | python3 -c 'import json,sys; j = json.load(sys.stdin); print(j["command"]); print(j["key"])')
 echo "$cmd"
-[[ $cmd == "curl -fsSL https://api.$domain/v0/nodes/join.sh | sudo bash" ]] || fail "unexpected join command"
+[[ $cmd == 's=$(curl -fsSL https://api.'"$domain"'/v0/nodes/join.sh) && sudo bash -c "$s"' ]] || fail "unexpected join command"
 [[ $key =~ ^([a-z0-9]{6})\.[a-z0-9]{16}$ ]] || fail "unexpected join key"
 key_id=${BASH_REMATCH[1]}
 # The test cell has no public DNS and a self-signed CA: the second VM gets

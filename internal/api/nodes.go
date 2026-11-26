@@ -226,7 +226,7 @@ func (s *Server) createJoin(w http.ResponseWriter, r *http.Request, c *Caller) e
 	writeJSON(w, http.StatusCreated, map[string]any{
 		// The key is pasted when the script asks for it: it stays out of
 		// URLs (logs) and off the command line (shell history, ps), E-64.
-		"command":   fmt.Sprintf("curl -fsSL https://%s/v0/nodes/join.sh | sudo bash", s.Join.APIHost),
+		"command":   joinCommand(s.Join.APIHost),
 		"key":       id + "." + secret,
 		"expiresAt": expires,
 	})
@@ -250,23 +250,33 @@ func (s *Server) joinScript(w http.ResponseWriter, _ *http.Request, _ *Caller) e
 # console on the terminal: the key stays off the command line (E-64).
 key=${CELL_JOIN_KEY:-}
 if [ -z "$key" ]; then
-  if ! { exec 3<>/dev/tty; } 2>/dev/null; then
-    echo "error: no terminal to ask for the join key on: run the command in a terminal (or set CELL_JOIN_KEY)" >&2
+  # Only stdin: piped into sudo, the script may run in the background of
+  # its terminal, where reading /dev/tty stops it for good.
+  if ! [ -t 0 ]; then
+    echo "error: no terminal to ask for the join key on: run this in a terminal (or set CELL_JOIN_KEY):" >&2
+    echo '  %s' >&2
     exit 1
   fi
-  printf 'Join key (from the console): ' >&3
-  IFS= read -rs key <&3 || { echo "error: no join key" >&2; exit 1; }
-  printf '\n' >&3
-  exec 3>&-
+  printf 'Join key (from the console): ' >&2
+  IFS= read -rs key || { echo "error: no join key" >&2; exit 1; }
+  printf '\n' >&2
 fi
 key=${key//[[:space:]]/}
 [[ $key =~ ^[a-z0-9]{6}\.[a-z0-9]{16}$ ]] || { echo "error: that is not a join key from the console" >&2; exit 1; }
 CELL_JOIN_SERVER=%s
 CELL_JOIN_TOKEN=K10%s::$key
 unset CELL_JOIN_KEY key
-`, s.Join.Server, s.Join.CAHash)
+`, joinCommand(s.Join.APIHost), s.Join.Server, s.Join.CAHash)
 	_, err := w.Write(s.Join.Script)
 	return err
+}
+
+// joinCommand is the command the console shows. The script is fetched
+// first, so it fails loud when the download does, and bash runs it with the
+// terminal as its input, so sudo keeps it in the foreground and it can ask
+// for the key there.
+func joinCommand(apiHost string) string {
+	return fmt.Sprintf(`s=$(curl -fsSL https://%s/v0/nodes/join.sh) && sudo bash -c "$s"`, apiHost)
 }
 
 // randomToken returns n characters from [a-z0-9].

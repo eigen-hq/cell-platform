@@ -90,8 +90,11 @@ mv "$new" "$dir"
 rm -rf "$dir.old"
 trap - EXIT
 
-# Piped into bash, stdin is this script: the installer asks on the terminal.
-if { true </dev/tty; } 2>/dev/null; then
+# Piped into bash, stdin is this script: the installer asks on the terminal,
+# when this is its foreground job (in the background, reading it would stop
+# the installer for good).
+pg_tpg=$(ps -o pgid=,tpgid= -p $$ 2>/dev/null | awk '{print ($1 == $2)}') || pg_tpg=0
+if [ "$pg_tpg" = 1 ] && { true </dev/tty; } 2>/dev/null; then
   exec "$dir/deploy/install.sh" </dev/tty
 fi
 exec "$dir/deploy/install.sh"
