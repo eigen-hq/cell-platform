@@ -2,18 +2,24 @@
 # Installs a cell on this machine, or updates it, from a release of the
 # platform:
 #
-#   curl -fsSL https://get.eigen-platform.com | sudo bash
+#   curl -fsSL https://get.eigen-platform.com | bash
+#
+# Not root, it runs through sudo itself, with the terminal as its input: so
+# sudo keeps it in the foreground and the installer can ask there (sudo-rs
+# runs a piped "| sudo bash" in the background, where reading the terminal
+# stops it for good). "| sudo bash" works too, without the questions there.
 #
 # That address serves a copy of this file (GitHub Pages, branch pages):
 # update the copy whenever this file changes.
 #
 # CELL_VERSION picks a release (default: the latest), for example
-# ... | sudo CELL_VERSION=v0.2.0 bash. Other settings pass through to
-# deploy/install.sh the same way. The release lands in /opt/cell; settings
+# ... | CELL_VERSION=v0.2.0 bash. Other settings (CELL_*, NO_COLOR) pass
+# through to deploy/install.sh the same way. The release lands in /opt/cell; settings
 # and data live elsewhere, so an update only replaces that folder.
 set -euo pipefail
 # Read as a whole before running: a download cut short runs nothing.
 {
+cell_get() {
 repo=${CELL_REPO:-eigen-hq/cell-platform}
 dir=/opt/cell
 fail() { printf '\n  error: %s\n\n' "$*" >&2; exit 1; }
@@ -65,7 +71,7 @@ release() {
   rm -rf "$dl"
 }
 
-[ "$(id -u)" -eq 0 ] || fail "run as root: curl -fsSL <this URL> | sudo bash"
+[ "$(id -u)" -eq 0 ] || fail "run as root"
 for c in curl tar; do command -v "$c" >/dev/null || fail "$c is missing (apt-get install $c)"; done
 [ ! -d "$dir/.git" ] || fail "$dir is a git clone: run deploy/install.sh there"
 
@@ -91,11 +97,26 @@ rm -rf "$dir.old"
 trap - EXIT
 
 # Piped into bash, stdin is this script: the installer asks on the terminal,
-# when this is its foreground job (in the background, reading it would stop
-# the installer for good).
-pg_tpg=$(ps -o pgid=,tpgid= -p $$ 2>/dev/null | awk '{print ($1 == $2)}') || pg_tpg=0
-if [ "$pg_tpg" = 1 ] && { true </dev/tty; } 2>/dev/null; then
-  exec "$dir/deploy/install.sh" </dev/tty
-fi
+# when this is its foreground job.
+if on_terminal; then exec "$dir/deploy/install.sh" </dev/tty; fi
 exec "$dir/deploy/install.sh"
+}
+
+# on_terminal: this is the terminal's foreground job (in the background,
+# reading the terminal would stop it for good).
+on_terminal() {
+  local fg
+  fg=$(ps -o pgid=,tpgid= -p $$ 2>/dev/null | awk '{print ($1 == $2)}') || fg=0
+  [ "$fg" = 1 ] && { true </dev/tty; } 2>/dev/null
+}
+
+if [ "$(id -u)" -ne 0 ]; then
+  command -v sudo >/dev/null || { printf '\n  error: run this as root (sudo is missing)\n\n' >&2; exit 1; }
+  # sudo drops the environment: the settings go along by name.
+  keep=$(compgen -e | grep -E '^(CELL_[A-Z0-9_]+|NO_COLOR)$' | paste -sd, -) || keep=
+  run=(sudo ${keep:+--preserve-env=$keep} bash -c "set -euo pipefail; $(declare -f cell_get on_terminal); cell_get")
+  if on_terminal; then exec "${run[@]}" </dev/tty; fi
+  exec "${run[@]}" </dev/null
+fi
+cell_get
 }

@@ -3,7 +3,9 @@ package api
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"syscall"
@@ -89,7 +91,7 @@ func TestJoin(t *testing.T) {
 
 	code, body := h.do("POST", "/v0/nodes/joins", "admin", nil)
 	m := regexp.MustCompile(`^([a-z0-9]{6})\.([a-z0-9]{16})$`).FindStringSubmatch(field(body, "key").(string))
-	if code != 201 || m == nil || field(body, "command") != `s=$(curl -fsSL https://api.x/v0/nodes/join.sh) && sudo bash -c "$s"` ||
+	if code != 201 || m == nil || field(body, "command") != `curl -fsSL https://api.x/v0/nodes/join.sh | bash` ||
 		field(body, "expiresAt") != "2026-11-19T13:00:00Z" {
 		t.Fatalf("join: %d %v", code, body)
 	}
@@ -109,7 +111,7 @@ func TestJoin(t *testing.T) {
 	code, body = h.do("GET", "/v0/nodes/join.sh", "", nil)
 	script, _ := body.(string)
 	if code != 200 || !strings.HasPrefix(script, "#!/usr/bin/env bash\n") || !strings.Contains(script, "\nCELL_JOIN_SERVER=203.0.113.1\n") ||
-		!strings.Contains(script, "\nCELL_JOIN_TOKEN=K10ab12::$key\n") || !strings.HasSuffix(script, "K3S_VERSION=v1\nsay hi\n") ||
+		!strings.Contains(script, "\nCELL_JOIN_TOKEN=K10ab12::$key\n") || !strings.Contains(script, "K3S_VERSION=v1\nsay hi\nCELL_JOIN_SCRIPT\n") ||
 		strings.Contains(script, m[2]) {
 		t.Errorf("script: %d %q", code, script)
 	}
@@ -123,10 +125,17 @@ func TestJoinScriptKey(t *testing.T) {
 		Script: []byte(`printf '%s|%s|%s' "$CELL_JOIN_SERVER" "$CELL_JOIN_TOKEN" "${CELL_JOIN_KEY-unset}"` + "\n")}
 	_, body := h.do("GET", "/v0/nodes/join.sh", "", nil)
 	script, _ := body.(string)
+	// Not root, the script runs the join through sudo: a stand-in runs it
+	// as this user.
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "sudo"), []byte("#!/bin/sh\ncase $1 in --preserve-env=*) shift ;; esac\nexec \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	run := func(env ...string) (string, error) {
 		cmd := exec.Command("bash", "-c", script)
-		cmd.Env = env
-		// No terminal: stdin is /dev/null, as with curl piped into sudo.
+		cmd.Env = append(env, "PATH="+bin+":/usr/bin:/bin")
+		// No terminal: as with curl piped into sudo-rs, which runs it in the
+		// background.
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 		out, err := cmd.CombinedOutput()
 		return string(out), err
@@ -136,7 +145,7 @@ func TestJoinScriptKey(t *testing.T) {
 		t.Errorf("key from the environment: %v %q", err, out)
 	}
 	if out, err := run(); err == nil || !strings.Contains(out, "no terminal to ask for the join key") ||
-		!strings.Contains(out, `  s=$(curl -fsSL https://api.x/v0/nodes/join.sh) && sudo bash -c "$s"`) {
+		!strings.Contains(out, `  curl -fsSL https://api.x/v0/nodes/join.sh | bash`) {
 		t.Errorf("no terminal and no key: %v %q", err, out)
 	}
 	if out, err := run("CELL_JOIN_KEY=abc123.xxxxxxxxxxxxxxxX"); err == nil || !strings.Contains(out, "not a join key") {

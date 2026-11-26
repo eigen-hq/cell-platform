@@ -23,7 +23,7 @@ make cell-down   # delete the local cell
 On your own server, for installation and update (requirements and steps in `docs/installation.md`):
 
 ```
-curl -fsSL https://get.eigen-platform.com | sudo bash
+curl -fsSL https://get.eigen-platform.com | bash
 ```
 
 This fetches the latest release to `/opt/cell`, builds the image on the server and installs; `CELL_VERSION=v0.2.0` before `bash` selects a specific one. From a clone: `sudo deploy/install.sh`.

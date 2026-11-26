@@ -239,19 +239,33 @@ func (s *Server) createJoin(w http.ResponseWriter, r *http.Request, c *Caller) e
 // for a run without one), and k3s on the server checks the key when the
 // machine joins. Once the machine is in, the operator deletes the key
 // (E-64).
+//
+// Piped into bash as the user, it runs the join through sudo itself, with
+// the terminal as its input: so sudo keeps it in the foreground (sudo-rs
+// runs a piped "| sudo bash" in the background, where reading the terminal
+// stops it for good) and it can ask for the password and the key.
 func (s *Server) joinScript(w http.ResponseWriter, _ *http.Request, _ *Caller) error {
 	if s.Join == nil {
 		return errorf(http.StatusConflict, "this cell takes no more machines (it runs on one machine only)")
 	}
+	cmd := joinCommand(s.Join.APIHost)
 	w.Header().Set("Content-Type", "text/x-shellscript")
 	w.Header().Set("Cache-Control", "no-store")
 	fmt.Fprintf(w, `#!/usr/bin/env bash
-# Joins this machine to the cell (E-44). It asks for the join key from the
-# console on the terminal: the key stays off the command line (E-64).
+# Joins this machine to the cell (E-44):
+#
+#   %s
+#
+# It asks for the join key from the console on the terminal: the key stays
+# off the command line (E-64).
+set -euo pipefail
+# Read as a whole before running: a download cut short runs nothing.
+{
+f=$(mktemp)
+trap 'rm -f "$f"' EXIT
+cat >"$f" <<'CELL_JOIN_SCRIPT'
 key=${CELL_JOIN_KEY:-}
 if [ -z "$key" ]; then
-  # Only stdin: piped into sudo, the script may run in the background of
-  # its terminal, where reading /dev/tty stops it for good.
   if ! [ -t 0 ]; then
     echo "error: no terminal to ask for the join key on: run this in a terminal (or set CELL_JOIN_KEY):" >&2
     echo '  %s' >&2
@@ -266,17 +280,29 @@ key=${key//[[:space:]]/}
 CELL_JOIN_SERVER=%s
 CELL_JOIN_TOKEN=K10%s::$key
 unset CELL_JOIN_KEY key
-`, joinCommand(s.Join.APIHost), s.Join.Server, s.Join.CAHash)
-	_, err := w.Write(s.Join.Script)
+`, cmd, cmd, s.Join.Server, s.Join.CAHash)
+	if _, err := w.Write(s.Join.Script); err != nil {
+		return err
+	}
+	_, err := fmt.Fprint(w, `CELL_JOIN_SCRIPT
+# The join gets the terminal as its input only as the terminal's foreground
+# job: in the background, reading it would stop the join for good.
+fg=$(ps -o pgid=,tpgid= -p $$ 2>/dev/null | awk '{print ($1 == $2)}') || fg=0
+run=(bash "$f")
+[ "$(id -u)" -eq 0 ] || run=(sudo ${CELL_JOIN_KEY:+--preserve-env=CELL_JOIN_KEY} bash "$f")
+if [ "$fg" = 1 ] && { true </dev/tty; } 2>/dev/null; then
+  "${run[@]}" </dev/tty
+else
+  "${run[@]}" </dev/null
+fi
+}
+`)
 	return err
 }
 
-// joinCommand is the command the console shows. The script is fetched
-// first, so it fails loud when the download does, and bash runs it with the
-// terminal as its input, so sudo keeps it in the foreground and it can ask
-// for the key there.
+// joinCommand is the command the console shows.
 func joinCommand(apiHost string) string {
-	return fmt.Sprintf(`s=$(curl -fsSL https://%s/v0/nodes/join.sh) && sudo bash -c "$s"`, apiHost)
+	return fmt.Sprintf(`curl -fsSL https://%s/v0/nodes/join.sh | bash`, apiHost)
 }
 
 // randomToken returns n characters from [a-z0-9].

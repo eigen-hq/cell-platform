@@ -61,7 +61,7 @@ The examples show the Hetzner Cloud Console; with other providers the settings h
 Log in to the server over SSH and run:
 
 ```bash
-curl -fsSL https://get.eigen-platform.com | sudo bash
+curl -fsSL https://get.eigen-platform.com | bash
 ```
 
 The command downloads the latest release and asks for the domain and the email address. Before it sets anything up, it checks the DNS record and the ports and stops with an explanation if something is missing.
@@ -129,13 +129,13 @@ Administrators and members of the group `cell-mesh` are allowed. You manage grou
 The same command as for the installation fetches the latest release:
 
 ```bash
-curl -fsSL https://get.eigen-platform.com | sudo bash
+curl -fsSL https://get.eigen-platform.com | bash
 ```
 
 All settings and data are kept. You install a specific release with `CELL_VERSION`:
 
 ```bash
-curl -fsSL https://get.eigen-platform.com | sudo CELL_VERSION=v0.2.0 bash
+curl -fsSL https://get.eigen-platform.com | CELL_VERSION=v0.2.0 bash
 ```
 
 ## If something goes wrong
@@ -171,7 +171,7 @@ For an installation without prompts, for example from a script, set settings as 
 
 ```bash
 curl -fsSL https://get.eigen-platform.com |
-  sudo CELL_DOMAIN=cell.example.com CELL_ACME_EMAIL=ops@example.com bash
+  CELL_DOMAIN=cell.example.com CELL_ACME_EMAIL=ops@example.com bash
 ```
 
 The installation saves them in `/etc/cell/install.env`; later runs do not need them again.
