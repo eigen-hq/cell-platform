@@ -280,8 +280,10 @@ func (r *BackupReconciler) encryptArchive(ctx context.Context, b *cellv1.Backup,
 
 // catalogCheck is how often the barman-cloud plugin lists the archive of
 // the cluster's current configuration and records its last base backup
-// in the ObjectStore (plugin default 30 minutes).
-const catalogCheck = 5 * time.Minute
+// in the ObjectStore: the plugin's default. Each check starts barman-cloud
+// processes and lists the archive through the gateway, per database; it
+// matters only when the plugin's own record after a backup failed.
+const catalogCheck = 30 * time.Minute
 
 // archiveConfirm bounds the wait for that record: one catalog check and
 // some margin.
