@@ -361,6 +361,7 @@ paths:
   /v0/groups:
     get:
       operationId: listGroups
+      description: The groups the cell grants access through. The platform's own group and authentik's built-in groups (names starting with "authentik ") are not shown and cannot be joined or created.
       responses:
         default: {$ref: "#/components/responses/Error"}
         "200":

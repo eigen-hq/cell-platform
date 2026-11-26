@@ -460,7 +460,7 @@ func TestCreateAppPasswordChecksOwner(t *testing.T) {
 // group change through the API.
 func TestPlatformAccountHidden(t *testing.T) {
 	api := newFakeAPI()
-	api.objects["core/users/"] = []map[string]any{{"pk": 7, "username": PlatformAccount}, {"pk": 9, "username": "alice"}}
+	api.objects["core/users/"] = []map[string]any{{"pk": 7, "username": PlatformAccount}, {"pk": 9, "username": "alice", "groups_obj": []any{map[string]any{"name": "finance"}, map[string]any{"name": "authentik Admins"}}}}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		q.Del("include_users")
@@ -471,22 +471,34 @@ func TestPlatformAccountHidden(t *testing.T) {
 	c := &Client{BaseURL: srv.URL, Token: "t", HTTP: srv.Client()}
 	ctx := context.Background()
 	users, err := c.ListUsers(ctx)
-	if err != nil || len(users) != 1 || users[0].Username != "alice" {
+	if err != nil || len(users) != 1 || users[0].Username != "alice" || len(users[0].Groups) != 1 || users[0].Groups[0] != "finance" {
 		t.Errorf("users %v, err %v", users, err)
 	}
 	if _, err := c.CreateAppPassword(ctx, PlatformAccount); !errors.Is(err, ErrNotFound) {
 		t.Errorf("app password for the platform account: %v", err)
 	}
-	api.objects["core/groups/"] = []map[string]any{{"pk": "g-1", "name": "finance"}, {"pk": "g-2", "name": PlatformAccount}}
+	api.objects["core/groups/"] = []map[string]any{{"pk": "g-1", "name": "finance"}, {"pk": "g-2", "name": PlatformAccount}, {"pk": "g-3", "name": "authentik Read-only"}}
 	if _, err := c.ChangeGroupMembers(ctx, "finance", []string{PlatformAccount}, nil); !errors.Is(err, ErrNotFound) {
 		t.Errorf("adding the platform account to a group: %v", err)
 	}
-	// Its superuser group: not listed, nobody joins it.
+	// Its superuser group and authentik's built-in groups: not listed,
+	// nobody joins them, no new group takes their names.
 	if groups, err := c.ListGroups(ctx); err != nil || len(groups) != 1 || groups[0].Name != "finance" {
 		t.Errorf("groups %v, err %v", groups, err)
 	}
-	if _, err := c.ChangeGroupMembers(ctx, PlatformAccount, []string{"alice"}, nil); !errors.Is(err, ErrNotFound) {
-		t.Errorf("joining the platform's group: %v", err)
+	if _, err := c.CreateGroup(ctx, " authentik custom "); !errors.Is(err, ErrReserved) {
+		t.Errorf("a reserved name behind spaces: %v", err)
+	}
+	if _, err := c.CreateGroup(ctx, "\u001cauthentik custom"); !errors.Is(err, ErrInvalidName) {
+		t.Errorf("a reserved name behind a control character: %v", err)
+	}
+	for _, g := range []string{PlatformAccount, "authentik Read-only"} {
+		if _, err := c.ChangeGroupMembers(ctx, g, []string{"alice"}, nil); !errors.Is(err, ErrNotFound) {
+			t.Errorf("joining %s: %v", g, err)
+		}
+		if _, err := c.CreateGroup(ctx, g); !errors.Is(err, ErrReserved) {
+			t.Errorf("a new group %s: %v", g, err)
+		}
 	}
 	for _, call := range api.calls {
 		if strings.HasPrefix(call, "POST core/tokens/") || strings.HasPrefix(call, "POST core/groups/g-") {
@@ -502,7 +514,7 @@ func TestSuperuserRightsStayInAuthentik(t *testing.T) {
 	api := newFakeAPI()
 	api.objects["core/users/"] = []map[string]any{{"pk": 1, "username": "root", "is_superuser": true}, {"pk": 9, "username": "alice"}}
 	api.objects["core/groups/"] = []map[string]any{
-		{"pk": "g-admins", "name": "authentik Admins", "is_superuser": true, "parents": []any{}},
+		{"pk": "g-admins", "name": "admins", "is_superuser": true, "parents": []any{}},
 		{"pk": "g-child", "name": "child", "parents": []any{"g-admins"}},
 		{"pk": "g-grand", "name": "grand", "parents": []any{"g-other", "g-child"}},
 		{"pk": "g-other", "name": "other", "parents": []any{}},
@@ -515,7 +527,7 @@ func TestSuperuserRightsStayInAuthentik(t *testing.T) {
 	if _, err := c.CreateAppPassword(ctx, "root"); !errors.Is(err, ErrSuperuser) {
 		t.Errorf("app password for a superuser: %v", err)
 	}
-	for _, g := range []string{"authentik Admins", "child", "grand", "orphan"} {
+	for _, g := range []string{"admins", "child", "grand", "orphan"} {
 		if _, err := c.ChangeGroupMembers(ctx, g, []string{"alice"}, nil); !errors.Is(err, ErrSuperuser) {
 			t.Errorf("joining %s: %v", g, err)
 		}
@@ -526,8 +538,8 @@ func TestSuperuserRightsStayInAuthentik(t *testing.T) {
 			t.Errorf("a new user in %s: %v", g, err)
 		}
 	}
-	if _, err := c.ChangeGroupMembers(ctx, "authentik Admins", nil, []string{"root"}); !errors.Is(err, ErrSuperuser) {
-		t.Errorf("leaving authentik Admins: %v", err)
+	if _, err := c.ChangeGroupMembers(ctx, "admins", nil, []string{"root"}); !errors.Is(err, ErrSuperuser) {
+		t.Errorf("leaving admins: %v", err)
 	}
 	if su, err := c.grantsSuperuser(ctx, api.objects["core/groups/"][3]); su || err != nil {
 		t.Errorf("a group without superuser parents: %v %v", su, err)

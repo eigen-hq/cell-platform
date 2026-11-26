@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/eigen-hq/cell-platform/internal/authentik"
 )
@@ -27,6 +28,12 @@ func identityError(err error) error {
 	}
 	if errors.Is(err, authentik.ErrSuperuser) {
 		return errorf(http.StatusForbidden, "%v", err)
+	}
+	if errors.Is(err, authentik.ErrInvalidName) {
+		return errorf(http.StatusBadRequest, "%v", err)
+	}
+	if errors.Is(err, authentik.ErrReserved) {
+		return errorf(http.StatusConflict, "%v", err)
 	}
 	return err
 }
@@ -129,7 +136,7 @@ func (s *Server) createGroup(w http.ResponseWriter, r *http.Request, _ *Caller) 
 	if err := readJSON(r, &req); err != nil {
 		return err
 	}
-	if req.Name == "" {
+	if strings.TrimSpace(req.Name) == "" {
 		return errorf(http.StatusBadRequest, "name is required")
 	}
 	g, err := s.Identity.CreateGroup(r.Context(), req.Name)

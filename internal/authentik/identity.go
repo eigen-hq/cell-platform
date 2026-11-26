@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"unicode"
 )
 
 // People, groups and API access.
@@ -20,6 +21,13 @@ var ErrNotFound = errors.New("not found")
 // superuser rights: those are managed in authentik itself, never through
 // the platform API.
 var ErrSuperuser = errors.New("authentik superuser rights are managed in authentik itself")
+
+// ErrReserved is returned for a new group with a name the platform or
+// authentik keeps for itself.
+var ErrReserved = errors.New("the name is reserved for the platform")
+
+// ErrInvalidName is returned for a name with control characters.
+var ErrInvalidName = errors.New("the name holds control characters")
 
 // Duplicate reports whether a 400 answer means "already exists" (authentik
 // words it either way, depending on the field).
@@ -74,6 +82,13 @@ func internalUser(username string) bool {
 	return username == "AnonymousUser" || username == PlatformAccount || strings.HasPrefix(username, "ak-outpost-")
 }
 
+// internalGroup hides the platform's superuser group and authentik's own
+// built-in groups ("authentik Admins", "authentik Read-only", ...): the cell
+// grants access through its cell-* and app groups only.
+func internalGroup(name string) bool {
+	return name == PlatformAccount || strings.HasPrefix(name, "authentik ")
+}
+
 func names(objs any, key string) []string {
 	list, _ := objs.([]any)
 	var out []string
@@ -92,7 +107,12 @@ func (c *Client) ListUsers(ctx context.Context) ([]User, error) {
 	}
 	var users []User
 	for _, o := range objs {
-		u := User{Username: fmt.Sprint(o["username"]), Name: fmt.Sprint(o["name"]), Email: fmt.Sprint(o["email"]), Groups: names(o["groups_obj"], "name")}
+		u := User{Username: fmt.Sprint(o["username"]), Name: fmt.Sprint(o["name"]), Email: fmt.Sprint(o["email"])}
+		for _, g := range names(o["groups_obj"], "name") {
+			if !internalGroup(g) {
+				u.Groups = append(u.Groups, g)
+			}
+		}
 		if !internalUser(u.Username) {
 			users = append(users, u)
 		}
@@ -116,10 +136,10 @@ func (c *Client) userPK(ctx context.Context, username string) (any, error) {
 	return u["pk"], nil
 }
 
-// groupObj finds a group by name. The platform account's superuser group
-// counts as missing, so nobody joins it through the API.
+// groupObj finds a group by name. Hidden groups count as missing, so nobody
+// joins or leaves them through the API.
 func (c *Client) groupObj(ctx context.Context, name string) (map[string]any, error) {
-	if name == PlatformAccount {
+	if internalGroup(name) {
 		return nil, fmt.Errorf("group %q: %w", name, ErrNotFound)
 	}
 	g, err := c.find(ctx, "core/groups/", url.Values{"name": {name}})
@@ -295,7 +315,7 @@ func (c *Client) ListGroups(ctx context.Context) ([]Group, error) {
 	var groups []Group
 	for _, o := range objs {
 		g := Group{Name: fmt.Sprint(o["name"])}
-		if g.Name == PlatformAccount {
+		if internalGroup(g.Name) {
 			continue
 		}
 		for _, u := range names(o["users_obj"], "username") {
@@ -308,7 +328,17 @@ func (c *Client) ListGroups(ctx context.Context) ([]Group, error) {
 	return groups, nil
 }
 
+// CreateGroup refuses control characters (Python's strip in authentik
+// removes some that Go keeps) and trims the name as authentik does, so the
+// reserved-name check sees the name authentik stores.
 func (c *Client) CreateGroup(ctx context.Context, name string) (Group, error) {
+	if strings.ContainsFunc(name, unicode.IsControl) {
+		return Group{}, fmt.Errorf("group %q: %w", name, ErrInvalidName)
+	}
+	name = strings.TrimSpace(name)
+	if internalGroup(name) {
+		return Group{}, fmt.Errorf("group %q: %w", name, ErrReserved)
+	}
 	if err := c.do(ctx, http.MethodPost, "core/groups/", map[string]any{"name": name}, nil); err != nil {
 		return Group{}, err
 	}
