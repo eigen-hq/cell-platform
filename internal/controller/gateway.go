@@ -25,6 +25,11 @@ const (
 	GatewayConfig = "cell-mcp"
 	// GatewayClient is the identity's client the gateway's tokens are for.
 	GatewayClient = "cell-mcp"
+	// GatewayTokenValidity is how long a token for the gateway lasts. The
+	// gateway checks tokens offline (signature and expiry, no revocation),
+	// so this bounds how long a stolen token or a removed access still
+	// works (E-74).
+	GatewayTokenValidity = "minutes=5"
 )
 
 // GatewayReconciler writes the configuration of the MCP gateway

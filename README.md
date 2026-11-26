@@ -40,10 +40,11 @@ curl -H 'Authorization: Bearer <access_token>' -d '{"catalog":"forgejo"}' https:
 curl -H 'Authorization: Bearer <access_token>' -X POST https://api.cell.localhost/v0/changes/<name>/approve
 ```
 
-For the MCP gateway you get the token the same way, only with `client_id=cell-mcp`, and enter it in the MCP client as a header, for example:
+For the MCP gateway you get the token the same way, only with `client_id=cell-mcp`. It lasts five minutes (E-74), so let the MCP client fetch a new one itself, for example Claude Code with a `headersHelper` in `.mcp.json`. The helper reads the app password from a file (written without a line break, `printf %s '<app password>' > ~/.config/cell/app-password`, then `chmod 600`), because Claude Code hides variables with names like `PASSWORD` from a project's helper:
 
 ```
-claude mcp add --transport http cell https://mcp.cell.localhost/mcp --header 'Authorization: Bearer <access_token>'
+{"mcpServers": {"cell": {"type": "http", "url": "https://mcp.cell.localhost/mcp",
+  "headersHelper": "curl -fsS -d grant_type=client_credentials -d client_id=cell-mcp -d username=akadmin --data-urlencode password@$HOME/.config/cell/app-password -d 'scope=openid profile' https://auth.cell.localhost/application/o/token/ | jq -c '{Authorization: (\"Bearer \" + .access_token)}'"}}}
 ```
 
 ## Reading order

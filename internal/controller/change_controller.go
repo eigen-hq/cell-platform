@@ -291,10 +291,7 @@ func (r *ChangeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		if appReadyAt(&app, cr.Status.AppliedGeneration) {
 			return end(cellv1.RunSucceeded, "app healthy with the change")
 		}
-		timeout := time.Duration(app.Spec.Health.TimeoutSeconds) * time.Second
-		if timeout == 0 {
-			timeout = 300 * time.Second
-		}
+		timeout := healthDeadline(&app, cr.Status.AppliedGeneration)
 		if r.now().Sub(cr.Status.AppliedAt.Time) < timeout {
 			return set(cellv1.RunRunning, "waiting for the health check", wait)
 		}
@@ -449,10 +446,7 @@ func (r *ChangeReconciler) installed(cr *cellv1.ChangeRequest, app *cellv1.App, 
 	if appReadyAt(app, cr.Status.AppliedGeneration) {
 		return end(cellv1.RunSucceeded, "app installed and healthy")
 	}
-	timeout := time.Duration(app.Spec.Health.TimeoutSeconds) * time.Second
-	if timeout == 0 {
-		timeout = 300 * time.Second
-	}
+	timeout := healthDeadline(app, cr.Status.AppliedGeneration)
 	if r.now().Sub(cr.Status.AppliedAt.Time) < timeout {
 		return set(cellv1.RunRunning, "waiting for the health check", 5*time.Second)
 	}
@@ -532,10 +526,7 @@ func (r *ChangeReconciler) restore(ctx context.Context, cr *cellv1.ChangeRequest
 	if appReadyAt(app, app.Generation) {
 		return end(cellv1.RunSucceeded, "backup "+cr.Spec.Backup+" restored, app healthy")
 	}
-	timeout := time.Duration(app.Spec.Health.TimeoutSeconds) * time.Second
-	if timeout == 0 {
-		timeout = 300 * time.Second
-	}
+	timeout := healthDeadline(app, app.Generation)
 	if rs.Status.CompletedAt != nil && r.now().Sub(rs.Status.CompletedAt.Time) > timeout {
 		reason := "no condition"
 		if c := apimeta.FindStatusCondition(app.Status.Conditions, condReady); c != nil {

@@ -241,7 +241,11 @@ func (r *AppReconciler) setPhase(app *cellv1.App, healthy bool, msg string, act 
 		}
 		return
 	}
-	r.condition(app, condReady, false, "Unhealthy", msg)
+	reason := "Unhealthy"
+	if strings.HasPrefix(msg, loginProxyPrefix) {
+		reason = reasonLoginProxy
+	}
+	r.condition(app, condReady, false, reason, msg)
 	if act.phase != "" {
 		app.Status.Phase = act.phase
 		return
@@ -264,11 +268,36 @@ func (r *AppReconciler) unhealthyTooLong(app *cellv1.App) (time.Time, bool) {
 	if c == nil || c.Status != metav1.ConditionFalse {
 		return time.Time{}, false
 	}
+	return c.LastTransitionTime.Time, r.now().Sub(c.LastTransitionTime.Time) > healthDeadline(app, app.Generation)
+}
+
+const (
+	// loginProxyPrefix starts the message of an app that passes its own
+	// health check but is not served by the login proxy yet.
+	loginProxyPrefix = "login proxy: "
+	reasonLoginProxy = "LoginProxyPending"
+	// loginProxyGrace is the extra time such an app gets: the outpost can
+	// take minutes to pick up a new app (its websocket reconnects after up
+	// to 300 s), which is not the app's fault (E-75).
+	loginProxyGrace = 10 * time.Minute
+)
+
+// healthDeadline is how long the app may fail its health check for the
+// given spec generation: the manifest's timeout, plus loginProxyGrace while
+// the app passes its own check for that generation and waits only for the
+// login proxy.
+func healthDeadline(app *cellv1.App, generation int64) time.Duration {
 	timeout := time.Duration(app.Spec.Health.TimeoutSeconds) * time.Second
 	if timeout == 0 {
 		timeout = 300 * time.Second
 	}
-	return c.LastTransitionTime.Time, r.now().Sub(c.LastTransitionTime.Time) > timeout
+	c := apimeta.FindStatusCondition(app.Status.Conditions, condReady)
+	// The condition's own generation, not the status's: setPhase asks
+	// before the status records the generation it just checked.
+	if c != nil && c.Status == metav1.ConditionFalse && c.Reason == reasonLoginProxy && c.ObservedGeneration >= generation {
+		timeout += loginProxyGrace
+	}
+	return timeout
 }
 
 func (r *AppReconciler) condition(app *cellv1.App, typ string, ok bool, reason, msg string) {
@@ -392,7 +421,7 @@ func (r *AppReconciler) install(ctx context.Context, app *cellv1.App, target *ba
 			return false, "", err
 		}
 		if err := r.forwardAuth(ctx, host, clientID); err != nil {
-			return false, "login proxy: " + err.Error(), nil
+			return false, loginProxyPrefix + err.Error(), nil
 		}
 	}
 	return true, "", nil

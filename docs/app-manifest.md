@@ -76,7 +76,7 @@ spec:
 | `access` | `subdomain` (not `auth`, `api` and `mcp`, which belong to the cell; only once per cell: a host that another route already serves stays with that route; otherwise the operator reserves the host atomically as ConfigMap `host-<subdomain>` in `cell-system` before it sets anything up; whoever reserves first keeps it until its routes have left it or the app is removed), `port`, `service` (default: app name), `auth`, `groups` |
 | `access.auth` | `mode`, `redirectPaths` (OIDC callback paths), `secretKeys` (key names in the client secret, as the chart or app expects them) |
 | `access.groups` | Groups of the identity service whose members may use the app; empty means all users of the cell. Needs a login (`oidc` or `proxy`); others are rejected at login |
-| `health` | `path` (default `/`) and `timeoutSeconds` (default 300), see Status. Also the deadline within which an update must become healthy |
+| `health` | `path` (default `/`) and `timeoutSeconds` (default 300), see Status. Also the deadline within which an update must become healthy. An app that passes its own check and waits only for the login proxy gets 10 minutes more (E-75) |
 | `mcp` | `path` of the MCP endpoint of the app (Streamable HTTP on `access.port`). Once the app has been healthy, the MCP gateway of the cell offers its tools, with the app name in front (`notes_memo_list_memos`), only to accounts that may use the app (`access.groups`). The status shows the internal address (`mcpEndpoint`) |
 | `backup.schedule` | `none`, `hourly`, `daily` (default), `weekly`. Apps with a database or volumes are backed up, the first time right after installation. Retention is 30 days |
 
@@ -115,7 +115,7 @@ In this order, each step with its own condition in the status:
 3. Login client in authentik (`LoginReady`); rewritten on spec change, after an operator restart and every 10 minutes, so that drift heals
 4. Workload (`WorkloadReady`): image apps as Deployment (strategy `Recreate`), Service, PVCs; Helm apps as Flux `OCIRepository`/`HelmRepository` and `HelmRelease`
 5. Ingress with certificate from the ClusterIssuer `cell`; with `proxy` additionally middleware and outpost route
-6. Health check directly against the service (`Ready`)
+6. Health check directly against the service (`Ready`); with `proxy` then the check through the outpost, as a browser would come (`Ready=False` with reason `LoginProxyPending` while only this one fails)
 
 Image apps trust the cell CA automatically (mounted bundle, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`). Helm apps mount `{{ .cell.caConfigMap }}` through their chart values. In local cells (`*.localhost`) image apps additionally get the loopback bridge (E-21).
 

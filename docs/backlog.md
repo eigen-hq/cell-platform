@@ -109,8 +109,8 @@ What is wanted and tried out happens in the office UI; the platform builds, oper
 |---|---|---|
 | Own service account in authentik with narrow permissions | open | |
 | Pin third-party images by digest | running (`deploy/images.lock`, E-76) | |
-| Short-lived tokens for the tool gateway | open | |
-| Do not count the wait for the login proxy against the deadline of the app | open | |
+| Short-lived tokens for the tool gateway | built (E-74) | |
+| Do not count the wait for the login proxy against the deadline of the app | built (E-75) | |
 | Restart of an app as an API action | open | |
 | Console: hide actions for viewers | open | |
 | Encrypt database backups and their WAL in the cell before they leave it (today only volume backups are encrypted with the backup key) | open | |

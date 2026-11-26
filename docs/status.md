@@ -72,6 +72,7 @@ Status 2026-11-19: Helm through Flux (E-18), manifest sharpened (`app-manifest.m
 | Removal keeps data | same test deletes the app, checks namespace and volumes, reinstalls and signs in again | passed |
 | Apps isolated (E-45) | `make e2e`, `TestReferenceApps`: a pod outside the platform does not reach the service of the app, one in the namespace of the app does; a privileged pod is rejected. Helm apps run as the `helm-deployer` of the namespace (envtest) | passed (2026-11-25) for Forgejo, Nextcloud, custom-build placeholder; full `make e2e` afterwards 15 min green |
 | Operator logic | `make test`: envtest with a real API server (database first, placeholder, login, proxy, Helm, `NeedsAttention`, removal) | passed |
+| Login proxy wait outside the deadline (E-75) | envtest `TestLoginProxyWait`: a `proxy` app whose own check passes and whose outpost does not answer yet is still installing 2 min into a 60 s timeout (fails without the change: the install ended as failed), succeeds once the outpost answers; a ready app whose outpost drops out is not `NeedsAttention` after 5 min, but is after 12; `TestHealthDeadline`: the extra time holds only for the generation that passed its own check | passed; open: a real outpost delay on a fresh proxy app in the daily run |
 | Local run times | first installation including image download | custom-build placeholder 10 s, Forgejo about 2 min, Nextcloud about 2 min |
 
 ### Day-2 operations
@@ -131,6 +132,7 @@ Status 2026-11-20: agentgateway as MCP gateway, configured by the operator from 
 | No access, no tools | same check: an account outside the group sees only `notes_*`, its call to a `journal_*` tool is rejected; without a token or with a token of the API the gateway answers 401, a token of the gateway is not valid at the API | passed |
 | Access rules | `make test`, `TestGatewayConfig`: the rules evaluated with cel-go, also with group names that contain CEL themselves; apps without `mcp`, apps never healthy and deleted apps are missing | passed |
 | Memory | gateway idle, local cell | 11 MiB |
+| Short-lived tokens (E-74) | `go test ./internal/authentik`, `TestEnsureAPIClientTokenValidity`: the provider `cell-mcp` gets `minutes=5`, one made before with `hours=1` is changed to it, `cell-api` keeps the default (fails without the change); `TestMCPGateway` checks `exp - iat` of a gateway token is at most 5 min | unit test passed; open: token lifetime and the change of an existing provider by the installer rerun, in the daily run |
 
 ### Console
 
