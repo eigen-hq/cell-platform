@@ -5,7 +5,11 @@ import (
 	"errors"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"github.com/eigen-hq/cell-platform/internal/authentik"
+	"github.com/eigen-hq/cell-platform/internal/cell"
 )
 
 // Mail is taken only after its check passes; an invite mails the link once
@@ -35,6 +39,17 @@ func TestMailAndInvites(t *testing.T) {
 	if code, body = h.do("PUT", "/v0/mail", "admin", smtp); code != 200 || field(body, "port") != float64(587) {
 		t.Fatalf("set mail: %d %v", code, body)
 	}
+	// The API writes only Secret cell-mail; the operator sets the identity
+	// from it (TestMailSync).
+	var s corev1.Secret
+	if err := h.server.Kube.Get(context.Background(), client.ObjectKey{Namespace: "cell-system", Name: "cell-mail"}, &s); err != nil || string(s.Data["password"]) != "pw" || string(s.Data["port"]) != "587" {
+		t.Fatalf("mail settings for the operator: %v %v", err, s.Data)
+	}
+	m, err := cell.ReadMail(s.Data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.server.Identity.(*fakeIdentity).setMail(m)
 	if code, body = h.do("GET", "/v0/mail", "admin", nil); code != 200 || field(body, "configured") != true || field(body, "password") != nil {
 		t.Errorf("mail after: %d %v", code, body)
 	}

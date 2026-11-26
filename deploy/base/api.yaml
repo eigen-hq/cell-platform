@@ -223,8 +223,8 @@ spec:
     - name: api
       expression: "request.userInfo.username == 'system:serviceaccount:cell-system:cell-api'"
   validations:
-    - expression: "object.metadata.name in ['backup-target-request', 'cell-agent-llm'] && object.type == 'Opaque'"
-      message: "in cell-system the platform API only creates the request for a new backup target and the model provider"
+    - expression: "object.metadata.name in ['backup-target-request', 'cell-agent-llm', 'cell-mail'] && object.type == 'Opaque'"
+      message: "in cell-system the platform API only creates the request for a new backup target, the model provider and the mail server"
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -248,7 +248,7 @@ rules:
     verbs: [get]
   - apiGroups: [""]
     resources: [secrets]
-    resourceNames: [cell-agent-llm]
+    resourceNames: [cell-agent-llm, cell-mail]
     verbs: [patch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

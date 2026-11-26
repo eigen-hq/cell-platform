@@ -22,6 +22,8 @@ const (
 	Issuer = "cell"
 	// AgentGroup gives its members the agent role in the platform API.
 	AgentGroup = "cell-agents"
+	// AdminGroup gives its members the admin role in the platform API.
+	AdminGroup = "cell-admins"
 	// AgentAccount is the ops agent's account in the identity; its
 	// credentials are the Secret of the same name in SystemNamespace.
 	AgentAccount = "cell-agent"

@@ -2,17 +2,22 @@ package api
 
 import (
 	"context"
-	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/mail"
-	"net/smtp"
-	"strconv"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"github.com/eigen-hq/cell-platform/internal/authentik"
+	"github.com/eigen-hq/cell-platform/internal/cell"
 )
 
 // System mail and invites (E-79): the cell sends through an SMTP server the
@@ -81,8 +86,24 @@ func (s *Server) setMail(w http.ResponseWriter, r *http.Request, _ *Caller) erro
 	if err := check(r.Context(), m); err != nil {
 		return errorf(http.StatusBadRequest, "mail server check failed: %v", err)
 	}
-	if err := s.Identity.SetMail(r.Context(), m); err != nil {
-		return identityError(err)
+	// Secret cell-mail is the one truth (E-82): the operator sets the
+	// identity's mail stage from it, which sends invites, and mails warnings
+	// with it. The last admin to save wins in both.
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: cell.SystemNamespace, Name: cell.MailSettings}}
+	patch, err := json.Marshal(map[string]any{"data": m.Data()})
+	if err != nil {
+		return err
+	}
+	err = s.Kube.Patch(r.Context(), secret, client.RawPatch(types.MergePatchType, patch))
+	if apierrors.IsNotFound(err) {
+		secret.Type, secret.Data = corev1.SecretTypeOpaque, m.Data()
+		err = s.Kube.Create(r.Context(), secret)
+		if apierrors.IsAlreadyExists(err) {
+			err = s.Kube.Patch(r.Context(), secret, client.RawPatch(types.MergePatchType, patch))
+		}
+	}
+	if err != nil {
+		return err
 	}
 	writeJSON(w, http.StatusOK, mailView{Configured: true, Host: m.Host, Port: m.Port, Username: m.Username, From: m.From, TLS: m.TLS})
 	return nil
@@ -105,42 +126,11 @@ func validHost(h string) bool {
 func checkSMTP(ctx context.Context, m authentik.Mail) error {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	addr := net.JoinHostPort(m.Host, strconv.Itoa(m.Port))
-	tlsConfig := &tls.Config{ServerName: m.Host, MinVersion: tls.VersionTLS12}
-	dialer := &net.Dialer{Timeout: 10 * time.Second}
-	var conn net.Conn
-	var err error
-	if m.TLS {
-		conn, err = (&tls.Dialer{NetDialer: dialer, Config: tlsConfig}).DialContext(ctx, "tcp", addr)
-	} else {
-		conn, err = dialer.DialContext(ctx, "tcp", addr)
-	}
+	c, err := m.Dial(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = conn.Close() }()
-	if deadline, ok := ctx.Deadline(); ok {
-		if err := conn.SetDeadline(deadline); err != nil {
-			return err
-		}
-	}
-	c, err := smtp.NewClient(conn, m.Host)
-	if err != nil {
-		return err
-	}
-	if !m.TLS {
-		if ok, _ := c.Extension("STARTTLS"); !ok {
-			return errors.New("the server offers no STARTTLS; turn on TLS if it speaks TLS from the start (port 465)")
-		}
-		if err := c.StartTLS(tlsConfig); err != nil {
-			return fmt.Errorf("STARTTLS: %w", err)
-		}
-	}
-	if m.Username != "" {
-		if err := c.Auth(smtp.PlainAuth("", m.Username, m.Password, m.Host)); err != nil {
-			return fmt.Errorf("login: %w", err)
-		}
-	}
+	defer func() { _ = c.Close() }()
 	if err := c.Mail(m.From); err != nil {
 		return fmt.Errorf("sender %s: %w", m.From, err)
 	}

@@ -123,11 +123,11 @@ func (f *fakeIdentity) GetMail(context.Context) (*authentik.Mail, error) {
 	return f.mail, nil
 }
 
-func (f *fakeIdentity) SetMail(_ context.Context, m authentik.Mail) error {
+// setMail is what the operator does with Secret cell-mail.
+func (f *fakeIdentity) setMail(m authentik.Mail) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.mail = &m
-	return nil
 }
 
 func (f *fakeIdentity) InviteUser(_ context.Context, username string, valid time.Duration) (authentik.Invite, error) {

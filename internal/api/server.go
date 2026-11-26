@@ -32,7 +32,7 @@ const (
 	RoleViewer = "viewer"
 	RoleNone   = "none"
 
-	GroupAdmins  = "cell-admins"
+	GroupAdmins  = cell.AdminGroup
 	GroupViewers = "cell-viewers"
 	GroupAgents  = cell.AgentGroup
 )
@@ -71,7 +71,6 @@ type Identity interface {
 	CreateGroup(ctx context.Context, name string) (authentik.Group, error)
 	ChangeGroupMembers(ctx context.Context, group string, add, remove []string) (authentik.Group, error)
 	GetMail(ctx context.Context) (*authentik.Mail, error)
-	SetMail(ctx context.Context, m authentik.Mail) error
 	InviteUser(ctx context.Context, username string, valid time.Duration) (authentik.Invite, error)
 }
 

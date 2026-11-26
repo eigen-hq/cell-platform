@@ -184,7 +184,7 @@
     }
   }
 
-  // System mail: invites and later warnings go out through this server.
+  // System mail: invites and warnings to the admins go out through this server.
   let editingMail = $state(false);
   let mailForm = $state({ host: "", port: "", username: "", password: "", from: "", tls: false });
   let mailNote = $state<{ text: string; bad?: boolean } | null>(null);
@@ -205,7 +205,7 @@
       const body = { host: f.host.trim(), port: f.port ? Number(f.port) : undefined, username: f.username.trim() || undefined, password: f.password || undefined, from: f.from.trim(), tls: f.tls };
       mail = must(await api.PUT("/v0/mail", { body }));
       editingMail = false;
-      mailNote = { text: `The server took the login. Invites go out by mail now.` };
+      mailNote = { text: `The server took the login. Invites and warnings go out by mail now.` };
     } catch (err) {
       mailNote = { text: msg(err), bad: true };
     } finally {
@@ -386,9 +386,9 @@
         </div>
       </form>
     {:else if mail?.configured}
-      <p class="mail-line"><span class="chip">{mail.from}</span><small>through {mail.host}:{mail.port}{mail.username ? ` as ${mail.username}` : ""}, {mail.tls ? "TLS" : "STARTTLS"}</small></p>
+      <p class="mail-line"><span class="chip">{mail.from}</span><small>through {mail.host}:{mail.port}{mail.username ? ` as ${mail.username}` : ""}, {mail.tls ? "TLS" : "STARTTLS"}. Admins with a mail address hear when an app needs attention.</small></p>
     {:else}
-      <p class="mail-line"><small>No mail server yet. Invites come back as links to hand over.</small></p>
+      <p class="mail-line"><small>No mail server yet. Invites come back as links to hand over, and warnings stay in the console.</small></p>
     {/if}
   </section>
 

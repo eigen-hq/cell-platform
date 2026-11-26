@@ -86,7 +86,7 @@ What is wanted and tried out happens in the office UI; the platform builds, oper
 | Availability and response times per app | open | |
 | Map: wiring, traffic, outbound connections, agents | open | Metrics |
 | Findings with an agent action (e.g. unused or duplicate apps) | open | Usage numbers |
-| Warnings and notifications to IT | open | System mail |
+| Warnings and notifications to IT | built: a mail to the admins when an app needs attention (E-82); other events and channels open | System mail |
 | Capacity: when the cell needs to grow | open | Metrics |
 
 ### Backups and data
@@ -171,7 +171,7 @@ A core part of the platform, not an add-on (E-78): agents and apps reach models 
 | Feature | Status | Depends on |
 |---|---|---|
 | Cell and domain | open | |
-| System mail of the cell (send only: invitations, password links, warnings) | built (invitations; warnings open), not yet verified on a cell | |
+| System mail of the cell (send only: invitations, password links, warnings) | built (invitations, warnings), not yet verified on a cell | |
 
 ### Distributed cell
 

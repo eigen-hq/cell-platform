@@ -25,7 +25,7 @@ var clusterWide = map[string][]string{
 		"cell.internal/backups:" + crud, "cell.internal/backups/status:" + crud,
 		"cell.internal/restores:" + crud, "cell.internal/restores/status:" + crud,
 		"cell.internal/changerequests:" + crud, "cell.internal/changerequests/status:" + crud,
-		"cell.internal/tasks:get,list,watch,create",
+		"cell.internal/tasks:get,list,watch,create,patch",
 		"apps/deployments:get,list,watch", "batch/jobs:get,list,watch",
 		"postgresql.cnpg.io/clusters:get,list,watch", "helm.toolkit.fluxcd.io/helmreleases:get,list,watch",
 		"networking.k8s.io/ingresses:list",

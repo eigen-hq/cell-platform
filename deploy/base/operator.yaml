@@ -16,10 +16,11 @@ rules:
   - apiGroups: [cell.internal]
     resources: [apps, apps/status, apps/finalizers, backups, backups/status, restores, restores/status, changerequests, changerequests/status]
     verbs: [get, list, watch, create, update, patch, delete]
-  # An app that needs attention gets a diagnose task for the ops agent.
+  # An app that needs attention gets a diagnose task for the ops agent; the
+  # task is marked once IT got the warning.
   - apiGroups: [cell.internal]
     resources: [tasks]
-    verbs: [get, list, watch, create]
+    verbs: [get, list, watch, create, patch]
   # The watches follow the apps across namespaces; a host is free only if no
   # ingress in the cell uses it.
   - apiGroups: [apps]
@@ -331,6 +332,10 @@ metadata:
   namespace: cell-system
 spec:
   replicas: 1
+  # One operator at a time, also while it is updated: two would both act on
+  # what they see, mail a warning twice, say.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: cell-operator

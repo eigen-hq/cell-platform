@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -17,6 +18,7 @@ import (
 
 	cellv1 "github.com/eigen-hq/cell-platform/api/v1alpha1"
 	"github.com/eigen-hq/cell-platform/internal/authentik"
+	"github.com/eigen-hq/cell-platform/internal/cell"
 	"github.com/eigen-hq/cell-platform/internal/controller"
 )
 
@@ -102,6 +104,22 @@ func run() error {
 		return err
 	}
 	if err := (&controller.GatewayReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
+		return err
+	}
+	admins := func(ctx context.Context) ([]string, error) {
+		users, err := identity.ListUsers(ctx)
+		var to []string
+		for _, u := range users {
+			if u.Email != "" && slices.Contains(u.Groups, cell.AdminGroup) {
+				to = append(to, u.Email)
+			}
+		}
+		return to, err
+	}
+	if err := (&controller.MailReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Identity: identity}).SetupWithManager(mgr); err != nil {
+		return err
+	}
+	if err := (&controller.WarningReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Recipients: admins}).SetupWithManager(mgr); err != nil {
 		return err
 	}
 	if err := (&controller.ModelsReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {

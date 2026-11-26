@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/eigen-hq/cell-platform/internal/cell"
 )
 
 // System mail and invites (E-79). The cell sends mail through an SMTP
@@ -28,16 +30,9 @@ const (
 // ErrNotPerson is returned for an invite to a machine account.
 var ErrNotPerson = errors.New("only people get invites, not service accounts")
 
-// Mail is the SMTP server the cell sends through. TLS means implicit TLS
-// (usually port 465); otherwise the connection must offer STARTTLS.
-type Mail struct {
-	Host     string
-	Port     int
-	Username string
-	Password string // write only: authentik never returns it
-	From     string
-	TLS      bool
-}
+// Mail is the SMTP server the cell sends through; authentik never returns
+// its password.
+type Mail = cell.Mail
 
 // GetMail returns the mail settings, or nil before an admin set them.
 func (c *Client) GetMail(ctx context.Context) (*Mail, error) {
