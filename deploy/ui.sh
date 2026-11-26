@@ -25,9 +25,12 @@ else
   ui_tty="" ui_dim="" ui_bold="" ui_ok="" ui_err="" ui_off="" ui_cl=""
 fi
 # A failing command names itself in the log (errexit alone says nothing).
+# Scripts run under ui_start catch PIPE too (a trap does not pass to a new
+# shell; HUP, ignored, does).
 if [ -n "${CELL_UI_LOG:-}" ]; then
   set -E
   trap 'ui_failed $?' ERR
+  trap : PIPE
 fi
 # The current step, shared by install.sh and the scripts it runs:
 # "<start> <label>", or "!" once die reported a failure.
@@ -40,7 +43,9 @@ if [ -z "${CELL_STEP_FILE:-}" ]; then
   export CELL_STEP_DIR CELL_STEP_FILE
 fi
 
-ui() { printf "$@" >&"$ui_fd"; }
+# A terminal that went away (SSH dropped) fails no step: the run goes on
+# into the log.
+ui() { printf "$@" >&"$ui_fd" 2>/dev/null || true; }
 
 ui_failed() {
   printf 'failed (exit %s): %s\n' "$1" "$BASH_COMMAND"
@@ -96,7 +101,7 @@ note() {
 
 ui_notes() {
   [ -s "$CELL_STEP_FILE.notes" ] || return 0
-  sed "s/^/    $ui_dim/; s/\$/$ui_off/" "$CELL_STEP_FILE.notes" >&"$ui_fd"
+  sed "s/^/    $ui_dim/; s/\$/$ui_off/" "$CELL_STEP_FILE.notes" >&"$ui_fd" 2>/dev/null || true
   : >"$CELL_STEP_FILE.notes"
 }
 
@@ -145,7 +150,7 @@ ui_die() {
 ui_log_tail() {
   [ -n "${CELL_UI_LOG:-}" ] && [ -s "$CELL_UI_LOG" ] || return 0
   ui '\n  %sLast lines of the log:%s\n' "$ui_dim" "$ui_off"
-  tail -n 15 "$CELL_UI_LOG" | sed 's/^/    /' >&"$ui_fd"
+  tail -n 15 "$CELL_UI_LOG" | sed 's/^/    /' >&"$ui_fd" 2>/dev/null || true
   ui '\n  Full log: %s\n' "$CELL_UI_LOG"
 }
 
@@ -160,6 +165,12 @@ ui_start() {
   (umask 077 && touch "$1")
   chmod 600 "$1"
   export CELL_UI_LOG=$1
+  # A closed SSH session or output pipe does not stop the run halfway; the
+  # log shows it. HUP is ignored (the commands running then get it too),
+  # PIPE only caught, so a write of this shell fails instead of killing it
+  # and the commands it runs keep the default.
+  trap '' HUP
+  trap : PIPE
   exec 3>&1 >>"$CELL_UI_LOG" 2>&1
   ui_fd=3 ui_efd=3
   printf '\n===== %s %s\n' "$(date -u +%FT%TZ)" "$0"

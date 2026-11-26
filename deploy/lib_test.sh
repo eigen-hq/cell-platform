@@ -504,4 +504,56 @@ out=$(FAKE_EXISTS=1 ask) && rc=0 || rc=$?
 check "a check running already stops the run" "1:1" "$rc:$(grep -c 'being checked already' <<<"$out")"
 unset -f kubectl sleep
 
+# A terminal that went away (closed fd) fails no step: notes, the log's end
+# and plain lines are dropped, the run goes on.
+gone=$(mktemp); echo "last line" >"$gone"
+# Its own bash: errexit is off in a subshell on the left of ||.
+out=$(CELL_UI_LOG=$gone bash -c '
+  set -euo pipefail
+  source "$1"
+  exec 7>&-
+  ui_fd=7 ui_tty=1
+  note "queued"
+  ui_notes
+  ui_log_tail
+  ui "line\n"
+  echo survived
+' _ "$here/ui.sh" 2>/dev/null | tail -n 1 || true)
+check "a lost terminal does not stop the run" survived "$out"
+
+gone=$(mktemp -d)
+CELL_UI_LOG="" bash -c '
+  set -euo pipefail
+  source "$1"
+  ui_start "$2/log"
+  sleep 0.3 # the reader is gone
+  ui "line\n"
+  note "queued"
+  ui_notes
+  ui_log_tail
+  # A script it runs (bootstrap.sh, node.sh) writes to the same pipe.
+  bash -c "set -euo pipefail; source \"\$1\"; ui \"child\\n\"; note child; echo survived >\"\$2/child\"" _ "$1" "$2"
+  echo survived >"$2/result"
+' _ "$here/ui.sh" "$gone" | (exec true) || true
+check "a closed output pipe does not stop a script the run starts" survived "$(cat "$gone/child" 2>/dev/null)"
+check "a closed output pipe does not stop the run" survived "$(cat "$gone/result" 2>/dev/null)"
+rm -rf "$gone"
+
+lockdir=$(mktemp -d)
+held=$(
+  flock() { [ "$*" = "-n 8" ]; }
+  exec 8>"$lockdir/other"
+  hold_lock "$lockdir/lock" && fd8_is "$lockdir/lock" && echo lock
+)
+check "an inherited fd 8 on another file is not taken for the lock" lock "$held"
+held=$(
+  flock() { [ "$*" = "-n 8" ]; }
+  exec 8>"$lockdir/lock"
+  echo kept >"$lockdir/lock" # opening it again would empty it
+  hold_lock "$lockdir/lock" && cat "$lockdir/lock"
+)
+check "the lock get.sh hands over is kept" kept "$held"
+rm -rf "$lockdir"
+rm -f "$gone"
+
 [ "$fails" -eq 0 ]

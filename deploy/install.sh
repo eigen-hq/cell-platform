@@ -26,6 +26,8 @@ repo=$(cd "$here/.." && pwd)
 source "$here/versions.env"
 source "$here/lib.sh"
 [ "$(id -u)" -eq 0 ] || die "run as root (sudo)"
+# One run at a time: a second one would change the cell under the first.
+hold_lock /run/cell-install.lock || die "another installation is running: follow it with sudo tail -f /var/log/cell-install.log, or stop it with sudo pkill -f 'deploy/(install|bootstrap).sh' and run again"
 settings=/etc/cell/install.env
 saved=(CELL_DOMAIN CELL_TLS CELL_ACME_EMAIL CELL_ACME_SERVER CELL_STORAGE CELL_NODE_IP CELL_INGRESS_IP)
 if [ -f "$settings" ]; then

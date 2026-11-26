@@ -426,3 +426,16 @@ build_image() {
   fi
   echo "$ref"
 }
+
+# hold_lock <file> holds the lock on <file> in fd 8 or fails at once. From
+# get.sh, fd 8 is that file and locked already (flock on it succeeds again);
+# an fd 8 open on anything else is replaced.
+hold_lock() {
+  if fd8_is "$1" && flock -n 8; then return 0; fi
+  exec 8>"$1" && flock -n 8
+}
+
+# fd8_is <file>: fd 8 is open on <file> (same device and inode).
+fd8_is() {
+  perl -e 'open(my $f, "<&=", 8) or exit 1; my @a = stat($f); my @b = stat($ARGV[0]) or exit 1; exit !($a[0] == $b[0] && $a[1] == $b[1])' "$1" 2>/dev/null
+}

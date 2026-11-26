@@ -72,8 +72,12 @@ release() {
 }
 
 [ "$(id -u)" -eq 0 ] || fail "run as root"
-for c in curl tar; do command -v "$c" >/dev/null || fail "$c is missing (apt-get install $c)"; done
+for c in curl tar flock; do command -v "$c" >/dev/null || fail "$c is missing (apt-get install $c)"; done
 [ ! -d "$dir/.git" ] || fail "$dir is a git clone: run deploy/install.sh there"
+# One run at a time, from before the release in $dir is replaced to the end
+# of the installer, which keeps this lock (fd 8).
+exec 8>/run/cell-install.lock
+flock -n 8 || fail "another installation is running: follow it with sudo tail -f /var/log/cell-install.log, or stop it with sudo pkill -f 'deploy/(install|bootstrap).sh' and run again"
 
 version=${CELL_VERSION:-}
 if [ -z "$version" ]; then
