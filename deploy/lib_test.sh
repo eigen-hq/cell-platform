@@ -111,6 +111,8 @@ check "ensure_secret keeps values out of argv" "0" "$(grep -c hunter2 "$FAKE_LOG
 manifest=$(backup_target_manifest "[target] secret_access_key = s3secret" gatewayKey=masterkey "localVolume=hostPath: {path: \"/b\"}")
 check "backup_target_manifest encodes values" 'masterkey|hostPath: {path: "/b"}' "$(grep -E '^  (gatewayKey|localVolume):' <<<"$manifest" | awk '{gsub(/"/, "", $2); print $2}' | while read -r v; do base64 -d <<<"$v"; echo; done | paste -sd'|' -)"
 check "die inside \$(...) still reports on stderr" "|error: gone" "$(: >"$CELL_STEP_FILE"; out=$( (die gone) 2>"$tmp/err"); printf '%s|' "$out"; grep -o 'error: gone' "$tmp/err")"
+b64=$(backup_target_manifest $'[target]\ntype = s3' root= | awk '$1 == "rclone.conf:" {gsub(/"/, "", $2); print $2}')
+check "backup_target_manifest writes rclone.conf as the operator does (no final line break)" "$(printf '[target]\ntype = s3' | base64)" "$(base64 -d <<<"$b64" | base64)"
 check "no target writes an empty rclone.conf" '  rclone.conf: ""' "$(backup_target_manifest "" root= | grep rclone.conf)"
 check "backup_target_manifest keeps values out of argv" "0" "$(grep -cE 'masterkey|hunter3|s3secret' "$FAKE_LOG" || true)"
 

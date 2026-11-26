@@ -195,10 +195,12 @@ data_manifest() {
 
 # backup_target_manifest prints the backup-target Secret: rclone.conf from
 # the first argument (empty: no target yet), KEY=VALUE pairs from the others.
+# Without a final line break, as the operator writes it (cell.S3RcloneConf):
+# a target set in the console stays unchanged when the installer runs again.
 backup_target_manifest() {
   local conf=$1
   shift
-  data_manifest cell-system backup-target "rclone.conf=${conf:+$conf$'\n'}" "$@"
+  data_manifest cell-system backup-target "rclone.conf=$conf" "$@"
 }
 
 # names_accounts prints the acme-dns accounts of a cell with an address from
