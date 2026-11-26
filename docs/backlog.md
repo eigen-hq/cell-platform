@@ -2,6 +2,12 @@
 
 All features in one list, without phases (E-37). The order within an area follows the dependencies.
 
+## Direction (E-78)
+
+An agentic operations platform for any software. It runs the apps of a company, and it gives agents one shared brain over them: context collected in the platform where it can be, MCP tools of the apps where it cannot, each agent getting what its permissions allow. Model access is a core part and provider-agnostic. The work happens in the office UI, an app of the cell like any other: everything it gets from the platform, every app can get.
+
+Every feature is thought through to how it is used in the end: by IT in the console, by staff in the office UI and in the apps' own clients, by agents through the API.
+
 ## The boundary
 
 - **Platform and console: technical operation.** Run, monitor, back up, check and approve apps. Here IT sees what happens in the cell and decides everything that applies to more than one person.
@@ -46,7 +52,11 @@ What the console shows comes from the API. Without an endpoint there is no UI, n
 | Feature | Status | Depends on |
 |---|---|---|
 | Installed apps with state, version, address | running | |
-| Install by IT: catalog, own manifest | running (catalog); manifest: API running | |
+| Install by IT: catalog, own manifest | running (catalog); manifest: API running, console open | |
+| Default set: apps a new cell starts with (among them parts of the office UI), installed and updated like any catalog app | open | First setup |
+| Own domain per app (e.g. the office UI on `eigen-office.com`): DNS check, certificate, login redirects and the app's base URL follow the domain; the cell address stays as a fallback | open | |
+| Own clients per app (mobile, desktop, CLI): the manifest declares them, each gets its own login client (public, PKCE) and reaches the app on its domain | open | Own domain per app |
+| Model access for apps: an app declares it in the manifest and gets the cell's model gateway with its own key and budget, no provider key in the app | open | Model gateway |
 | Packaging of an open-source project by an agent (Compose) | running | Helm charts: O-15 |
 | Update and remove | running (update by hand; update policy: O-09) | O-09 |
 | Enforce data access per app: which people, which data | open | |
@@ -127,6 +137,7 @@ What is wanted and tried out happens in the office UI; the platform builds, oper
 | Accounts and groups, members, app password | running | |
 | Access per app through groups | running | |
 | Departments and teams as structure of the identity service | open | |
+| Invite a person: a mail with a link, the person sets password and second factor; no credentials sent by hand | open | System mail |
 | Person changes with approval, remove a person | open | |
 | Account help: password, second factor, lock, sessions | open | |
 | Login policy | open | |
@@ -140,16 +151,20 @@ What is wanted and tried out happens in the office UI; the platform builds, oper
 | Agents as accounts with permissions per app | open | |
 | Autonomy levels | open | |
 | Tool gateway for all apps | API running | O-18, O-19, O-20 |
+| Tools per agent: each agent gets the MCP tools of the apps it may use, changing with apps and permissions | open | Tool gateway |
+| Context index: documents, tickets, people and their references across all apps, in the platform's database and storage; own apps write directly, third-party apps are indexed | open | Data access per app |
 
 ### Models
 
+A core part of the platform, not an add-on (E-78): agents and apps reach models only through the cell's gateway, in one open API, so a provider can be swapped without changing an agent or an app.
+
 | Feature | Status | Depends on |
 |---|---|---|
-| Run models in the cell | open | |
-| Models through the customer's own key | open | O-16 |
-| Set the model key and model in the console and the API, not only at install (`CELL_LLM_API_KEY`) | open | |
-| Provider-agnostic model access: agents speak one model API through a gateway in the cell, any provider or own model behind it; no agent code bound to one provider's SDK | open | O-30 |
-| Usage and costs, budget and limits per agent or department | open | |
+| Model gateway: one open model API in the cell, any provider or own model behind it; no agent code bound to one provider's SDK | open | O-30 |
+| Providers and keys in the console and the API (the customer's own keys), not only at install (`CELL_LLM_API_KEY`) | open | Model gateway |
+| Model per task: which model an agent uses, fallback to another provider | open | Model gateway |
+| Usage and costs, budget and limits per agent, app or department | open | Model gateway |
+| Run open models in the cell | open | Model gateway |
 
 ### Cell
 
@@ -181,7 +196,7 @@ One cluster across all machines, WireGuard in between (E-42); network for people
 | Requests API: new app, feature request, personal trial version, with group of people and data access; status for the requesters | open | O-27 |
 | Events for the office UI (request approved, app ready) | open | O-27 |
 | Shared login (own client per UI) | open | E-52 |
-| Office UI as an app of the cell | open | O-26 |
+| Office UI as a catalog app of the cell, on its own domain; no special path in the platform (E-78) | open | Own domain per app, shared login |
 
 ### Self-hosting
 
