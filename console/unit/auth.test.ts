@@ -33,6 +33,12 @@ const login = () =>
   );
 const tick = () => new Promise((r) => setTimeout(r, 0));
 const answer = async (i: number, r: Response) => (answers[i]!(r), await tick(), await tick());
+// The redirect waits on the PKCE digest, which takes longer than a few ticks
+// on a busy machine.
+const redirected = async (n: number) => {
+  for (let i = 0; i < 100 && went.length < n; i++) await new Promise((r) => setTimeout(r, 10));
+  assert.equal(went.length, n);
+};
 
 test("everyone waiting on a failed login hears of it, also across a sign-out", { timeout: 2000 }, async () => {
   const poll = signIn().catch((e: Error) => e);
@@ -59,9 +65,10 @@ test("a sign-in superseded by a sign-out and a retry keeps neither its state nor
   assert.match(String(await out), /HTTP 503/);
   void signIn(); // "Sign in again"
   await answer(2, login());
-  assert.equal(went.length, 1);
+  await redirected(1);
   const state = new URL(went[0]!).searchParams.get("state");
   await answer(0, login()); // the first lookup comes back late
+  await new Promise((r) => setTimeout(r, 100));
   assert.equal(went.length, 1);
   assert.equal(JSON.parse(store.get("cell.login")!).state, state);
 });
@@ -78,7 +85,7 @@ test("a login that cannot keep its state can be tried again", { timeout: 2000 },
   full = false;
   void signIn();
   await answer(1, login());
-  assert.equal(went.length, 1);
+  await redirected(1);
 });
 
 test("a sign-out the storage refuses is an error for the page, not a thrown click", { timeout: 2000 }, async () => {
