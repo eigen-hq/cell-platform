@@ -14,7 +14,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	cellv1 "github.com/eigen-hq/cell-platform/api/v1alpha1"
 	"github.com/eigen-hq/cell-platform/internal/authentik"
@@ -37,11 +36,9 @@ func run() error {
 	if err := cellv1.AddToScheme(scheme); err != nil {
 		return err
 	}
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:                 scheme,
-		HealthProbeBindAddress: ":8081",
-		Metrics:                metricsserver.Options{BindAddress: "0"},
-	})
+	opts := controller.ManagerOptions(scheme)
+	opts.HealthProbeBindAddress = ":8081"
+	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), opts)
 	if err != nil {
 		return err
 	}

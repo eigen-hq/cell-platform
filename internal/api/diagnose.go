@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"sort"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -63,6 +65,20 @@ func viewPod(p *corev1.Pod) podView {
 	return v
 }
 
+// appList lists in an app's namespace. The API may read there once the
+// operator has set the namespace up (E-70); before, the app has nothing to
+// list.
+func (s *Server) appList(ctx context.Context, list client.ObjectList, ns string) error {
+	err := s.Kube.List(ctx, list, client.InNamespace(ns))
+	if !apierrors.IsForbidden(err) {
+		return err
+	}
+	if nerr := s.Kube.Get(ctx, client.ObjectKey{Name: ns}, &corev1.Namespace{}); apierrors.IsNotFound(nerr) {
+		return nil
+	}
+	return err
+}
+
 // pods are the app's pods, newest first.
 func (s *Server) pods(r *http.Request) ([]corev1.Pod, string, error) {
 	app, err := s.app(r.Context(), r.PathValue("name"))
@@ -71,7 +87,7 @@ func (s *Server) pods(r *http.Request) ([]corev1.Pod, string, error) {
 	}
 	ns := "app-" + app.Name
 	var list corev1.PodList
-	if err := s.Kube.List(r.Context(), &list, client.InNamespace(ns)); err != nil {
+	if err := s.appList(r.Context(), &list, ns); err != nil {
 		return nil, "", err
 	}
 	sort.Slice(list.Items, func(i, j int) bool {
@@ -159,7 +175,7 @@ func (s *Server) appEvents(w http.ResponseWriter, r *http.Request, _ *Caller) er
 		return err
 	}
 	var list corev1.EventList
-	if err := s.Kube.List(r.Context(), &list, client.InNamespace("app-"+app.Name)); err != nil {
+	if err := s.appList(r.Context(), &list, "app-"+app.Name); err != nil {
 		return err
 	}
 	out := []eventView{}

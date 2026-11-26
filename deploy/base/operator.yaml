@@ -1,4 +1,7 @@
 # The App operator. Its only write path into apps is this ServiceAccount.
+# Across the cluster it holds only what is cluster-wide or what it watches
+# across apps (E-70); what it writes into an app comes from the RoleBinding
+# cell-operator in the app's namespace, which it binds itself.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -12,68 +15,40 @@ metadata:
 rules:
   - apiGroups: [cell.internal]
     resources: [apps, apps/status, apps/finalizers, backups, backups/status, restores, restores/status, changerequests, changerequests/status]
-    verbs: ["*"]
+    verbs: [get, list, watch, create, update, patch, delete]
   # An app that needs attention gets a diagnose task for the ops agent.
   - apiGroups: [cell.internal]
     resources: [tasks]
     verbs: [get, list, watch, create]
-  - apiGroups: [batch]
-    resources: [jobs]
-    verbs: [get, list, watch, create, delete]
-  - apiGroups: [batch]
-    resources: [cronjobs]
-    verbs: [get, list, watch, patch]
-  - apiGroups: [""]
-    resources: [pods]
-    verbs: [get, list, watch]
-  - apiGroups: [apps]
-    resources: [statefulsets]
-    verbs: [get, list, watch, update, patch]
-  - apiGroups: [postgresql.cnpg.io]
-    resources: [backups]
-    verbs: [get, list, watch, create, delete]
-  - apiGroups: [barmancloud.cnpg.io]
-    resources: [objectstores]
-    verbs: [get, list, watch, create, update, patch, delete]
-  - apiGroups: [""]
-    resources: [namespaces, configmaps, secrets, services, persistentvolumeclaims]
-    verbs: [get, list, watch, create, update, patch, delete]
-  - apiGroups: [""]
-    resources: [events]
-    verbs: [create, patch]
+  # The watches follow the apps across namespaces; a host is free only if no
+  # ingress in the cell uses it.
   - apiGroups: [apps]
     resources: [deployments]
-    verbs: [get, list, watch, create, update, patch, delete]
-  - apiGroups: [networking.k8s.io]
-    resources: [ingresses, networkpolicies]
-    verbs: [get, list, watch, create, update, patch, delete]
-  # Helm apps are deployed by their own ServiceAccount, admin of the app's
-  # namespace only.
-  - apiGroups: [""]
-    resources: [serviceaccounts]
-    verbs: [get, list, watch, create, update, patch, delete]
-  - apiGroups: [rbac.authorization.k8s.io]
-    resources: [rolebindings]
-    verbs: [get, list, watch, create, update, patch, delete]
-  - apiGroups: [rbac.authorization.k8s.io]
-    resources: [clusterroles]
-    resourceNames: [admin]
-    verbs: [bind]
+    verbs: [get, list, watch]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [get, list, watch]
   - apiGroups: [postgresql.cnpg.io]
     resources: [clusters]
-    verbs: [get, list, watch, create, update, patch, delete]
+    verbs: [get, list, watch]
   - apiGroups: [helm.toolkit.fluxcd.io]
     resources: [helmreleases]
-    verbs: [get, list, watch, create, update, patch, delete]
-  - apiGroups: [source.toolkit.fluxcd.io]
-    resources: [helmrepositories, ocirepositories]
-    verbs: [get, list, watch, create, update, patch, delete]
-  - apiGroups: [traefik.io]
-    resources: [middlewares]
-    verbs: [get, list, watch, create, update, patch, delete]
-  - apiGroups: [cert-manager.io]
-    resources: [certificates]
-    verbs: [get, list, watch, create, update, patch, delete]
+    verbs: [get, list, watch]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses]
+    verbs: [list]
+  # Only app-* namespaces and their RoleBindings (policy cell-operator-scope
+  # below). No delete for RoleBindings: they go with the namespace.
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, create, patch, delete]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [rolebindings]
+    verbs: [create, patch]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [clusterroles]
+    resourceNames: [admin, cell-operator-app, cell-api-app]
+    verbs: [bind]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -87,6 +62,185 @@ subjects:
   - kind: ServiceAccount
     name: cell-operator
     namespace: cell-system
+---
+# What the operator does inside an app's namespace; bound there by the
+# operator (RoleBinding cell-operator). Helm apps are deployed by their own
+# ServiceAccount helm-deployer, admin of the app's namespace only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cell-operator-app
+rules:
+  - apiGroups: [""]
+    resources: [configmaps, secrets, services, persistentvolumeclaims, serviceaccounts]
+    verbs: [get, list, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list]
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets]
+    verbs: [get, list, create, update, patch, delete]
+  - apiGroups: [batch]
+    resources: [cronjobs]
+    verbs: [get, list, patch]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [get, list, create, delete]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses, networkpolicies]
+    verbs: [get, list, create, update, patch, delete]
+  - apiGroups: [postgresql.cnpg.io]
+    resources: [clusters]
+    verbs: [get, list, create, update, patch, delete]
+  - apiGroups: [postgresql.cnpg.io]
+    resources: [backups]
+    verbs: [get, list, create, delete]
+  - apiGroups: [barmancloud.cnpg.io]
+    resources: [objectstores]
+    verbs: [get, list, create, update, patch, delete]
+  - apiGroups: [helm.toolkit.fluxcd.io]
+    resources: [helmreleases]
+    verbs: [get, list, create, update, patch, delete]
+  - apiGroups: [source.toolkit.fluxcd.io]
+    resources: [helmrepositories, ocirepositories]
+    verbs: [get, list, create, update, patch, delete]
+  - apiGroups: [traefik.io]
+    resources: [middlewares]
+    verbs: [get, list, create, update, patch, delete]
+  - apiGroups: [cert-manager.io]
+    resources: [certificates]
+    verbs: [get, list, create, update, patch, delete]
+---
+# The operator in its own namespace: the cell's configuration and host
+# claims, the login proxy's ingress per app, the check of a new backup
+# target and the restart of the backup gateway. Of the secrets it changes
+# only its own by name.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cell-operator
+  namespace: cell-system
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, list, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get, list, watch, create]
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [cell-agent, backup-target, backup-target-request]
+    verbs: [update, delete]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [list]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses]
+    verbs: [get, create, update, patch, delete]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [create, delete]
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [backup-gateway]
+    verbs: [patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cell-operator
+  namespace: cell-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cell-operator
+subjects:
+  - kind: ServiceAccount
+    name: cell-operator
+    namespace: cell-system
+---
+# The cell's CA and, with the naming service (E-55), its token and the
+# accounts of the hosts.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cell-operator
+  namespace: cert-manager
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [cell-ca, cell-names, cell-acme-dns]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [cell-acme-dns]
+    verbs: [update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cell-operator
+  namespace: cert-manager
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cell-operator
+subjects:
+  - kind: ServiceAccount
+    name: cell-operator
+    namespace: cell-system
+---
+# The operator's cluster-wide writes stay in app namespaces: a namespace
+# app-* with Pod Security baseline, and a RoleBinding there only as one of
+# three grants.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: cell-operator-scope
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE, DELETE]
+        resources: [namespaces]
+      - apiGroups: [rbac.authorization.k8s.io]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE, DELETE]
+        resources: [rolebindings]
+  matchConditions:
+    - name: operator
+      expression: "request.userInfo.username == 'system:serviceaccount:cell-system:cell-operator'"
+  variables:
+    - name: obj
+      expression: "request.operation == 'DELETE' ? oldObject : object"
+    - name: isNamespace
+      expression: "request.resource.resource == 'namespaces'"
+  validations:
+    - expression: "variables.isNamespace ? variables.obj.metadata.name.startsWith('app-') : request.namespace.startsWith('app-')"
+      message: "the operator writes namespaces and RoleBindings only for apps (app-*)"
+    - expression: >-
+        !variables.isNamespace || request.operation == 'DELETE' ||
+        (has(object.metadata.labels) && 'pod-security.kubernetes.io/enforce' in object.metadata.labels &&
+        object.metadata.labels['pod-security.kubernetes.io/enforce'] == 'baseline')
+      message: "an app namespace enforces Pod Security baseline"
+    - expression: >-
+        variables.isNamespace || request.operation == 'DELETE' ||
+        (object.roleRef.kind == 'ClusterRole' && has(object.subjects) && size(object.subjects) == 1 &&
+        object.subjects[0].kind == 'ServiceAccount' && has(object.subjects[0].namespace) && (
+        (object.roleRef.name == 'admin' && object.subjects[0].name == 'helm-deployer' && object.subjects[0].namespace == request.namespace) ||
+        (object.roleRef.name == 'cell-operator-app' && object.subjects[0].name == 'cell-operator' && object.subjects[0].namespace == 'cell-system') ||
+        (object.roleRef.name == 'cell-api-app' && object.subjects[0].name == 'cell-api' && object.subjects[0].namespace == 'cell-system')))
+      message: "an app's RoleBinding grants admin to its helm-deployer, cell-operator-app to the operator or cell-api-app to the API, nothing else"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: cell-operator-scope
+spec:
+  policyName: cell-operator-scope
+  validationActions: [Deny]
 ---
 apiVersion: apps/v1
 kind: Deployment

@@ -38,23 +38,53 @@ rules:
   - apiGroups: [cell.internal]
     resources: [apps]
     verbs: [create]
-  # What admins and agents read when an app is in trouble.
-  - apiGroups: [""]
-    resources: [pods, events]
-    verbs: [list]
-  - apiGroups: [""]
-    resources: [pods/log]
-    verbs: [get]
-  # The machines of the cell (E-44), what they use and their disks.
+  # The machines of the cell (E-44) and what they use; their disks come
+  # from Longhorn (Role in storage-longhorn-classes.yaml).
   - apiGroups: [""]
     resources: [nodes]
     verbs: [list]
   - apiGroups: [metrics.k8s.io]
     resources: [nodes]
     verbs: [list]
-  - apiGroups: [longhorn.io]
-    resources: [nodes]
+---
+# What admins and agents read when an app is in trouble, in the app's
+# namespace only: the operator binds it there (RoleBinding cell-api, E-70).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cell-api-app
+rules:
+  - apiGroups: [""]
+    resources: [pods, events]
     verbs: [list]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+---
+# Which machines the cell's own services run on.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cell-api-pods
+  namespace: cell-system
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cell-api-pods
+  namespace: cell-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cell-api-pods
+subjects:
+  - kind: ServiceAccount
+    name: cell-api
+    namespace: cell-system
 ---
 # Join keys for new machines: bootstrap tokens in kube-system. The API only
 # creates them, and only as join keys (policy cell-api-join-keys below).

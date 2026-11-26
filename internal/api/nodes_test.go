@@ -9,9 +9,12 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 func node(name string, server, ready bool, ip string) *corev1.Node {
@@ -37,9 +40,20 @@ func TestNodes(t *testing.T) {
 		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}, Spec: corev1.PodSpec{NodeName: node},
 			Status: corev1.PodStatus{Phase: corev1.PodRunning}}
 	}
-	h := newHarness(t, node("b-worker", false, false, "203.0.113.2"), node("z-server", true, true, "203.0.113.1"),
+	// The API reads pods only in the apps' namespaces, once the operator has
+	// bound its role there, and in cell-system (E-70).
+	readable := map[string]bool{"cell-system": true, "app-notes": true, "app-files": true}
+	funcs := interceptor.Funcs{List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+		o := (&client.ListOptions{}).ApplyOptions(opts)
+		if _, ok := list.(*corev1.PodList); ok && !readable[o.Namespace] {
+			return apierrors.NewForbidden(schema.GroupResource{Resource: "pods"}, "", fmt.Errorf("namespace %q", o.Namespace))
+		}
+		return c.List(ctx, list, opts...)
+	}}
+	h := newHarnessWith(t, funcs, node("b-worker", false, false, "203.0.113.2"), node("z-server", true, true, "203.0.113.1"),
+		installed("notes", "oidc"), installed("files", "oidc"), installed("fresh", "oidc"),
 		pod("app-notes", "notes-0", "b-worker"), pod("app-notes", "notes-1", "b-worker"), pod("app-files", "files-0", "z-server"),
-		pod("cell-system", "cell-api-0", "z-server"))
+		pod("cell-system", "cell-api-0", "z-server"), pod("kube-system", "coredns-0", "b-worker"))
 	code, body := h.do("GET", "/v0/nodes", "agent", nil)
 	list, _ := body.([]any)
 	if code != 200 || len(list) != 2 {

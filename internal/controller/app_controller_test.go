@@ -31,7 +31,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
-	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	cellv1 "github.com/eigen-hq/cell-platform/api/v1alpha1"
 	"github.com/eigen-hq/cell-platform/internal/authentik"
@@ -112,7 +111,15 @@ func TestMain(m *testing.M) {
 	scheme := runtime.NewScheme()
 	_ = clientgoscheme.AddToScheme(scheme)
 	_ = cellv1.AddToScheme(scheme)
-	mgr, err := ctrl.NewManager(cfg, ctrl.Options{Scheme: scheme, Metrics: metricsserver.Options{BindAddress: "0"}})
+	restCfg = cfg
+	if k8s, err = client.New(cfg, client.Options{Scheme: scheme}); err != nil {
+		panic(err)
+	}
+	// The operator runs with the rights the installer gives it, nothing more.
+	if err := setUpRights(env); err != nil {
+		panic(err)
+	}
+	mgr, err := ctrl.NewManager(as(operatorAccount), ManagerOptions(scheme))
 	if err != nil {
 		panic(err)
 	}
@@ -156,11 +163,7 @@ func TestMain(m *testing.M) {
 			panic(err)
 		}
 	}()
-	if k8s, err = client.New(cfg, client.Options{Scheme: scheme}); err != nil {
-		panic(err)
-	}
 	for _, o := range []client.Object{
-		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "cell-system"}},
 		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "cell-config", Namespace: "cell-system"},
 			Data: map[string]string{"domain": "cell.localhost", "tls": "acme", "storage": "local-path"}},
 		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "backup-target", Namespace: "cell-system"},

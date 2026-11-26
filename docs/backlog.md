@@ -117,7 +117,7 @@ What is wanted and tried out happens in the office UI; the platform builds, oper
 | Backup targets over HTTPS only, plain HTTP only for a private network on purpose | open | |
 | A target set again by the installer goes through the operator's checked switch under the gateway lock | open | |
 | Join keys: the joining machine reads the key without the command line, the key expires on join, the policy bounds its lifetime | open | |
-| Namespaced permissions for operator and API instead of cluster-wide ones | open | |
+| Namespaced permissions for operator and API instead of cluster-wide ones | running, not yet verified (E-70) | |
 | Signed releases: the installer checks the release and its downloads against a signature | open | |
 
 ### Identity
