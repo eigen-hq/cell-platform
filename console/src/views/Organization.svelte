@@ -20,6 +20,7 @@
   type Group = components["schemas"]["Group"];
   type App = components["schemas"]["App"];
   type Mail = components["schemas"]["Mail"];
+  type Models = components["schemas"]["Models"];
 
   const ADMINS = "cell-admins";
   const AGENTS = "cell-agents";
@@ -30,6 +31,7 @@
   let apps = $state<App[]>([]);
   let failed = $state("");
   let mail = $state<Mail | null>(null);
+  let models = $state<Models | null>(null);
 
   // A poll that started before a save may answer after the reload: drop it.
   const guard = newest();
@@ -57,10 +59,20 @@
       mailFailed = e instanceof Error ? e.message : String(e);
     }
   }
+  let modelsFailed = $state("");
+  async function loadModels() {
+    try {
+      models = must(await api.GET("/v0/models"));
+      modelsFailed = "";
+    } catch (e) {
+      modelsFailed = e instanceof Error ? e.message : String(e);
+    }
+  }
 
   $effect(() => {
     load();
     loadMail();
+    loadModels();
     const t = setInterval(load, 15000);
     return () => clearInterval(t);
   });
@@ -179,6 +191,36 @@
       mailNote = { text: msg(err), bad: true };
     } finally {
       savingMail = false;
+    }
+  }
+
+  // The model provider: every agent of the cell reaches it through the
+  // model gateway; its key stays there.
+  let editingModels = $state(false);
+  let modelsForm = $state({ provider: "anthropic" as "anthropic" | "openai", baseUrl: "", model: "", apiKey: "" });
+  let modelsNote = $state<{ text: string; bad?: boolean } | null>(null);
+  let savingModels = $state(false);
+  function editModels() {
+    const m = models;
+    modelsForm = { provider: m?.provider ?? "anthropic", baseUrl: m?.baseUrl ?? "", model: m?.model ?? "", apiKey: "" };
+    modelsNote = null;
+    editingModels = true;
+  }
+  async function saveModels(e: SubmitEvent) {
+    e.preventDefault();
+    if (savingModels) return;
+    savingModels = true;
+    modelsNote = null;
+    try {
+      const f = modelsForm;
+      const body = { provider: f.provider, baseUrl: f.baseUrl.trim() || undefined, model: f.model.trim() || undefined, apiKey: f.apiKey || undefined };
+      models = must(await api.PUT("/v0/models", { body }));
+      editingModels = false;
+      modelsNote = { text: `The provider took the key. Agents use ${models.model} within a minute.` };
+    } catch (err) {
+      modelsNote = { text: msg(err), bad: true };
+    } finally {
+      savingModels = false;
     }
   }
 
@@ -328,6 +370,31 @@
       <p class="mail-line"><span class="chip">{mail.from}</span><small>through {mail.host}:{mail.port}{mail.username ? ` as ${mail.username}` : ""}, {mail.tls ? "TLS" : "STARTTLS"}</small></p>
     {:else}
       <p class="mail-line"><small>No mail server yet. Invites come back as links to hand over.</small></p>
+    {/if}
+  </section>
+
+  <section class="mail">
+    <div class="head">
+      <h2 class="sec-title">Models</h2>
+      {#if !editingModels}<Button kind="quiet" onclick={editModels}>{models?.configured ? "Change" : "Set up"}</Button>{/if}
+    </div>
+    {#if modelsNote}<p class="note" class:fail={modelsNote.bad} role="status">{modelsNote.text}</p>{/if}
+    {#if modelsFailed}<p class="note fail" role="alert">{modelsFailed}</p>{/if}
+    {#if editingModels}
+      <form class="add" onsubmit={saveModels}>
+        <label>Provider<select bind:value={modelsForm.provider}><option value="anthropic">Anthropic</option><option value="openai">OpenAI-compatible</option></select></label>
+        <label>Address<input type="url" bind:value={modelsForm.baseUrl} required={modelsForm.provider === "openai"} placeholder={modelsForm.provider === "openai" ? "https://api.openai.com/v1" : "https://api.anthropic.com"} autocomplete="off" /></label>
+        <label>Model<input bind:value={modelsForm.model} required={modelsForm.provider === "openai"} placeholder={modelsForm.provider === "openai" ? "gpt-5" : "claude-opus-5-5"} autocomplete="off" /></label>
+        <label>Key<input type="password" bind:value={modelsForm.apiKey} autocomplete="new-password" placeholder={models?.configured && models.provider === modelsForm.provider && (models.baseUrl ?? "") === modelsForm.baseUrl.trim().replace(/\/$/, "") ? "empty keeps the key" : ""} /></label>
+        <div class="row">
+          <Button type="submit" disabled={savingModels}>{savingModels ? "Checking the key" : "Check and save"}</Button>
+          <Button kind="quiet" type="button" onclick={() => (editingModels = false)}>Cancel</Button>
+        </div>
+      </form>
+    {:else if models?.configured}
+      <p class="mail-line"><span class="chip">{models.model}</span><small>from {models.provider === "openai" ? models.baseUrl : "Anthropic"}, for every agent of the cell</small></p>
+    {:else}
+      <p class="mail-line"><small>No model provider yet. Agent tasks wait until one is set.</small></p>
     {/if}
   </section>
 

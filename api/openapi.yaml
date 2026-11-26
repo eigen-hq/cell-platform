@@ -320,6 +320,30 @@ paths:
         "400": {$ref: "#/components/responses/Error"}
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
+  /v0/models:
+    get:
+      operationId: getModels
+      description: The model provider the cell's agents use through the model gateway. Never the key.
+      responses:
+        default: {$ref: "#/components/responses/Error"}
+        "200": {description: The provider., content: {application/json: {schema: {$ref: "#/components/schemas/Models"}}}}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+    put:
+      operationId: setModels
+      description: |
+        Sets the model provider. A new key is first checked: the cell lists
+        the provider's models with it. Only if that works does the provider
+        change. The gateway takes it within a minute; agents need no restart.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/ModelsRequest"}}}
+      responses:
+        default: {$ref: "#/components/responses/Error"}
+        "200": {description: Set., content: {application/json: {schema: {$ref: "#/components/schemas/Models"}}}}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
   /v0/groups:
     get:
       operationId: listGroups
@@ -991,6 +1015,23 @@ components:
         password: {type: string, description: Stays in the cell; no answer holds it.}
         from: {type: string, description: "The sender, a plain address."}
         tls: {type: boolean, description: "TLS from the start (port 465); false: STARTTLS, which the server must offer."}
+    Models:
+      type: object
+      additionalProperties: false
+      required: [configured]
+      properties:
+        configured: {type: boolean, description: Agents have a model.}
+        provider: {type: string, enum: [anthropic, openai]}
+        baseUrl: {type: string}
+        model: {type: string}
+    ModelsRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        provider: {type: string, enum: [anthropic, openai], description: "Default: anthropic. openai means any OpenAI-compatible API (baseUrl required)."}
+        baseUrl: {type: string, description: "Default for anthropic: https://api.anthropic.com. For anthropic the address without /v1 (a trailing /v1 is dropped); for openai the address the API answers under, such as https://api.openai.com/v1."}
+        model: {type: string, description: "The provider's model name; default for anthropic: claude-opus-5-5."}
+        apiKey: {type: string, description: "Stays in the model gateway; no answer holds it. Empty keeps the key set before for the same provider and address."}
     BackupTarget:
       type: object
       additionalProperties: false

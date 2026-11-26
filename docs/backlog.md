@@ -160,8 +160,8 @@ A core part of the platform, not an add-on (E-78): agents and apps reach models 
 
 | Feature | Status | Depends on |
 |---|---|---|
-| Model gateway: one open model API in the cell, any provider or own model behind it; no agent code bound to one provider's SDK | open | O-30 |
-| Providers and keys in the console and the API (the customer's own keys), not only at install (`CELL_LLM_API_KEY`) | open | Model gateway |
+| Model gateway: one open model API in the cell, any provider or own model behind it; no agent code bound to one provider's SDK | built (E-80); the agent still uses the Anthropic SDK against the gateway | O-30 |
+| Providers and keys in the console and the API (the customer's own keys), not only at install (`CELL_LLM_API_KEY`) | built (E-80) | Model gateway |
 | Model per task: which model an agent uses, fallback to another provider | open | Model gateway |
 | Usage and costs, budget and limits per agent, app or department | open | Model gateway |
 | Run open models in the cell | open | Model gateway |

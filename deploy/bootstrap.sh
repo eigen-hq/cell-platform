@@ -36,10 +36,11 @@
 #   CELL_NAMES_ZONE, CELL_NAMES_DNS_TOKEN
 #                      run the naming service in this cell for a zone in the
 #                      Hetzner Cloud DNS (only the cell that serves others)
-#   CELL_LLM_API_KEY   the customer's model key for the ops agent (optional;
-#                      without it, agent tasks wait). Kept as Secret
-#                      cell-agent-llm; unsetting it later leaves the Secret.
-#   CELL_AGENT_MODEL   model of the ops agent (default: claude-opus-5-5)
+#   CELL_LLM_API_KEY   the customer's Anthropic key for the model gateway
+#                      (optional; an admin can set a provider in the console,
+#                      and without one agent tasks wait). Set, it replaces the
+#                      provider on every run; unset, the provider stays.
+#   CELL_AGENT_MODEL   the Anthropic model (default: claude-opus-5-5)
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=versions.env
@@ -388,17 +389,26 @@ if [ "$CELL_INGRESS_IP" != 127.0.0.1 ]; then
   RETRY_ATTEMPTS=24 retry mesh_joined || die "the cell's router did not join the mesh: kubectl -n cell-system logs deploy/cell-mesh-router"
 fi
 
-step "Ops agent"
-llm=unchanged
+step "Model gateway and ops agent"
 if [ -n "${CELL_LLM_API_KEY:-}" ]; then
-  llm_args=(apiKey="$CELL_LLM_API_KEY")
+  # Replaced as a whole: an OpenAI-compatible provider an admin set in the
+  # console must not keep its address for the Anthropic key.
+  llm_args=(provider=anthropic apiKey="$CELL_LLM_API_KEY")
   [ -n "${CELL_AGENT_MODEL:-}" ] && llm_args+=(model="$CELL_AGENT_MODEL")
-  llm=$(secret_manifest cell-system cell-agent-llm Opaque "${llm_args[@]}" | kubectl apply -f -)
+  llm=$(secret_manifest cell-system cell-agent-llm Opaque "${llm_args[@]}")
+  if kubectl -n cell-system get secret cell-agent-llm -o name >/dev/null 2>&1; then
+    kubectl replace -f - <<<"$llm" >/dev/null
+  else
+    kubectl create -f - <<<"$llm" >/dev/null
+  fi
 fi
+apply models.yaml
 apply agent.yaml
-# The key is read at start: a new one needs a restart.
-case $llm in *unchanged*) ;; *) kubectl -n cell-system rollout restart deploy/cell-agent >/dev/null ;; esac
-# Up only once the operator created the agent's account (Secret cell-agent).
+# Both are up only once the operator created the agent's account and the
+# gateway's configuration (Secrets cell-agent, cell-models). The gateway
+# reloads its configuration and the agent asks for the provider: a new key
+# needs no restart.
+kubectl -n cell-system rollout status deploy/cell-models --timeout=5m >/dev/null
 kubectl -n cell-system rollout status deploy/cell-agent --timeout=5m >/dev/null
 
 step "MCP gateway"

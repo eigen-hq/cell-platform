@@ -26,8 +26,8 @@ var systemPrompt string
 // Agent works on the cell's pending tasks, one at a time.
 type Agent struct {
 	API *API
-	// Model is nil without a model key: tasks then wait for an agent that
-	// has one.
+	// Model is the model gateway (E-80); nil without a key to it: tasks
+	// then wait for an agent that has one.
 	Model   *anthropic.Client
 	ModelID string
 	Log     *slog.Logger
@@ -49,14 +49,24 @@ type task struct {
 // Run works on tasks until ctx ends.
 func (a *Agent) Run(ctx context.Context) error {
 	if a.Model == nil {
-		a.Log.Warn("no model key (Secret cell-agent-llm, key apiKey): tasks wait for an agent that has one")
+		a.Log.Warn("no key to the model gateway (Secret cell-agent, key modelKey): tasks wait for an agent that has one")
 		<-ctx.Done()
 		return nil
 	}
+	waiting := false
 	for {
-		err := a.abandon(ctx)
-		if err == nil {
-			err = a.Once(ctx)
+		ready, err := a.ready(ctx)
+		if err == nil && ready != !waiting {
+			waiting = !ready
+			if waiting {
+				a.Log.Warn("no model provider set (PUT /v0/models): tasks wait")
+			}
+		}
+		if err == nil && ready {
+			err = a.abandon(ctx)
+			if err == nil {
+				err = a.Once(ctx)
+			}
 		}
 		if err != nil {
 			a.Log.Error("tasks", "error", err)
@@ -67,6 +77,16 @@ func (a *Agent) Run(ctx context.Context) error {
 		case <-time.After(a.Poll):
 		}
 	}
+}
+
+// ready tells whether the cell has a model provider: without one, the
+// gateway serves no model and a task would only fail.
+func (a *Agent) ready(ctx context.Context) (bool, error) {
+	var v struct {
+		Configured bool `json:"configured"`
+	}
+	err := a.API.JSON(ctx, http.MethodGet, "/v0/models", "", nil, &v)
+	return v.Configured, err
 }
 
 // abandon ends the tasks of this agent that are still running between two

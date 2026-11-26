@@ -15,6 +15,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/v2/option"
 
 	"github.com/eigen-hq/cell-platform/internal/agent"
+	"github.com/eigen-hq/cell-platform/internal/cell"
 )
 
 func main() {
@@ -39,8 +40,8 @@ func run(log *slog.Logger) error {
 			ClientID: "cell-api", Username: username, Password: password,
 			HTTP: &http.Client{Timeout: 60 * time.Second},
 		},
-		// E-33: the customer's model key; the model can be exchanged.
-		ModelID: env("CELL_AGENT_MODEL", "claude-opus-5-5"),
+		// The model gateway sends the model an admin set (E-80).
+		ModelID: cell.ModelAlias,
 		Log:     log,
 		Poll:    10 * time.Second,
 	}

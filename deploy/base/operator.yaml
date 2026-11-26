@@ -129,7 +129,7 @@ rules:
     verbs: [get, list, watch, create]
   - apiGroups: [""]
     resources: [secrets]
-    resourceNames: [cell-agent, backup-target, backup-target-request]
+    resourceNames: [cell-agent, cell-models, backup-target, backup-target-request]
     verbs: [update, delete]
   - apiGroups: [""]
     resources: [pods]

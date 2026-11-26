@@ -109,6 +109,21 @@ func TestEnsureAgentAccount(t *testing.T) {
 	if g := id.accounts["cell-agent"]; len(g) != 1 || g[0] != "cell-agents" {
 		t.Errorf("account groups %v", g)
 	}
+	key := string(s.Data["modelKey"])
+	if len(key) != 64 {
+		t.Errorf("model key %q", key)
+	}
+	// A cell from before the model gateway keeps its password and gets a key.
+	delete(s.Data, "modelKey")
+	if err := c.Update(ctx, &s); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureAgentAccount(ctx, c, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Get(ctx, client.ObjectKeyFromObject(&s), &s); err != nil || string(s.Data["password"]) != "pw-1" || len(s.Data["modelKey"]) != 64 || string(s.Data["modelKey"]) == key {
+		t.Errorf("secret %v: %v", s.Data, err)
+	}
 	// A secret without a password (made by hand) gets one.
 	s.Data = map[string][]byte{"username": []byte("cell-agent")}
 	if err := c.Update(ctx, &s); err != nil {

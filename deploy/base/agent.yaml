@@ -1,7 +1,8 @@
 # The ops agent. It has no rights in the cluster (no service account
 # token): it works only through the platform API with its own account,
-# which the operator creates (Secret cell-agent). The model key is the
-# customer's (E-07), optional: without it tasks wait.
+# which the operator creates (Secret cell-agent). It reaches its model
+# through the model gateway (models.yaml); without a provider set, tasks
+# wait.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -32,10 +33,13 @@ spec:
               valueFrom: {secretKeyRef: {name: cell-agent, key: username}}
             - name: CELL_AGENT_PASSWORD
               valueFrom: {secretKeyRef: {name: cell-agent, key: password}}
+            # The model gateway (E-80) and the agent's own key to it; the
+            # provider's key stays in the gateway. The operator adds the key
+            # to Secret cell-agent: until then the pod waits.
+            - name: ANTHROPIC_BASE_URL
+              value: http://cell-models.cell-system.svc.cluster.local
             - name: ANTHROPIC_API_KEY
-              valueFrom: {secretKeyRef: {name: cell-agent-llm, key: apiKey, optional: true}}
-            - name: CELL_AGENT_MODEL
-              valueFrom: {secretKeyRef: {name: cell-agent-llm, key: model, optional: true}}
+              valueFrom: {secretKeyRef: {name: cell-agent, key: modelKey}}
           resources:
             requests: {cpu: 10m, memory: 32Mi}
             limits: {memory: 128Mi}

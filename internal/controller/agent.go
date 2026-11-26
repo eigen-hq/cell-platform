@@ -2,8 +2,11 @@ package controller
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"hash/fnv"
+	"maps"
 	"strings"
 	"time"
 
@@ -25,8 +28,9 @@ type AgentIdentity interface {
 
 // EnsureAgentAccount gives the ops agent its account in the identity (a
 // service account in the agents' group, so the API gives it the agent
-// role) and its credentials as Secret cell-system/cell-agent, once. The
-// agent has no rights in the cluster: it works through the API alone.
+// role) and its credentials as Secret cell-system/cell-agent, once: its
+// password and its key to the model gateway. The agent has no rights in the
+// cluster: it works through the API alone.
 func EnsureAgentAccount(ctx context.Context, c client.Client, id AgentIdentity) error {
 	if err := id.EnsureServiceAccount(ctx, cell.AgentAccount, cell.AgentGroup); err != nil {
 		return err
@@ -34,17 +38,32 @@ func EnsureAgentAccount(ctx context.Context, c client.Client, id AgentIdentity) 
 	s := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: cell.SystemNamespace, Name: cell.AgentAccount}}
 	err := c.Get(ctx, client.ObjectKeyFromObject(s), s)
 	switch {
-	case err == nil && len(s.Data["password"]) > 0:
+	case err == nil && len(s.Data["password"]) > 0 && len(s.Data[cell.AgentModelKey]) > 0:
 		return nil
 	case err != nil && !apierrors.IsNotFound(err):
 		return err
 	}
-	password, perr := id.CreateAppPassword(ctx, cell.AgentAccount)
-	if perr != nil {
-		return perr
+	data := map[string][]byte{"username": []byte(cell.AgentAccount)}
+	if err == nil {
+		maps.Copy(data, s.Data)
+	}
+	if len(data["password"]) == 0 {
+		password, perr := id.CreateAppPassword(ctx, cell.AgentAccount)
+		if perr != nil {
+			return perr
+		}
+		data["password"] = []byte(password)
+	}
+	// The agent's own key to the model gateway (E-80).
+	if len(data[cell.AgentModelKey]) == 0 {
+		key := make([]byte, 32)
+		if _, rerr := rand.Read(key); rerr != nil {
+			return rerr
+		}
+		data[cell.AgentModelKey] = []byte(hex.EncodeToString(key))
 	}
 	s.Type = corev1.SecretTypeOpaque
-	s.Data = map[string][]byte{"username": []byte(cell.AgentAccount), "password": []byte(password)}
+	s.Data = data
 	if apierrors.IsNotFound(err) {
 		return c.Create(ctx, s)
 	}

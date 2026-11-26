@@ -187,7 +187,7 @@ The installation saves them in `/etc/cell/install.env`; later runs do not need t
 | `CELL_BACKUP_S3_*` | Backup target already at installation (`ENDPOINT`, `REGION`, `BUCKET`, `ACCESS_KEY`, `SECRET_KEY`); on a later run another target goes through the same check and switch as one set in the console, and the run waits for it | none, set it up in the console |
 | `CELL_BACKUP_S3_PRIVATE_NETWORK` | `true` allows an `http://` endpoint, only with a private IP address as its host (no host name); otherwise the endpoint must be `https://` | `false` |
 | `CELL_BACKUP_PASSWORD` | Backup key; a later run with another one stops, the key encrypts the backups | generated |
-| `CELL_LLM_API_KEY` | Anthropic key for the ops agent | without it: agent tasks wait |
+| `CELL_LLM_API_KEY` | Anthropic key for the model gateway; set, it replaces the provider on every run | without it: an admin sets a provider in the console (Organization, Models); until then agent tasks wait |
 
 ### Backup target through the API
 

@@ -223,8 +223,8 @@ spec:
     - name: api
       expression: "request.userInfo.username == 'system:serviceaccount:cell-system:cell-api'"
   validations:
-    - expression: "object.metadata.name == 'backup-target-request' && object.type == 'Opaque'"
-      message: "in cell-system the platform API only creates the request for a new backup target"
+    - expression: "object.metadata.name in ['backup-target-request', 'cell-agent-llm'] && object.type == 'Opaque'"
+      message: "in cell-system the platform API only creates the request for a new backup target and the model provider"
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -233,6 +233,37 @@ metadata:
 spec:
   policyName: cell-api-backup-target
   validationActions: [Deny]
+---
+# The model provider (E-80): the API reads what the operator tells about it
+# and writes the provider; it never reads the provider's key back.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cell-api-models
+  namespace: cell-system
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [cell-models-status]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [cell-agent-llm]
+    verbs: [patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cell-api-models
+  namespace: cell-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cell-api-models
+subjects:
+  - kind: ServiceAccount
+    name: cell-api
+    namespace: cell-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

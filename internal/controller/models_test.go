@@ -1,0 +1,115 @@
+package controller
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"strings"
+	"testing"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/yaml"
+
+	"github.com/eigen-hq/cell-platform/internal/cell"
+)
+
+// The gateway admits only the agent's key, by its hash, and sends every
+// model name to the configured model; settings from before the gateway are
+// Anthropic.
+func TestModelsConfig(t *testing.T) {
+	ctx := context.Background()
+	agentKey := strings.Repeat("a", 64)
+	providerKey := "provider-" + strings.Repeat("x", 8)
+	c := fakeClient(k8s.Scheme(),
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: "cell-system", Name: "cell-agent"}, Data: map[string][]byte{"modelKey": []byte(agentKey)}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: "cell-system", Name: "cell-agent-llm"}, Data: map[string][]byte{"apiKey": []byte(providerKey)}})
+	r := &ModelsReconciler{Client: c}
+	if _, err := r.Reconcile(ctx, ctrl.Request{}); err != nil {
+		t.Fatal(err)
+	}
+	var s corev1.Secret
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "cell-system", Name: "cell-models"}, &s); err != nil {
+		t.Fatal(err)
+	}
+	var conf struct {
+		LLM struct {
+			Models []struct {
+				Name, Provider string
+				Params         map[string]string
+			}
+			Policies struct {
+				APIKey struct {
+					Mode string
+					Keys []struct {
+						KeyHash string `json:"keyHash"`
+					}
+				} `json:"apiKey"`
+			}
+		} `json:"llm"`
+	}
+	if err := yaml.Unmarshal(s.Data["config.yaml"], &conf); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(agentKey))
+	keys := conf.LLM.Policies.APIKey.Keys
+	if conf.LLM.Policies.APIKey.Mode != "strict" || len(keys) != 1 || keys[0].KeyHash != "sha256:"+hex.EncodeToString(sum[:]) {
+		t.Errorf("api key policy %+v", conf.LLM.Policies.APIKey)
+	}
+	if strings.Contains(string(s.Data["config.yaml"]), agentKey) {
+		t.Error("the agent's key is in the gateway's configuration")
+	}
+	m := conf.LLM.Models
+	if len(m) != 1 || m[0].Name != "*" || m[0].Provider != "anthropic" || m[0].Params["model"] != cell.DefaultModel || m[0].Params["apiKey"] != providerKey {
+		t.Errorf("models %+v", m)
+	}
+	var cm corev1.ConfigMap
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "cell-system", Name: "cell-models-status"}, &cm); err != nil {
+		t.Fatal(err)
+	}
+	if got := cm.Data["models.json"]; got != `{"configured":true,"provider":"anthropic","model":"claude-opus-5-5"}` || strings.Contains(got, providerKey) {
+		t.Errorf("status %s", got)
+	}
+	set := &corev1.Secret{}
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "cell-system", Name: "cell-agent-llm"}, set); err != nil {
+		t.Fatal(err)
+	}
+	if cm.Data["settingsVersion"] != set.ResourceVersion {
+		t.Errorf("status of version %q, settings %q", cm.Data["settingsVersion"], set.ResourceVersion)
+	}
+	render := func(data map[string][]byte) map[string]string {
+		t.Helper()
+		set.Data = data
+		if err := c.Update(ctx, set); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.Reconcile(ctx, ctrl.Request{}); err != nil {
+			t.Fatal(err)
+		}
+		if err := c.Get(ctx, client.ObjectKeyFromObject(&s), &s); err != nil {
+			t.Fatal(err)
+		}
+		conf.LLM.Models = nil
+		if err := yaml.Unmarshal(s.Data["config.yaml"], &conf); err != nil {
+			t.Fatal(err)
+		}
+		if len(conf.LLM.Models) != 1 {
+			t.Fatalf("models %+v", conf.LLM.Models)
+		}
+		return conf.LLM.Models[0].Params
+	}
+	// The gateway takes baseUrl as the whole prefix and adds /messages: the
+	// Anthropic address gets the API's /v1, the one the check lists models at.
+	if p := render(map[string][]byte{"baseUrl": []byte("https://anthropic.example.com"), "apiKey": []byte(providerKey)}); p["baseUrl"] != "https://anthropic.example.com/v1" {
+		t.Errorf("anthropic params %+v", p)
+	}
+
+	// An own model behind an OpenAI-compatible address needs no key; its
+	// address already is the whole prefix.
+	p := render(map[string][]byte{"provider": []byte("openai"), "baseUrl": []byte("http://llm.app-models.svc/v1"), "model": []byte("qwen3")})
+	if conf.LLM.Models[0].Provider != "openAI" || p["baseUrl"] != "http://llm.app-models.svc/v1" || p["apiKey"] != "" {
+		t.Errorf("models %+v", conf.LLM.Models)
+	}
+}

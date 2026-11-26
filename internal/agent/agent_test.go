@@ -51,6 +51,8 @@ func newCell(t *testing.T, script agenttest.Script, objs ...client.Object) *cell
 			pods = append(pods, p)
 		}
 	}
+	// The operator tells that a provider is set.
+	objs = append(objs, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: "cell-system", Name: "cell-models-status"}, Data: map[string]string{"models.json": `{"configured":true}`}})
 	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).
 		WithStatusSubresource(&cellv1.App{}, &cellv1.Task{}, &cellv1.ChangeRequest{}).Build()
 	api := httptest.NewServer((&cellapi.Server{
@@ -357,3 +359,25 @@ func TestLostClaim(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// Without a model provider the agent claims no task: it would only fail.
+func TestNoProvider(t *testing.T) {
+	pending := &cellv1.Task{ObjectMeta: metav1.ObjectMeta{Name: "board-diagnose-1"},
+		Spec: cellv1.TaskSpec{Kind: "diagnose", App: "board", Requester: cellv1.Requester{Kind: "Operator", Name: "cell-operator"}}}
+	c := newCell(t, func(agenttest.Conversation) (agenttest.Turn, error) {
+		return agenttest.Turn{}, errors.New("the model must not run")
+	}, pending)
+	status := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: "cell-system", Name: "cell-models-status"}, Data: map[string]string{"models.json": `{"configured":false}`}}
+	if err := c.kube.Update(context.Background(), status); err != nil {
+		t.Fatal(err)
+	}
+	c.agent.Poll = 10 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if err := c.agent.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := c.task(t, "board-diagnose-1"); got.Status.Phase != "" || got.Status.Assignee != "" {
+		t.Errorf("task without a provider %+v", got.Status)
+	}
+}

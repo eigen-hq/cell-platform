@@ -1,0 +1,63 @@
+# The model gateway (agentgateway, E-80): the one model API of the cell. It
+# speaks the Anthropic Messages API and the OpenAI-compatible one and sends
+# every request to the provider an admin set, with the provider's key, which
+# stays here. Only keys it knows get through: each agent has its own. The
+# operator writes its configuration (Secret cell-models); the gateway
+# reloads it when it changes. No Ingress: it serves the cell's agents only.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cell-models
+  namespace: cell-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cell-models
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cell-models
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: gateway
+          image: cr.agentgateway.dev/agentgateway:${AGENTGATEWAY_VERSION}
+          args: [-f, /config/config.yaml]
+          ports:
+            - name: http
+              containerPort: 3000
+            - name: ready
+              containerPort: 15021
+          readinessProbe:
+            httpGet: {path: /healthz/ready, port: ready}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+      volumes:
+        # Mounted as a directory: kubelet updates it in place.
+        - name: config
+          secret:
+            secretName: cell-models
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cell-models
+  namespace: cell-system
+spec:
+  selector:
+    app.kubernetes.io/name: cell-models
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
