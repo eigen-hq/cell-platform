@@ -107,6 +107,27 @@ if [ "$(cat "$config" 2>/dev/null)" != "$want" ]; then
   printf '%s\n' "$want" >"$config"
   changed=1
 fi
+# Ubuntu 26.04 restricts unconfined processes: k3s' runc then stacks the
+# containers' AppArmor profile onto "unconfined", and containerd's profile
+# denies the signals between a container's own processes (containerd#14485,
+# E-83). The apparmor package gives /usr/sbin/runc a named profile against
+# this; the same profile covers k3s' runc here, and the package's file is set
+# aside so the two do not compete for the name.
+# name_k3s_runc <dir> does that in the AppArmor directory dir. It loads the
+# profile on every run: a load that failed is tried again.
+name_k3s_runc() {
+  local profile
+  profile=$(sed 's#^profile runc /usr/{bin,sbin}/runc #profile runc /{usr/{bin,sbin},var/lib/rancher/k3s/data/*/bin}/runc #' "$1/runc")
+  grep -q '^profile runc /{usr/{bin,sbin},var/lib/rancher/k3s/data/\*/bin}/runc ' <<<"$profile" ||
+    die "$1/runc has an unknown form; containers on this machine would not get signals (containerd#14485)"
+  [ "$(cat "$1/cell-runc" 2>/dev/null)" = "$profile" ] || printf '%s\n' "$profile" >"$1/cell-runc"
+  mkdir -p "$1/disable"
+  ln -sfn "$1/runc" "$1/disable/runc"
+  apparmor_parser -r "$1/cell-runc"
+}
+if [ "$(sysctl -n kernel.apparmor_restrict_unprivileged_unconfined 2>/dev/null)" = 1 ] && [ -f /etc/apparmor.d/runc ]; then
+  name_k3s_runc /etc/apparmor.d
+fi
 mirrors=$(printf 'mirrors:\n  registry.cell.internal:\n')
 if [ "$(cat /etc/rancher/k3s/registries.yaml 2>/dev/null)" != "$mirrors" ]; then
   printf '%s\n' "$mirrors" >/etc/rancher/k3s/registries.yaml

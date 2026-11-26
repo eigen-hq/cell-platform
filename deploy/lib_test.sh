@@ -319,6 +319,25 @@ out=$(: >"$CELL_STEP_FILE"; K3S_TEST_FAIL=none k3s_sums install_k3s agent "$tmp/
 check "install_k3s puts the pinned k3s in place and sets up the service" "0:new k3s:binary $tmp/k3s/bin agent" "$rc:$(cat "$tmp/k3s/bin/k3s"):$(cat "$tmp/k3s/ran" 2>/dev/null)"
 unset -f curl uname k3s_sums sha install_k3s
 
+# name_k3s_runc widens the apparmor package's runc profile to k3s' runc and
+# loads it on every run, so a failed load is tried again (E-83).
+source <(sed -n '/^name_k3s_runc()/,/^}/p' "$here/node.sh")
+aa=$tmp/apparmor
+mkdir -p "$aa"
+printf 'abi <abi/5.0>,\nprofile runc /usr/{bin,sbin}/runc flags=(unconfined) {\n  userns,\n}\n' >"$aa/runc"
+apparmor_parser() { echo "$*" >>"$tmp/aa-loaded"; [ -z "${AA_FAIL:-}" ]; }
+(AA_FAIL=1 name_k3s_runc "$aa") 2>/dev/null && rc=0 || rc=$?
+check "a failed profile load fails the run" "1" "$rc"
+rm -f "$tmp/aa-loaded"
+(name_k3s_runc "$aa") && rc=0 || rc=$?
+check "the rerun loads the profile again" "0:-r $aa/cell-runc" "$rc:$(cat "$tmp/aa-loaded")"
+check "the profile also covers k3s' runc" "1" "$(grep -c '^profile runc /{usr/{bin,sbin},var/lib/rancher/k3s/data/\*/bin}/runc flags=(unconfined) {$' "$aa/cell-runc")"
+check "the package's profile is set aside" "$aa/runc" "$(readlink "$aa/disable/runc")"
+printf 'profile runc /opt/runc {\n}\n' >"$aa/runc"
+(name_k3s_runc "$aa") 2>/dev/null && rc=0 || rc=$?
+check "an unknown runc profile stops the run" "1" "$rc"
+unset -f apparmor_parser name_k3s_runc
+
 # install.sh starts node.sh as a process of its own: it passes every pin
 # node.sh needs.
 call=$(grep '"$here/node.sh"' "$here/install.sh")
