@@ -1,9 +1,9 @@
 // Unit checks of the backup target helpers, run by node (npm run check).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checking, requestOf, shown, type TargetForm } from "../src/lib/backup.ts";
+import { checking, plainHttp, requestOf, shown, type TargetForm } from "../src/lib/backup.ts";
 
-const form: TargetForm = { provider: "hetzner", region: "nbg1", endpoint: "https://ignored", otherRegion: "x", bucket: " bk ", accessKey: "AK", secretKey: "sk\n", prefix: "/a/b/" };
+const form: TargetForm = { provider: "hetzner", region: "nbg1", endpoint: "https://ignored", otherRegion: "x", bucket: " bk ", accessKey: "AK", secretKey: "sk\n", prefix: "/a/b/", privateNetwork: true };
 
 test("the form asks for Hetzner's endpoint of the region, or the one typed in", () => {
   assert.deepEqual(requestOf(form), { endpoint: "https://nbg1.your-objectstorage.com", region: "nbg1", bucket: "bk", accessKey: "AK", secretKey: "sk", prefix: "a/b" });
@@ -11,6 +11,16 @@ test("the form asks for Hetzner's endpoint of the region, or the one typed in", 
   assert.equal(other.endpoint, "https://s3.test");
   assert.equal(other.region, undefined);
   assert.equal(other.prefix, undefined);
+  assert.equal(other.privateNetwork, undefined);
+});
+
+test("plain http is asked for only for another service's http endpoint", () => {
+  const http = { ...form, provider: "other" as const, endpoint: " http://10.0.0.5:9000" };
+  assert.equal(plainHttp(http), true);
+  assert.equal(requestOf(http).privateNetwork, true);
+  assert.equal(requestOf({ ...http, privateNetwork: false }).privateNetwork, undefined);
+  assert.equal(plainHttp(form), false);
+  assert.equal(requestOf({ ...http, endpoint: "https://10.0.0.5" }).privateNetwork, undefined);
 });
 
 test("a poll from before the operator took up the check does not end it", () => {

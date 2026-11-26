@@ -198,6 +198,11 @@ func (r *BackupTargetReconciler) check(ctx context.Context, target, req *corev1.
 	if err != nil || d("bucket") == "" {
 		return ended(cell.CheckFailed, "the request is incomplete; ask again")
 	}
+	// The API checked it too; the request is checked here again, whoever
+	// wrote it (the installer does as well).
+	if err := cell.CheckBackupEndpoint(d("endpoint"), d("privateNetwork") == "true"); err != nil {
+		return ended(cell.CheckFailed, err.Error())
+	}
 
 	job := checkJob(r.RcloneImage, root)
 	if ok, err := ensureChild(ctx, r, job, string(req.UID)); err != nil || !ok {

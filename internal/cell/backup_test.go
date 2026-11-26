@@ -1,9 +1,38 @@
 package cell
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
+
+// Plain http only to a private address, asked for on purpose; the
+// installer runs the same cases (deploy/lib_test.sh).
+func TestCheckBackupEndpoint(t *testing.T) {
+	raw, err := os.ReadFile("testdata/endpoints.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, line := range strings.Split(string(raw), "\n") {
+		f := strings.Fields(line)
+		if len(f) == 0 || strings.HasPrefix(f[0], "#") {
+			continue
+		}
+		n++
+		err := CheckBackupEndpoint(f[0], f[1] == "true")
+		if got := map[bool]string{true: "ok", false: "refused"}[err == nil]; got != f[2] {
+			t.Errorf("%s private=%s: %s (%v), want %s", f[0], f[1], got, err, f[2])
+		}
+	}
+	if n < 20 {
+		t.Fatalf("only %d cases read", n)
+	}
+	// The endpoint goes into rclone.conf: a line break must not pass.
+	if CheckBackupEndpoint("https://s3.example.com\nendpoint = http://203.0.113.5", false) == nil {
+		t.Error("an endpoint with a line break passed")
+	}
+}
 
 // What the cell tells about each kind of target, as bootstrap or the
 // operator wrote it, and never a secret.

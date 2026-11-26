@@ -184,6 +184,7 @@ The installation saves them in `/etc/cell/install.env`; later runs do not need t
 | `CELL_INGRESS_IP` | Public address of the cell | address of the default route |
 | `CELL_NODE_IP` | Address for traffic between the machines | address in the private network, otherwise `CELL_INGRESS_IP` |
 | `CELL_BACKUP_S3_*` | Backup target already at installation (`ENDPOINT`, `REGION`, `BUCKET`, `ACCESS_KEY`, `SECRET_KEY`) | none, set it up in the console |
+| `CELL_BACKUP_S3_PRIVATE_NETWORK` | `true` allows an `http://` endpoint, only with a private IP address as its host (no host name); otherwise the endpoint must be `https://` | `false` |
 | `CELL_BACKUP_PASSWORD` | Backup key | generated |
 | `CELL_LLM_API_KEY` | Anthropic key for the ops agent | without it: agent tasks wait |
 

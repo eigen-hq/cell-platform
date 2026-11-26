@@ -116,6 +116,29 @@ check "backup_target_manifest writes rclone.conf as the operator does (no final 
 check "no target writes an empty rclone.conf" '  rclone.conf: ""' "$(backup_target_manifest "" root= | grep rclone.conf)"
 check "backup_target_manifest keeps values out of argv" "0" "$(grep -cE 'masterkey|hunter3|s3secret' "$FAKE_LOG" || true)"
 
+# The endpoint rule, from the cases the Go side tests too.
+while read -r endpoint private want; do
+  case $endpoint in '' | '#'*) continue ;; esac
+  check "endpoint $endpoint (private network: $private)" "$want" "$(backup_endpoint_ok "$endpoint" "$private" && echo ok || echo refused)"
+done <"$here/../internal/cell/testdata/endpoints.txt"
+inject=$'https://s3.example.com\nendpoint = http://203.0.113.5'
+check "an endpoint with a line break is refused" "refused" "$(backup_endpoint_ok "$inject" false && echo ok || echo refused)"
+s3ok() { env CELL_BACKUP_S3_ACCESS_KEY=AK CELL_BACKUP_S3_SECRET_KEY=sk "$@" bash -c 'source "$1"; s3_env_ok' _ "$here/lib.sh" >/dev/null 2>&1 && echo ok || echo refused; }
+check "an https target passes" "ok" "$(s3ok CELL_BACKUP_S3_ENDPOINT=https://s3.example.com)"
+check "an injected endpoint is refused" "refused" "$(s3ok CELL_BACKUP_S3_ENDPOINT="$inject")"
+check "a key with a line break is refused" "refused" "$(s3ok CELL_BACKUP_S3_ENDPOINT=https://s3.example.com CELL_BACKUP_S3_SECRET_KEY=$'sk\nendpoint = http://203.0.113.5')"
+check "a key with a comment mark is refused" "refused" "$(s3ok CELL_BACKUP_S3_ENDPOINT=https://s3.example.com CELL_BACKUP_S3_ACCESS_KEY='a#b')"
+check "a region with a space is refused" "refused" "$(s3ok CELL_BACKUP_S3_ENDPOINT=https://s3.example.com CELL_BACKUP_S3_REGION='a b')"
+check "plain http needs the flag" "refused" "$(s3ok CELL_BACKUP_S3_ENDPOINT=http://10.0.0.5:9000)"
+check "plain http to a private IP with the flag passes" "ok" "$(s3ok CELL_BACKUP_S3_ENDPOINT=http://10.0.0.5:9000 CELL_BACKUP_S3_PRIVATE_NETWORK=true)"
+# The installer refuses such a target before it changes anything.
+printf '#!/bin/sh\nexit 1\n' >"$tmp/curl" && chmod +x "$tmp/curl"
+: >"$FAKE_LOG"
+out=$(unset CELL_UI_LOG CELL_STEP_FILE CELL_STEP_DIR; CELL_DOMAIN=c.example.com OPERATOR_IMAGE=x CELL_BACKUP_S3_ENDPOINT=http://203.0.113.5 CELL_BACKUP_S3_PRIVATE_NETWORK=true "$here/bootstrap.sh" 2>&1) && rc=0 || rc=$?
+check "bootstrap stops on a public http target" "1 https" "$rc $(grep -o https <<<"$out" | head -1)"
+check "bootstrap stops before any kubectl call" "" "$(cat "$FAKE_LOG")"
+rm "$tmp/curl"
+
 BASE_DIR=$tmp
 printf 'host: ${CELL_DOMAIN}\n' >"$tmp/t.yaml"
 export CELL_DOMAIN=example.org; check "render substitutes" "host: example.org" "$(render t.yaml)"

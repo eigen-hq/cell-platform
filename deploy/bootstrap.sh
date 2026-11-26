@@ -18,7 +18,9 @@
 #   Backup target (optional; the console sets one too), one of:
 #   CELL_BACKUP_S3_ENDPOINT, CELL_BACKUP_S3_BUCKET, CELL_BACKUP_S3_ACCESS_KEY,
 #   CELL_BACKUP_S3_SECRET_KEY (CELL_BACKUP_S3_REGION optional)
-#                      an S3 bucket
+#                      an S3 bucket, over https; plain http only with
+#                      CELL_BACKUP_S3_PRIVATE_NETWORK=true and an IP address
+#                      of a private network as the endpoint's host (E-68)
 #   CELL_BACKUP_PATH   a directory on the first machine (a disk, a mounted NAS)
 #   CELL_BACKUP_RCLONE_CONFIG, CELL_BACKUP_RCLONE_ROOT
 #                      any rclone remote (SFTP, WebDAV, SMB, ...): a file with
@@ -58,6 +60,9 @@ CELL_STORAGE=${CELL_STORAGE:-local-path}
 BASE_DIR="$here/base"
 # shellcheck source=lib.sh
 source "$here/lib.sh"
+# A target named here is checked before anything changes; a stored one,
+# also one from before the gateway, stays as it is (E-68).
+[ -z "${CELL_BACKUP_S3_ENDPOINT:-}" ] || s3_env_ok
 
 # Namespaces first, with a label owned by our own field manager. Without an
 # owned field, the next server-side apply would rewrite their managed fields.

@@ -2,6 +2,8 @@ package cell
 
 import (
 	"fmt"
+	"net/netip"
+	"net/url"
 	"path"
 	"regexp"
 	"strings"
@@ -83,6 +85,45 @@ func DescribeBackupTarget(data map[string][]byte) BackupTarget {
 		t.Kind, t.Where = "other", conf["type"]+" remote, "+root
 	}
 	return t
+}
+
+// privateNetworks are the only places a backup target may be reached over
+// plain HTTP, and only when asked for on purpose (E-68): RFC 1918,
+// loopback, link-local, CGNAT and IPv6 unique local addresses.
+var privateNetworks = []netip.Prefix{
+	netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("172.16.0.0/12"), netip.MustParsePrefix("192.168.0.0/16"),
+	netip.MustParsePrefix("127.0.0.0/8"), netip.MustParsePrefix("169.254.0.0/16"), netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("::1/128"), netip.MustParsePrefix("fe80::/10"), netip.MustParsePrefix("fc00::/7"),
+}
+
+// CheckBackupEndpoint lets an S3 endpoint through if it is https, or http
+// with privateNetwork set and an address of a private network as its host.
+// A host name never passes over http: what it resolves to is not known
+// here and can change. The installer has the same rule (deploy/lib.sh,
+// backup_endpoint_ok); both test testdata/endpoints.txt.
+func CheckBackupEndpoint(endpoint string, privateNetwork bool) error {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return fmt.Errorf("endpoint: not a URL")
+	}
+	switch {
+	case u.Scheme == "https":
+		return nil
+	case u.Scheme != "http":
+		return fmt.Errorf("endpoint: an https URL")
+	case !privateNetwork:
+		return fmt.Errorf("endpoint: https only; plain http only on a private network, asked for on purpose")
+	}
+	ip, err := netip.ParseAddr(u.Hostname())
+	if err == nil && ip.Zone() == "" {
+		ip = ip.Unmap()
+		for _, n := range privateNetworks {
+			if n.Contains(ip) {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("endpoint: plain http only to an address of a private network (10/8, 172.16/12, 192.168/16, loopback, link-local, 100.64/10, fc00::/7), not to a host name")
 }
 
 // rcloneSection reads the options of one section of an rclone.conf.

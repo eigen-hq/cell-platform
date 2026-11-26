@@ -1,0 +1,33 @@
+# The rule for backup target endpoints (E-68), tested by
+# internal/cell/backup_test.go and deploy/lib_test.sh alike.
+# endpoint privateNetwork want
+https://fsn1.your-objectstorage.com false ok
+https://fsn1.your-objectstorage.com true ok
+https://10.0.0.5:9000 false ok
+http://s3.example.com false refused
+http://s3.example.com true refused
+http://minio.lan:9000 true refused
+http://localhost:9000 true refused
+http://10.0.0.5:9000 false refused
+http://10.0.0.5:9000 true ok
+http://172.16.0.1 true ok
+http://172.31.255.254:8080 true ok
+http://172.32.0.1 true refused
+http://192.168.1.10 true ok
+http://127.0.0.1:8080 true ok
+http://169.254.10.1 true ok
+http://100.64.0.1 true ok
+http://100.127.255.254 true ok
+http://100.128.0.1 true refused
+http://8.8.8.8 true refused
+http://203.0.113.5 true refused
+http://167772161 true refused
+http://10.1 true refused
+http://[::1]:8080 true ok
+http://[fd00::5]:9000 true ok
+http://[fc00::1] true ok
+http://[fe80::1] true ok
+http://[::ffff:10.0.0.1] true ok
+http://[::ffff:8.8.8.8] true refused
+http://[2001:db8::1] true refused
+ftp://10.0.0.5 true refused

@@ -53,7 +53,9 @@ docker inspect -f '{{json .NetworkSettings.Networks}}' cell-backup-s3 | grep -q 
 # so the endpoint is the container's address on the cell network.
 s3_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"$net\").IPAddress}}" cell-backup-s3)
 [ -n "$s3_ip" ] || die "backup S3 has no address on $net"
+# Plain http on the cell's own Docker network, on purpose (E-68).
 export CELL_BACKUP_S3_ENDPOINT=http://$s3_ip:8080 CELL_BACKUP_S3_BUCKET=cell-backups CELL_BACKUP_S3_REGION=us-east-1
+export CELL_BACKUP_S3_PRIVATE_NETWORK=true
 
 CELL_DOMAIN=${CELL_DOMAIN:-cell.localhost} "$here/bootstrap.sh"
 echo "local cell up in $(($(date +%s) - start))s"

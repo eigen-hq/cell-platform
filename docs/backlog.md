@@ -114,7 +114,7 @@ What is wanted and tried out happens in the office UI; the platform builds, oper
 | Restart of an app as an API action | open | |
 | Console: hide actions for viewers | open | |
 | Encrypt database backups and their WAL in the cell before they leave it (today only volume backups are encrypted with the backup key) | open | |
-| Backup targets over HTTPS only, plain HTTP only for a private network on purpose | open | |
+| Backup targets over HTTPS only, plain HTTP only for a private network on purpose | built (E-68), waiting for the daily run | |
 | A target set again by the installer goes through the operator's checked switch under the gateway lock | open | |
 | Join keys: the joining machine reads the key without the command line, the key expires on join, the policy bounds its lifetime | open | |
 | Namespaced permissions for operator and API instead of cluster-wide ones | open | |

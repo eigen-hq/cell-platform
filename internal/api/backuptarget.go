@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,6 +30,9 @@ type backupTargetRequest struct {
 	AccessKey string `json:"accessKey"`
 	SecretKey string `json:"secretKey"`
 	Prefix    string `json:"prefix,omitempty"`
+	// PrivateNetwork lets plain http through, to an address of a private
+	// network only (E-68).
+	PrivateNetwork bool `json:"privateNetwork,omitempty"`
 }
 
 var (
@@ -48,6 +52,9 @@ func (q *backupTargetRequest) check() error {
 		u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || (u.Path != "" && u.Path != "/") ||
 		len(q.Endpoint) > 256 || strings.ContainsFunc(q.Endpoint, func(r rune) bool { return r <= ' ' || r >= 0x7f }) {
 		return fmt.Errorf("endpoint: an http or https URL with a host only, such as https://fsn1.your-objectstorage.com")
+	}
+	if err := cell.CheckBackupEndpoint(q.Endpoint, q.PrivateNetwork); err != nil {
+		return err
 	}
 	q.Endpoint = strings.TrimSuffix(q.Endpoint, "/")
 	if q.Region == "" {
@@ -127,7 +134,7 @@ func (s *Server) setBackupTarget(w http.ResponseWriter, r *http.Request, c *Call
 		Type:       corev1.SecretTypeOpaque,
 		StringData: map[string]string{
 			"endpoint": q.Endpoint, "region": q.Region, "bucket": q.Bucket, "prefix": q.Prefix,
-			"accessKey": q.AccessKey, "secretKey": q.SecretKey,
+			"accessKey": q.AccessKey, "secretKey": q.SecretKey, "privateNetwork": strconv.FormatBool(q.PrivateNetwork),
 			"requester": c.Username, "requestedAt": at.Format(time.RFC3339Nano),
 		},
 	})

@@ -919,9 +919,10 @@ components:
       additionalProperties: false
       required: [endpoint, bucket, accessKey, secretKey]
       properties:
-        endpoint: {type: string, description: "http or https URL with a host only, such as https://fsn1.your-objectstorage.com."}
+        endpoint: {type: string, description: "https URL with a host only, such as https://fsn1.your-objectstorage.com. Plain http only with privateNetwork and an address of a private network as the host."}
         region: {type: string, description: "Default: us-east-1."}
         bucket: {type: string}
         accessKey: {type: string}
         secretKey: {type: string, description: Stays in the cell; no answer holds it.}
         prefix: {type: string, description: "Path in the bucket; default: the current one (the cell's domain)."}
+        privateNetwork: {type: boolean, description: "Allows a plain http endpoint, on purpose: its host must be an IP address of a private network (10/8, 172.16/12, 192.168/16, loopback, link-local, 100.64/10, fc00::/7), never a host name. Ignored for https."}

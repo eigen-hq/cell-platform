@@ -164,6 +164,51 @@ stored_backup_target() {
   export CELL_BACKUP_PASSWORD
 }
 
+# backup_endpoint_ok tells whether $1 may be an S3 backup target's endpoint
+# (E-68): https, or plain http only with $2 = true and an IP address of a
+# private network as its host, never a host name. The API and the operator
+# have the same rule (cell.CheckBackupEndpoint); both test
+# internal/cell/testdata/endpoints.txt.
+backup_endpoint_ok() {
+  python3 - "$1" "$2" <<'PY'
+import ipaddress, sys, urllib.parse
+endpoint, private = sys.argv[1], sys.argv[2] == "true"
+# urlsplit drops line breaks and tabs; the endpoint goes into rclone.conf.
+if any(c <= " " or c >= "\x7f" for c in endpoint):
+    sys.exit(1)
+try:
+    u = urllib.parse.urlsplit(endpoint)
+    host = u.hostname or ""
+except ValueError:
+    sys.exit(1)
+if u.scheme == "https":
+    sys.exit(0)
+if u.scheme != "http" or not private or "%" in host:
+    sys.exit(1)
+try:
+    ip = ipaddress.ip_address(host)
+except ValueError:
+    sys.exit(1)
+if ip.version == 6 and ip.ipv4_mapped:
+    ip = ip.ipv4_mapped
+nets = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16", "100.64.0.0/10", "::1/128", "fe80::/10", "fc00::/7"]
+sys.exit(0 if any(ip in ipaddress.ip_network(n) for n in nets) else 1)
+PY
+}
+
+# s3_env_ok stops the installer before it changes anything when the
+# CELL_BACKUP_S3_* variables name an endpoint it refuses (E-68) or hold
+# what rclone's config parser reads as more than the value, as
+# cell.S3RcloneConf refuses it.
+s3_env_ok() {
+  local v bad="[\"'\`%\\#;]"
+  for v in CELL_BACKUP_S3_ENDPOINT CELL_BACKUP_S3_ACCESS_KEY CELL_BACKUP_S3_SECRET_KEY CELL_BACKUP_S3_REGION; do
+    [[ ${!v:-x} =~ ^[[:graph:]]+$ && ! ${!v:-x} =~ $bad ]] || die "$v holds spaces, control characters or any of $bad"
+  done
+  backup_endpoint_ok "$CELL_BACKUP_S3_ENDPOINT" "${CELL_BACKUP_S3_PRIVATE_NETWORK:-false}" ||
+    die "CELL_BACKUP_S3_ENDPOINT must be https; plain http only with CELL_BACKUP_S3_PRIVATE_NETWORK=true and an IP address of a private network (10/8, 172.16/12, 192.168/16, loopback, link-local, 100.64/10, fc00::/7) as its host"
+}
+
 # apply_secret applies the Secret manifest on stdin and prints what kubectl
 # says. A failed apply can quote the manifest, values and all: of its
 # message only kubectl's kind of error reaches the log.

@@ -166,6 +166,34 @@ func TestBackupTargetCheck(t *testing.T) {
 	if err := c.Get(ctx, client.ObjectKey{Namespace: "cell-system", Name: checkJobName}, &batchv1.Job{}); !apierrors.IsNotFound(err) {
 		t.Errorf("orphaned check's job left behind: %v", err)
 	}
+
+	// Plain http only on a private network, asked for on purpose (E-68):
+	// whoever wrote the request, a refused one starts no Job.
+	plain := func(uid, endpoint, private string) *corev1.Secret {
+		q := request(uid, "s3cr3t")
+		q.Data["endpoint"], q.Data["privateNetwork"] = []byte(endpoint), []byte(private)
+		return q
+	}
+	for i, q := range []*corev1.Secret{plain("req-4", "http://10.0.0.5:9000", ""), plain("req-5", "http://minio.lan:9000", "true")} {
+		if err := c.Create(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+		if s = step(); s.Check.State != cell.CheckFailed || !strings.Contains(s.Check.Message, "http") {
+			t.Errorf("plain http %d: %+v", i, s.Check)
+		}
+		if err := c.Get(ctx, client.ObjectKey{Namespace: "cell-system", Name: checkJobName}, &batchv1.Job{}); !apierrors.IsNotFound(err) {
+			t.Errorf("plain http %d started a check: %v", i, err)
+		}
+	}
+	if err := c.Create(ctx, plain("req-6", "http://10.0.0.5:9000", "true")); err != nil {
+		t.Fatal(err)
+	}
+	if s = step(); s.Check.State != cell.CheckRunning {
+		t.Errorf("private http: %+v", s.Check)
+	}
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "cell-system", Name: checkJobName}, &batchv1.Job{}); err != nil {
+		t.Errorf("private http started no check: %v", err)
+	}
 }
 
 // The check Job takes its keys from the request secret, never as values,
