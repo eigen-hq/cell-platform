@@ -267,6 +267,23 @@ paths:
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
         "409": {$ref: "#/components/responses/Error"}
+  /v0/users/{name}:
+    parameters: [{$ref: "#/components/parameters/name"}]
+    delete:
+      operationId: removeUser
+      description: |
+        Removes a person from the cell: their account, sessions, app
+        passwords and an open invite end. A token already checked keeps
+        working until the API's short cache of it runs out. Admins cannot
+        remove themselves (another admin can), superusers (managed in the
+        identity itself) or service accounts (the platform's).
+      responses:
+        default: {$ref: "#/components/responses/Error"}
+        "204": {description: Removed.}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
   /v0/users/{name}/tokens:
     parameters: [{$ref: "#/components/parameters/name"}]
     post:

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -635,5 +636,37 @@ func TestInviteReplacesTheLastLink(t *testing.T) {
 	_, err = c.InviteUser(context.Background(), "alice", time.Hour)
 	if err == nil || strings.Contains(err.Error(), "flow_token") || strings.Contains(err.Error(), "key") {
 		t.Errorf("wrong host: %v", err)
+	}
+}
+
+// Only people are removed: no superuser, no service account, no hidden
+// account reaches a DELETE.
+func TestRemoveUser(t *testing.T) {
+	api := newFakeAPI()
+	api.objects["core/users/"] = []map[string]any{
+		{"pk": 1, "username": "root", "is_superuser": true},
+		{"pk": 2, "username": "cell-agent-ops", "type": "service_account"},
+		{"pk": 7, "username": PlatformAccount, "is_superuser": true},
+		{"pk": 9, "username": "alice", "type": "internal"},
+	}
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+	c := &Client{BaseURL: srv.URL, Token: "t", HTTP: srv.Client()}
+	ctx := context.Background()
+	for name, want := range map[string]error{"root": ErrSuperuser, "cell-agent-ops": ErrServiceAccount, PlatformAccount: ErrNotFound, "bob": ErrNotFound} {
+		if err := c.RemoveUser(ctx, name); !errors.Is(err, want) {
+			t.Errorf("removing %s: %v, want %v", name, err, want)
+		}
+	}
+	for _, call := range api.calls {
+		if strings.HasPrefix(call, "DELETE ") {
+			t.Errorf("call reached authentik: %s", call)
+		}
+	}
+	if err := c.RemoveUser(ctx, "alice"); err != nil {
+		t.Fatal(err)
+	}
+	if u, _ := c.find(ctx, "core/users/", url.Values{"username": {"alice"}}); u != nil {
+		t.Errorf("alice is still there: %v", u)
 	}
 }

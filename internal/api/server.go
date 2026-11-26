@@ -66,6 +66,7 @@ func RoleOf(groups []string) string {
 type Identity interface {
 	ListUsers(ctx context.Context) ([]authentik.User, error)
 	CreateUser(ctx context.Context, u authentik.User, password string) (authentik.User, error)
+	RemoveUser(ctx context.Context, username string) error
 	CreateAppPassword(ctx context.Context, username string) (string, error)
 	ListGroups(ctx context.Context) ([]authentik.Group, error)
 	CreateGroup(ctx context.Context, name string) (authentik.Group, error)
@@ -135,6 +136,7 @@ func (s *Server) routes() []route {
 		{"PUT", "/v0/apps/{name}/access", RoleAgent, s.setAccess},
 		{"GET", "/v0/users", RoleAgent, s.listUsers},
 		{"POST", "/v0/users", RoleAdmin, s.createUser},
+		{"DELETE", "/v0/users/{name}", RoleAdmin, s.removeUser},
 		{"POST", "/v0/users/{name}/tokens", RoleAdmin, s.createUserToken},
 		{"POST", "/v0/users/{name}/invite", RoleAdmin, s.inviteUser},
 		{"GET", "/v0/mail", RoleAdmin, s.getMail},

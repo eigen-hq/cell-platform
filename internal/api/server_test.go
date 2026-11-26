@@ -71,6 +71,22 @@ func (f *fakeIdentity) CreateUser(_ context.Context, u authentik.User, _ string)
 	return u, nil
 }
 
+func (f *fakeIdentity) RemoveUser(_ context.Context, username string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if username == "akadmin" { // a superuser in the fake
+		return fmt.Errorf("removing %q: %w", username, authentik.ErrSuperuser)
+	}
+	if username == "cell-agent-ops" {
+		return fmt.Errorf("user %q: %w", username, authentik.ErrServiceAccount)
+	}
+	if _, ok := f.users[username]; !ok {
+		return fmt.Errorf("user %q: %w", username, authentik.ErrNotFound)
+	}
+	delete(f.users, username)
+	return nil
+}
+
 func (f *fakeIdentity) CreateAppPassword(_ context.Context, username string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

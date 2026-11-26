@@ -31,7 +31,8 @@ api.use(auth);
 
 /** Turns an API answer into its data or throws its error message. */
 export function must<T>(r: { data?: T; error?: { error: string } | unknown; response: Response }): T {
-  if (r.data !== undefined) return r.data;
+  // 204 No Content (a removal) is a success without a body.
+  if (r.data !== undefined || r.response.status === 204) return r.data as T;
   const msg = (r.error as { error?: string } | undefined)?.error;
   throw new Error(msg || `The API answered HTTP ${r.response.status}.`);
 }

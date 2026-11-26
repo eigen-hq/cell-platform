@@ -138,7 +138,8 @@ What is wanted and tried out happens in the office UI; the platform builds, oper
 | Access per app through groups | running | |
 | Departments and teams as structure of the identity service | open | |
 | Invite a person: a mail with a link, the person sets password and second factor; no credentials sent by hand | built, not yet verified on a cell | System mail |
-| Person changes with approval, remove a person | open | |
+| Remove a person (admins; not themselves, superusers or service accounts) | built, not yet verified on a cell | |
+| Person changes with approval | open | |
 | Account help: password, second factor, lock, sessions | open | |
 | Login policy | open | |
 

@@ -26,6 +26,10 @@ var ErrSuperuser = errors.New("authentik superuser rights are managed in authent
 // authentik keeps for itself.
 var ErrReserved = errors.New("the name is reserved for the platform")
 
+// ErrServiceAccount is returned for removing a machine account: the
+// platform and its agents log in with them.
+var ErrServiceAccount = errors.New("service accounts belong to the platform and stay")
+
 // ErrInvalidName is returned for a name with control characters.
 var ErrInvalidName = errors.New("the name holds control characters")
 
@@ -229,6 +233,30 @@ func (c *Client) CreateUser(ctx context.Context, u User, password string) (User,
 		}
 	}
 	return u, nil
+}
+
+// RemoveUser deletes a person. Superusers (their rights stay in authentik),
+// service accounts (agents and the platform log in with them) and hidden
+// accounts are refused. authentik deletes the person's tokens and sessions
+// with them, so an open invite link and every app password end too.
+func (c *Client) RemoveUser(ctx context.Context, username string) error {
+	if internalUser(username) {
+		return fmt.Errorf("user %q: %w", username, ErrNotFound)
+	}
+	u, err := c.find(ctx, "core/users/", url.Values{"username": {username}})
+	if err != nil {
+		return err
+	}
+	if u == nil {
+		return fmt.Errorf("user %q: %w", username, ErrNotFound)
+	}
+	if strings.Contains(fmt.Sprint(u["type"]), "service_account") {
+		return fmt.Errorf("user %q: %w", username, ErrServiceAccount)
+	}
+	if u["is_superuser"] == true {
+		return fmt.Errorf("removing %q: %w", username, ErrSuperuser)
+	}
+	return c.do(ctx, http.MethodDelete, fmt.Sprintf("core/users/%v/", u["pk"]), nil, nil)
 }
 
 // EnsureServiceAccount creates a machine account if it is missing (no

@@ -71,3 +71,26 @@ func TestMailAndInvites(t *testing.T) {
 		t.Errorf("invite unknown: %d", code)
 	}
 }
+
+// Admins remove people, but not themselves, superusers or service accounts.
+func TestRemoveUser(t *testing.T) {
+	h := newHarness(t)
+	h.do("POST", "/v0/users", "admin", map[string]any{"username": "alice", "name": "Alice"})
+	h.do("POST", "/v0/users", "admin", map[string]any{"username": "admin-user", "name": "Me"})
+	for _, c := range []struct {
+		name, caller string
+		want         int
+	}{
+		{"alice", "viewer", 403},
+		{"admin-user", "admin", 400},
+		{"akadmin", "admin", 403},
+		{"cell-agent-ops", "admin", 400},
+		{"bob", "admin", 404},
+		{"alice", "admin", 204},
+		{"alice", "admin", 404},
+	} {
+		if code, body := h.do("DELETE", "/v0/users/"+c.name, c.caller, nil); code != c.want {
+			t.Errorf("%s removes %s: %d %v, want %d", c.caller, c.name, code, body, c.want)
+		}
+	}
+}

@@ -92,6 +92,22 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request, _ *Caller) e
 	return nil
 }
 
+func (s *Server) removeUser(w http.ResponseWriter, r *http.Request, c *Caller) error {
+	name := r.PathValue("name")
+	if name == c.Username {
+		return errorf(http.StatusBadRequest, "you cannot remove yourself; another admin can")
+	}
+	err := s.Identity.RemoveUser(r.Context(), name)
+	if errors.Is(err, authentik.ErrServiceAccount) {
+		return errorf(http.StatusBadRequest, "%v", err)
+	}
+	if err != nil {
+		return identityError(err)
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
 func (s *Server) createUserToken(w http.ResponseWriter, r *http.Request, _ *Caller) error {
 	token, err := s.Identity.CreateAppPassword(r.Context(), r.PathValue("name"))
 	if err != nil {

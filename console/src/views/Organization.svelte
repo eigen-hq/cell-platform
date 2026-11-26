@@ -196,6 +196,29 @@
     }
   }
 
+  // Removing a person asks once more in their row; it cannot be undone.
+  let removing = $state<string | null>(null);
+  async function remove(u: User) {
+    if (minting) return;
+    minting = true;
+    token = null;
+    tokenError = "";
+    personNote = null;
+    about = u.username;
+    try {
+      must(await api.DELETE("/v0/users/{name}", { params: { path: { name: u.username } } }));
+      removing = null;
+      about = null;
+      personNote = { text: `${u.name || u.username} is removed: their account, sessions and app passwords are gone.` };
+      await load();
+    } catch (err) {
+      removing = null;
+      tokenError = `${u.username}: ${msg(err)}`;
+    } finally {
+      minting = false;
+    }
+  }
+
   // System mail: invites and warnings to the admins go out through this server.
   let editingMail = $state(false);
   let mailForm = $state({ host: "", port: "", username: "", password: "", from: "", tls: false });
@@ -373,8 +396,15 @@
           <span class="who"><strong>{u.name || u.username}</strong><small>{u.username}{u.email ? ` · ${u.email}` : ""}</small></span>
           <span class="in">{#each [...new Set(u.groups)] as g (g)}<span class="chip">{g}</span>{/each}</span>
           <span class="acts">
-            <Button kind="quiet" disabled={minting} onclick={() => invite(u)}>Invite</Button>
-            <Button kind="quiet" disabled={minting} onclick={() => appPassword(u)}>App password</Button>
+            {#if removing === u.username}
+              <small>Remove {u.name || u.username} for good?</small>
+              <Button kind="danger" disabled={minting} onclick={() => remove(u)}>Remove</Button>
+              <Button kind="quiet" disabled={minting} onclick={() => (removing = null)}>Keep</Button>
+            {:else}
+              <Button kind="quiet" disabled={minting} onclick={() => invite(u)}>Invite</Button>
+              <Button kind="quiet" disabled={minting} onclick={() => appPassword(u)}>App password</Button>
+              <Button kind="quiet" disabled={minting} onclick={() => (removing = u.username)}>Remove</Button>
+            {/if}
           </span>
           {#if row === u.username}<div class="result">{@render results()}</div>{/if}
         </li>
