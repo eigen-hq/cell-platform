@@ -78,6 +78,13 @@ func (m Mail) Dial(ctx context.Context) (*smtp.Client, error) {
 		_ = c.Close()
 		return nil, err
 	}
+	// The greeting names the sender's domain: servers distrust "localhost",
+	// the default.
+	if _, domain, _ := strings.Cut(m.From, "@"); domain != "" {
+		if err := c.Hello(domain); err != nil {
+			return fail(err)
+		}
+	}
 	if !m.TLS {
 		if ok, _ := c.Extension("STARTTLS"); !ok {
 			return fail(errors.New("the server offers no STARTTLS; turn on TLS if it speaks TLS from the start (port 465)"))
