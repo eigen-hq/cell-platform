@@ -8,11 +8,14 @@ metadata:
 spec:
   title: Eigenbau-Platzhalter
   version: "1.12.0"
+  # Digest of the multi-arch index of the image for this version, verified
+  # 2026-11-26. A new version needs a new entry, or it runs by tag.
+  digests:
+    "1.12.0": sha256:c4717a8d1f0134a7444e24f881160e033991f23027c6c5a9a3f8fd22e70d1d44
   source:
     image:
       repository: traefik/whoami
-      # Digest of the multi-arch index, verified 2026-11-26; bump with version.
-      tag: "v1.12.0@sha256:c4717a8d1f0134a7444e24f881160e033991f23027c6c5a9a3f8fd22e70d1d44"
+      tag: "v{{ .app.version }}"
   access:
     subdomain: whoami
     port: 80

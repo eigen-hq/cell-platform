@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -181,5 +182,35 @@ func TestExistingDatabaseGetsThePinnedImage(t *testing.T) {
 	}
 	if db, _, _ := unstructured.NestedString(got.Object, "spec", "bootstrap", "initdb", "database"); db == "" {
 		t.Error("bootstrap configuration lost")
+	}
+}
+
+// The digest belongs to its version: after a version-only update the image
+// must not keep the digest of the old one.
+func TestDigestFollowsTheVersion(t *testing.T) {
+	const d1 = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	const d2 = "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+	app := &cellv1.App{Spec: cellv1.AppSpec{Version: "1", Digests: map[string]cellv1.Digest{"1": d1, "2": d2}}}
+	app.Name = "x"
+	image := func() string {
+		objs := imageWorkload(app, cellv1.ImageSource{Repository: "r/x"}, "")
+		for _, o := range objs {
+			if d, ok := o.(*appsv1.Deployment); ok {
+				return d.Spec.Template.Spec.Containers[0].Image
+			}
+		}
+		t.Fatal("no deployment")
+		return ""
+	}
+	if got := image(); got != "r/x:1@"+d1 {
+		t.Errorf("version 1: %s", got)
+	}
+	app.Spec.Version = "2"
+	if got := image(); got != "r/x:2@"+d2 || versionDigest(app) != d2 {
+		t.Errorf("version 2: %s", got)
+	}
+	app.Spec.Version = "3"
+	if got := image(); got != "r/x:3" || versionDigest(app) != "" {
+		t.Errorf("version without a digest keeps an old one: %s", got)
 	}
 }

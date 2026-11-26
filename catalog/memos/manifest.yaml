@@ -10,11 +10,13 @@ metadata:
 spec:
   title: Memos
   version: "26.11.1"
+  # Digest of the multi-arch index of the image for this version, verified
+  # 2026-11-26. A new version needs a new entry, or it runs by tag.
+  digests:
+    "26.11.1": sha256:5dcd6e6b973a55b964f2fe2ccdaa33319463ab448a23404ebb5d2acbd19299ba
   source:
     image:
       repository: neosmemo/memos
-      # Digest of the multi-arch index, verified 2026-11-26; bump with version.
-      tag: "26.11.1@sha256:5dcd6e6b973a55b964f2fe2ccdaa33319463ab448a23404ebb5d2acbd19299ba"
   needs:
     volumes:
       - name: data

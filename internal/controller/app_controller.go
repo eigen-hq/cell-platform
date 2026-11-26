@@ -310,7 +310,7 @@ func (r *AppReconciler) install(ctx context.Context, app *cellv1.App, target *ba
 	}
 
 	data := map[string]any{
-		"app":    map[string]any{"name": app.Name, "version": app.Spec.Version, "namespace": ns},
+		"app":    map[string]any{"name": app.Name, "version": app.Spec.Version, "digest": versionDigest(app), "namespace": ns},
 		"cell":   map[string]any{"domain": cfg.Domain, "caConfigMap": caConfigMap},
 		"access": map[string]any{"host": host, "url": "https://" + host},
 	}

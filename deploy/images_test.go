@@ -110,7 +110,9 @@ func TestCatalogImagesArePinned(t *testing.T) {
 	for _, f := range files {
 		var m struct {
 			Spec struct {
-				Source struct {
+				Version string
+				Digests map[string]string
+				Source  struct {
 					Image *struct{ Repository, Tag string }
 					Helm  *struct{ Values map[string]any }
 				}
@@ -119,18 +121,23 @@ func TestCatalogImagesArePinned(t *testing.T) {
 		if err := yaml.Unmarshal([]byte(read(t, f)), &m); err != nil {
 			t.Fatalf("%s: %v", f, err)
 		}
-		src := m.Spec.Source
+		sp := m.Spec
+		// The digest belongs to the version: a literal digest in the tag or
+		// the values would outlive a version change.
+		if !sumRe.MatchString(sp.Digests[sp.Version]) {
+			t.Errorf("%s: no digest for version %s in spec.digests", f, sp.Version)
+		}
 		switch {
-		case src.Image != nil:
-			if !pinnedRe.MatchString(src.Image.Tag) {
-				t.Errorf("%s: image %s:%s has no digest in its tag", f, src.Image.Repository, src.Image.Tag)
+		case sp.Source.Image != nil:
+			if strings.Contains(sp.Source.Image.Tag, "@") {
+				t.Errorf("%s: the tag carries a literal digest; use spec.digests", f)
 			}
-		case src.Helm != nil:
+		case sp.Source.Helm != nil:
 			// Charts take the digest as image.digest; a chart without that
 			// value needs its own check here.
-			img, _ := src.Helm.Values["image"].(map[string]any)
-			if d, _ := img["digest"].(string); !sumRe.MatchString(d) {
-				t.Errorf("%s: chart values set no image.digest", f)
+			img, _ := sp.Source.Helm.Values["image"].(map[string]any)
+			if d, _ := img["digest"].(string); d != "{{ .app.digest }}" {
+				t.Errorf("%s: chart values must set image.digest to {{ .app.digest }}, got %q", f, d)
 			}
 		default:
 			t.Errorf("%s: neither an image nor a chart source", f)
