@@ -186,6 +186,24 @@ func TestWaitingForHostIsNoError(t *testing.T) {
 	}
 }
 
+// An app removed without its namespace still gives up its host, also the
+// login proxy's route to it in the system namespace.
+func TestRemoveWithoutNamespaceFreesHost(t *testing.T) {
+	ctx := context.Background()
+	app := &cellv1.App{ObjectMeta: metav1.ObjectMeta{Name: "gone", Finalizers: []string{finalizer}}, Spec: plainSpec("gone")}
+	outpost := &networkingv1.Ingress{ObjectMeta: metav1.ObjectMeta{Namespace: "cell-system", Name: outpostIngress(app)}}
+	host := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: "cell-system", Name: "host-gone", Labels: map[string]string{hostLabel: "gone"}}}
+	r := &AppReconciler{Client: fakeClient(k8s.Scheme(), app, outpost, host), Identity: &fakeIdentity{}}
+	if _, err := r.remove(ctx, app, false); err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range []client.Object{outpost, host} {
+		if err := r.Get(ctx, client.ObjectKeyFromObject(o), o); !apierrors.IsNotFound(err) {
+			t.Errorf("%T %s left behind: %v", o, o.GetName(), err)
+		}
+	}
+}
+
 // An app never takes over a host another app has: a second app on the
 // same subdomain stops before it sets anything up, an app moving onto a
 // taken host stops while the other keeps it, and a reservation no cache

@@ -1,0 +1,147 @@
+# The cluster-wide rights of operator and API as v0.2.4 and v0.2.5 installed
+# them, before E-70: an installer rerun must take them back.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cell-operator
+rules:
+  - apiGroups: [cell.internal]
+    resources: [apps, apps/status, apps/finalizers, backups, backups/status, restores, restores/status, changerequests, changerequests/status]
+    verbs: ["*"]
+  # An app that needs attention gets a diagnose task for the ops agent.
+  - apiGroups: [cell.internal]
+    resources: [tasks]
+    verbs: [get, list, watch, create]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [get, list, watch, create, delete]
+  - apiGroups: [batch]
+    resources: [cronjobs]
+    verbs: [get, list, watch, patch]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [statefulsets]
+    verbs: [get, list, watch, update, patch]
+  - apiGroups: [postgresql.cnpg.io]
+    resources: [backups]
+    verbs: [get, list, watch, create, delete]
+  - apiGroups: [barmancloud.cnpg.io]
+    resources: [objectstores]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [namespaces, configmaps, secrets, services, persistentvolumeclaims]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses, networkpolicies]
+    verbs: [get, list, watch, create, update, patch, delete]
+  # Helm apps are deployed by their own ServiceAccount, admin of the app's
+  # namespace only.
+  - apiGroups: [""]
+    resources: [serviceaccounts]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [rolebindings]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [clusterroles]
+    resourceNames: [admin]
+    verbs: [bind]
+  - apiGroups: [postgresql.cnpg.io]
+    resources: [clusters]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [helm.toolkit.fluxcd.io]
+    resources: [helmreleases]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [source.toolkit.fluxcd.io]
+    resources: [helmrepositories, ocirepositories]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [traefik.io]
+    resources: [middlewares]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [cert-manager.io]
+    resources: [certificates]
+    verbs: [get, list, watch, create, update, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cell-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cell-operator
+subjects:
+  - kind: ServiceAccount
+    name: cell-operator
+    namespace: cell-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cell-api
+rules:
+  - apiGroups: [cell.internal]
+    resources: [apps, backups, restores]
+    verbs: [get, list, watch]
+  - apiGroups: [cell.internal]
+    resources: [backups]
+    verbs: [create]
+  - apiGroups: [cell.internal]
+    resources: [changerequests]
+    verbs: [get, list, watch, create, update]
+  # An install says whether it takes over data a removed app left behind.
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get]
+  # Tasks for agents: created by admins, claimed, recorded and finished by
+  # agents through the API.
+  - apiGroups: [cell.internal]
+    resources: [tasks]
+    verbs: [get, list, watch, create]
+  - apiGroups: [cell.internal]
+    resources: [tasks/status]
+    verbs: [update]
+  # Checking a manifest before anyone approves it: dry runs only, see the
+  # policy cell-api-dry-run below.
+  - apiGroups: [cell.internal]
+    resources: [apps]
+    verbs: [create]
+  # What admins and agents read when an app is in trouble.
+  - apiGroups: [""]
+    resources: [pods, events]
+    verbs: [list]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+  # The machines of the cell (E-44), what they use and their disks.
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [list]
+  - apiGroups: [metrics.k8s.io]
+    resources: [nodes]
+    verbs: [list]
+  - apiGroups: [longhorn.io]
+    resources: [nodes]
+    verbs: [list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cell-api
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cell-api
+subjects:
+  - kind: ServiceAccount
+    name: cell-api
+    namespace: cell-system

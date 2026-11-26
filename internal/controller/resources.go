@@ -49,6 +49,19 @@ func meta(app *cellv1.App, name string) metav1.ObjectMeta {
 	return metav1.ObjectMeta{Name: name, Namespace: Namespace(app.Name), Labels: labels(app)}
 }
 
+// grants give the operator and the API their rights in the app's namespace
+// (E-70): the operator's ClusterRole holds no writes in it, the API's no reads.
+func grants(app *cellv1.App) []client.Object {
+	bind := func(account, role string) client.Object {
+		return &rbacv1.RoleBinding{
+			ObjectMeta: meta(app, account),
+			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: role},
+			Subjects:   []rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Name: account, Namespace: cell.SystemNamespace}},
+		}
+	}
+	return []client.Object{bind("cell-operator", "cell-operator-app"), bind("cell-api", "cell-api-app")}
+}
+
 // namespaceObj is the app's namespace. Pods in it may not be privileged or
 // use the host's paths, network or processes, whoever writes them (the
 // operator or a chart): an app cannot reach past its namespace.

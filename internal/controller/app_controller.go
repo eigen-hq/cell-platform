@@ -143,16 +143,20 @@ func (r *AppReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-// +kubebuilder:rbac:groups=cell.internal,resources=apps;apps/status;apps/finalizers,verbs=*
-// +kubebuilder:rbac:groups=cell.internal,resources=tasks,verbs=get;list;watch;create
-
 func (r *AppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var app cellv1.App
 	if err := r.Get(ctx, req.NamespacedName, &app); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	// Before anything else, also while the app is paused or being removed:
+	// the namespaces of a cell from before E-70 get the grants here.
+	_, err := r.apply(ctx, grants(&app)...)
+	hasNamespace := !apierrors.IsNotFound(err)
+	if err != nil && hasNamespace {
+		return ctrl.Result{}, err
+	}
 	if !app.DeletionTimestamp.IsZero() {
-		return r.remove(ctx, &app)
+		return r.remove(ctx, &app, hasNamespace)
 	}
 	if controllerutil.AddFinalizer(&app, finalizer) {
 		if err := r.Update(ctx, &app); err != nil {
@@ -300,7 +304,10 @@ func (r *AppReconciler) install(ctx context.Context, app *cellv1.App, target *ba
 	if err != nil {
 		return false, "", err
 	}
-	if _, err := r.apply(ctx, namespaceObj(app, false), network(app), caBundle(app, cellCA, r.SystemCAs)); err != nil {
+	if _, err := r.apply(ctx, append([]client.Object{namespaceObj(app, false)}, grants(app)...)...); err != nil {
+		return false, "", err
+	}
+	if _, err := r.apply(ctx, network(app), caBundle(app, cellCA, r.SystemCAs)); err != nil {
 		return false, "", err
 	}
 	if target != nil && hasData(app) {
@@ -821,8 +828,9 @@ func (r *AppReconciler) releaseHosts(ctx context.Context, app, keep string) erro
 
 // remove deletes the running parts of an app and its login client but keeps
 // its data: volumes stay, the database is hibernated, and the namespace is
-// marked as retained. Installing the app again picks the data up.
-func (r *AppReconciler) remove(ctx context.Context, app *cellv1.App) (ctrl.Result, error) {
+// marked as retained. Installing the app again picks the data up. An app
+// that never got its namespace has nothing in one to remove or keep.
+func (r *AppReconciler) remove(ctx context.Context, app *cellv1.App, hasNamespace bool) (ctrl.Result, error) {
 	if !controllerutil.ContainsFinalizer(app, finalizer) {
 		return ctrl.Result{}, nil
 	}
@@ -850,6 +858,19 @@ func (r *AppReconciler) remove(ctx context.Context, app *cellv1.App) (ctrl.Resul
 		return ctrl.Result{}, err
 	}
 	r.loginSynced.Delete(app.Name)
+	if !hasNamespace {
+		// The login proxy's route lives in the system namespace and holds
+		// the app's host until it is gone.
+		outpost := &networkingv1.Ingress{ObjectMeta: metav1.ObjectMeta{Namespace: cell.SystemNamespace, Name: outpostIngress(app)}}
+		if err := r.Delete(ctx, outpost); client.IgnoreNotFound(err) != nil {
+			return ctrl.Result{}, err
+		}
+		if err := r.releaseHosts(ctx, app.Name, ""); err != nil {
+			return ctrl.Result{}, err
+		}
+		controllerutil.RemoveFinalizer(app, finalizer)
+		return ctrl.Result{}, r.Update(ctx, app)
+	}
 	ns := Namespace(app.Name)
 	obj := func(gvk schema.GroupVersionKind, ns, name string) client.Object {
 		u := &unstructured.Unstructured{}

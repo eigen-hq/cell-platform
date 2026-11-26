@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	cellv1 "github.com/eigen-hq/cell-platform/api/v1alpha1"
 	"github.com/eigen-hq/cell-platform/internal/cell"
 )
 
@@ -89,9 +90,22 @@ func (s *Server) listNodes(w http.ResponseWriter, r *http.Request, _ *Caller) er
 	if err := s.Kube.List(ctx, &nodes); err != nil {
 		return err
 	}
-	var pods corev1.PodList
-	if err := s.Kube.List(ctx, &pods); err != nil {
+	// Pods of the apps and of the cell's own services; the API reads no
+	// other namespace (E-70).
+	var apps cellv1.AppList
+	if err := s.Kube.List(ctx, &apps); err != nil {
 		return err
+	}
+	var pods corev1.PodList
+	if err := s.Kube.List(ctx, &pods, client.InNamespace(cell.SystemNamespace)); err != nil {
+		return err
+	}
+	for _, a := range apps.Items {
+		var list corev1.PodList
+		if err := s.appList(ctx, &list, "app-"+a.Name); err != nil {
+			return err
+		}
+		pods.Items = append(pods.Items, list.Items...)
 	}
 	out := []nodeView{}
 	byName := map[string]*nodeView{}
