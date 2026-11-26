@@ -107,7 +107,7 @@ What is wanted and tried out happens in the office UI; the platform builds, oper
 
 | Feature | Status | Depends on |
 |---|---|---|
-| Own service account in authentik with narrow permissions | open | |
+| Own service account in authentik with narrow permissions | running, not yet verified (E-77; a superuser, see there) | |
 | Pin third-party images by digest | running (`deploy/images.lock`, E-76) | |
 | Short-lived tokens for the tool gateway | built (E-74) | |
 | Do not count the wait for the login proxy against the deadline of the app | built (E-75) | |

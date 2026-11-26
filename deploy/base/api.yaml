@@ -313,8 +313,8 @@ spec:
             - name: AUTHENTIK_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: identity
-                  key: AUTHENTIK_BOOTSTRAP_TOKEN
+                  name: identity-platform
+                  key: token
             # The mesh's login client (E-56); without it, the cell has no mesh.
             - name: MESH_CLIENT_SECRET
               valueFrom:

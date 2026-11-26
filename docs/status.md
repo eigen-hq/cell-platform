@@ -107,6 +107,7 @@ Status 2026-11-19: platform API `cell-api` (E-29), approvals only through the AP
 | Access | `make e2e`, `TestAccessGroups`: app restricted to a group, a member gets in, the identity rejects others, after opening up everyone gets in | passed |
 | OpenAPI file up to date | `make test`: every route is in `api/openapi.yaml` and vice versa, every response in the API tests matches its schema (no additional fields allowed) | passed |
 | Control logic | `make test`: install, remove with and without data, restore as a change, access groups, validation of the actions; tokens (audience, rejection by the identity, cache) | passed |
+| Own authentik account instead of the bootstrap token (E-77) | `go test ./internal/authentik`: `TestCreateAppPasswordChecksOwner` (a token authentik gives to the caller instead of the named user is deleted and no key is returned; fails without the check), `TestPlatformAccountHidden` (not listed, no app password, no group change); `go test ./deploy`: `TestPlatformUsesItsOwnAuthentikAccount` (no manifest reads the bootstrap token, operator and API take `identity-platform/token`, the worker gets it and mounts the blueprint for `cell-platform`, the installer creates the Secret when missing); `bash -n deploy/bootstrap.sh` | unit tests passed (2026-11-26); open: the blueprint against a real authentik, fresh install and installer rerun on an older cell, in the daily run |
 
 ### Ops agent
 

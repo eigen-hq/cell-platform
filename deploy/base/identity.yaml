@@ -1,6 +1,6 @@
 # Identity: authentik on its own CloudNativePG database.
-# Credentials are created once by bootstrap.sh (secrets identity-db-credentials
-# and identity) and never leave the cell.
+# Credentials are created once by bootstrap.sh (secrets identity-db-credentials,
+# identity and identity-platform) and never leave the cell.
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -37,6 +37,18 @@ spec:
         secretName: identity
     postgresql:
       enabled: false
+    # The platform's own account (E-77): the worker applies the blueprint
+    # with the token key from Secret identity-platform.
+    blueprints:
+      configMaps:
+        - identity-blueprints
+    worker:
+      env:
+        - name: CELL_PLATFORM_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: identity-platform
+              key: token
     server:
       # Gunicorn restarts a worker every 1000 requests by default. That drops
       # the embedded outpost's websocket, which reconnects only after 300 s
@@ -55,3 +67,44 @@ spec:
           - secretName: auth-tls
             hosts:
               - auth.${CELL_DOMAIN}
+---
+# The account operator and API use instead of the bootstrap token (E-77):
+# a service account in the superuser group, because only a superuser may
+# create app passwords for other users. state: present keeps the token's
+# key equal to the Secret on every apply.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: identity-blueprints
+  namespace: cell-system
+data:
+  platform.yaml: |
+    version: 1
+    metadata:
+      name: cell platform account
+    context:
+      token: !Env [CELL_PLATFORM_TOKEN, null]
+    entries:
+      - model: authentik_core.user
+        state: present
+        id: platform-user
+        identifiers:
+          username: cell-platform
+        attrs:
+          name: cell platform
+          type: service_account
+          is_active: true
+          groups:
+            - !Find [authentik_core.group, [name, authentik Admins]]
+      - model: authentik_core.token
+        state: present
+        conditions:
+          - !If [!Context token]
+        identifiers:
+          identifier: cell-platform-token
+        attrs:
+          user: !KeyOf platform-user
+          intent: api
+          expiring: false
+          key: !Context token
+          description: cell platform (operator and API)

@@ -220,6 +220,9 @@ ensure_secret cell-system identity Opaque \
   AUTHENTIK_BOOTSTRAP_TOKEN="$(rand)" \
   AUTHENTIK_BOOTSTRAP_EMAIL="admin@$CELL_DOMAIN" \
   AUTHENTIK_ERROR_REPORTING__ENABLED=false
+# The platform's own token (E-77); created when missing, so a rerun moves an
+# older cell off the bootstrap token.
+ensure_secret cell-system identity-platform Opaque token="$(rand)"
 retry apply identity.yaml
 progress "starting its database"
 retry kubectl -n cell-system wait cluster/identity-db --for=condition=Ready --timeout=10s >/dev/null
@@ -263,6 +266,20 @@ for i in $(seq 72); do
   fi
   sleep 5
 done
+# The worker applies the platform's account from a blueprint in the
+# background; operator and API wait for it, the installer checks it once.
+# The header goes in on stdin, not the command line.
+ptoken=$(secret_value cell-system identity-platform token)
+[ -n "$ptoken" ] || die "secret cell-system/identity-platform has no token"
+platform_ready() {
+  local me
+  me=$(printf 'header = "Authorization: Bearer %s"\n' "$ptoken" |
+    curl -fsS -K - "${cacert[@]}" --resolve "auth.$CELL_DOMAIN:443:$CELL_INGRESS_IP" \
+      "https://auth.$CELL_DOMAIN/api/v3/core/users/me/") || return
+  [[ $me =~ \"username\":\ *\"cell-platform\" ]]
+}
+progress "the platform's account"
+retry platform_ready || die "authentik does not accept the platform's token: kubectl -n cell-system logs deploy/authentik-worker"
 step "App delivery (Flux $FLUX_VERSION)"
 # Flux may write anywhere (cluster-admin), and namespace admins may write
 # HelmReleases. A release that names no ServiceAccount therefore runs as its
