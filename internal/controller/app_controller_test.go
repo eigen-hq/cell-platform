@@ -775,6 +775,84 @@ func TestNeedsAttention(t *testing.T) {
 	phase(t, "broken", cellv1.PhaseNeedsAttention)
 }
 
+// The wait for the login proxy does not count against the app's deadline
+// (E-75): an app that passes its own health check gets more time for the
+// outpost, as an install change and as a running app, but not forever.
+func TestLoginProxyWait(t *testing.T) {
+	ctx := context.Background()
+	was := outpostReady.Load()
+	outpostReady.Store(false)
+	defer outpostReady.Store(was)
+	defer skew.Store(0)
+	readyFor := func(prefix string) func() error {
+		return func() error {
+			// Touch the app to reconcile now instead of after the requeue delay.
+			var a cellv1.App
+			if err := k8s.Get(ctx, client.ObjectKey{Name: "slow"}, &a); err != nil {
+				return err
+			}
+			metav1.SetMetaDataAnnotation(&a.ObjectMeta, "touch", time.Now().String())
+			if err := k8s.Update(ctx, &a); err != nil {
+				return err
+			}
+			if c := apimeta.FindStatusCondition(a.Status.Conditions, condReady); c == nil || !strings.HasPrefix(c.Message, prefix) {
+				return fmt.Errorf("ready condition %+v", c)
+			}
+			return nil
+		}
+	}
+	spec := plainSpec("slow")
+	spec.Access.Auth.Mode = "proxy"
+	approvedChange(t, "install-slow", cellv1.ChangeRequestSpec{App: "slow", Action: "install", Patch: rawJSON(t, spec)})
+	kubelet(t, "app-slow", "slow")
+	healthy.Store("slow", true)
+	issued(t, "slow", "slow.cell.localhost")
+	eventually(t, readyFor("login proxy: "))
+
+	// Past the timeout of 60 s, the install keeps waiting for the outpost.
+	skew.Store(int64(2 * time.Minute))
+	eventually(t, readyFor("login proxy: "))
+	time.Sleep(6 * time.Second) // the change looks again every 5 s
+	var cr cellv1.ChangeRequest
+	if err := k8s.Get(ctx, client.ObjectKey{Name: "install-slow"}, &cr); err != nil || cr.Status.Phase != cellv1.RunRunning {
+		t.Fatalf("install while the outpost is not ready: %v %s (%s)", err, cr.Status.Phase, cr.Status.Message)
+	}
+	outpostReady.Store(true)
+	changePhase(t, "install-slow", cellv1.RunSucceeded)
+	app := phase(t, "slow", cellv1.PhaseReady)
+
+	// A ready app whose outpost drops out does not need attention at once,
+	// but it does once the extra time is over too.
+	outpostReady.Store(false)
+	eventually(t, readyFor("login proxy: "))
+	skew.Store(int64(2*time.Minute + 5*time.Minute))
+	eventually(t, readyFor("login proxy: "))
+	time.Sleep(time.Second)
+	phase(t, "slow", cellv1.PhaseReady)
+	skew.Store(int64(2*time.Minute + 12*time.Minute))
+	eventually(t, readyFor("login proxy: "))
+	phase(t, "slow", cellv1.PhaseNeedsAttention)
+	removeApp(t, app)
+}
+
+// The extra time for the login proxy counts only for the generation that
+// passed its own health check, so a new spec that breaks the app does not
+// inherit it. The status still holds the old generation while setPhase asks.
+func TestHealthDeadline(t *testing.T) {
+	app := &cellv1.App{Spec: cellv1.AppSpec{Health: cellv1.Health{TimeoutSeconds: 60}}}
+	app.Status.ObservedGeneration = 1
+	app.Status.Conditions = []metav1.Condition{{Type: condReady, Status: metav1.ConditionFalse, Reason: reasonLoginProxy, ObservedGeneration: 2}}
+	for gen, want := range map[int64]time.Duration{2: time.Minute + loginProxyGrace, 3: time.Minute} {
+		if got := healthDeadline(app, gen); got != want {
+			t.Errorf("generation %d: %s, want %s", gen, got, want)
+		}
+	}
+	app.Status.Conditions[0].Reason = "Unhealthy"
+	if got := healthDeadline(app, 2); got != time.Minute {
+		t.Errorf("unhealthy app: %s", got)
+	}
+}
+
 // HTTP chart repositories: a different repository with the same chart
 // version must be deployed again before the app counts as ready.
 func TestHelmRepositoryChange(t *testing.T) {
