@@ -89,7 +89,9 @@ func (r *BackupTargetReconciler) Reconcile(ctx context.Context, _ ctrl.Request) 
 	}
 	var before cell.BackupTarget
 	var cm corev1.ConfigMap
+	answered := ""
 	if err := r.Reader.Get(ctx, system(cell.BackupTargetStatus), &cm); err == nil {
+		answered = cm.Data[cell.BackupTargetStatusRequestKey]
 		if raw := cm.Data[cell.BackupTargetStatusKey]; raw != "" {
 			if err := json.Unmarshal([]byte(raw), &before); err != nil {
 				return ctrl.Result{}, err
@@ -122,6 +124,7 @@ func (r *BackupTargetReconciler) Reconcile(ctx context.Context, _ ctrl.Request) 
 		if check, done, err = r.check(ctx, &target, &req); err != nil {
 			return ctrl.Result{}, err
 		}
+		answered = string(req.UID)
 	}
 	status := cell.DescribeBackupTarget(target.Data)
 	status.Check = check
@@ -129,7 +132,11 @@ func (r *BackupTargetReconciler) Reconcile(ctx context.Context, _ ctrl.Request) 
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	apply := corev1ac.ConfigMap(cell.BackupTargetStatus, cell.SystemNamespace).WithData(map[string]string{cell.BackupTargetStatusKey: string(raw)})
+	data := map[string]string{cell.BackupTargetStatusKey: string(raw)}
+	if answered != "" {
+		data[cell.BackupTargetStatusRequestKey] = answered
+	}
+	apply := corev1ac.ConfigMap(cell.BackupTargetStatus, cell.SystemNamespace).WithData(data)
 	if err := r.Apply(ctx, apply, client.FieldOwner(fieldOwner), client.ForceOwnership); err != nil {
 		return ctrl.Result{}, err
 	}

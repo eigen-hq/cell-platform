@@ -257,4 +257,88 @@ out=$(: >"$CELL_STEP_FILE"; FAKE_DEPLOYS='1 1 1 1\n' wait_ready x ns 0 a b 2>&1)
 check "wait_ready waits for named deployments not created yet" "1" "$rc"
 unset -f kubectl
 
+# A target named again on a live cell goes through the operator (E-69).
+# The fake cell's backup-target: one file per key in $tmp/bt.
+kubectl() {
+  local a=$* k
+  case $a in
+    *"get secret backup-target -o jsonpath="*)
+      k=${a##*\{.data.} && k=${k%\}} && k=${k//\\/}
+      [ "$k" != "${FAKE_FAIL:-}" ] || { echo "Unable to connect to the server" >&2; return 1; }
+      [ ! -f "$tmp/bt/$k" ] || base64 <"$tmp/bt/$k"
+      ;;
+  esac
+}
+live_cell() { # conf, root, prefix
+  rm -rf "$tmp/bt" && mkdir "$tmp/bt"
+  printf gk >"$tmp/bt/gatewayKey" && printf pw >"$tmp/bt/password"
+  printf '%s' "$1" >"$tmp/bt/rclone.conf" && printf '%s' "$2" >"$tmp/bt/root" && printf '%s' "$3" >"$tmp/bt/prefix"
+  printf 'emptyDir: {}' >"$tmp/bt/localVolume"
+}
+s3a=$'[target]\ntype = s3\nendpoint = https://a' s3b=$'[target]\ntype = s3\nendpoint = https://b'
+again() { # conf, root, prefix as bootstrap chose them from the environment; prints request|kept|conf|root|prefix
+  (stored="" where=t conf=$1 root=$2 prefix=$3 BACKUP_LOCAL_VOLUME=${4:-"emptyDir: {}"}; : >"$CELL_STEP_FILE"
+    keep_live_backup_target && echo "$backup_request|$backup_kept|$conf|$root|$prefix") 2>/dev/null || echo refused
+}
+live_cell "$s3a" bk/c.x c.x
+check "the same S3 target again changes nothing" "|1|$s3a|bk/c.x|c.x" "$(CELL_BACKUP_S3_ENDPOINT=https://a again "$s3a" bk/c.x c.x)"
+check "another S3 target keeps the stored one and asks the operator" "1|1|$s3a|bk/c.x|c.x" "$(CELL_BACKUP_S3_ENDPOINT=https://b again "$s3b" bk2/c.x c.x)"
+check "another bucket alone asks the operator" "1|1|$s3a|bk/c.x|c.x" "$(CELL_BACKUP_S3_ENDPOINT=https://a again "$s3a" bk2/c.x c.x)"
+live_cell "$s3a" bk/from/console from/console
+check "without a prefix named, the cell's prefix counts" "|1|$s3a|bk/from/console|from/console" "$(CELL_BACKUP_S3_ENDPOINT=https://a again "$s3a" bk/c.x c.x)"
+check "a prefix named counts" "1|1|$s3a|bk/from/console|from/console" "$(CELL_BACKUP_S3_ENDPOINT=https://a CELL_BACKUP_PREFIX=c.x again "$s3a" bk/c.x c.x)"
+check "a directory instead of a stored target is refused" "refused" "$(CELL_BACKUP_PATH=/b again $'[target]\ntype = local' /backup/c.x c.x 'hostPath: {path: "/b", type: DirectoryOrCreate}')"
+live_cell "" "" c.x
+check "a cell without a target asks the operator for its first S3 one" "1|1|||c.x" "$(CELL_BACKUP_S3_ENDPOINT=https://b again "$s3b" bk/c.x c.x)"
+check "a cell with a gateway takes no directory, also without a target" "refused" "$(CELL_BACKUP_PATH=/b again $'[target]\ntype = local' /backup/c.x c.x 'hostPath: {path: "/b", type: DirectoryOrCreate}')"
+rm -rf "$tmp/bt"
+check "a fresh cell writes the target itself" "||$s3b|bk/c.x|c.x" "$(CELL_BACKUP_S3_ENDPOINT=https://b again "$s3b" bk/c.x c.x)"
+live_cell "$s3a" bk/c.x c.x
+check "an unreadable gateway key stops the run" "refused" "$(FAKE_FAIL=gatewayKey CELL_BACKUP_S3_ENDPOINT=https://b again "$s3b" bk/c.x c.x)"
+check "an unreadable stored target stops the run" "refused" "$(FAKE_FAIL=root CELL_BACKUP_S3_ENDPOINT=https://b again "$s3b" bk2/c.x c.x)"
+live_cell "$s3a" bk/c.x c.x
+check "a target the environment does not name stays, unwritten" "|1|x|bk/c.x|c.x" "$( (stored=x conf=x root=bk/c.x prefix=c.x; keep_live_backup_target; echo "$backup_request|$backup_kept|$conf|$root|$prefix") )"
+kept() { (: >"$CELL_STEP_FILE"; backup_password_kept) >/dev/null 2>&1 && echo kept || echo refused; }
+check "the cell's backup key again is kept" "kept" "$(CELL_BACKUP_PASSWORD=pw kept)"
+check "no backup key named is kept" "kept" "$(unset CELL_BACKUP_PASSWORD; kept)"
+check "another backup key on a live cell is refused" "refused" "$(CELL_BACKUP_PASSWORD=other kept)"
+rm -rf "$tmp/bt"
+check "a fresh cell takes the backup key named" "kept" "$(CELL_BACKUP_PASSWORD=other kept)"
+
+# The request: as the API writes it, through stdin; then the operator's result.
+kubectl() {
+  case "$*" in
+    "create -f - -o jsonpath={.metadata.uid}")
+      cat >"$tmp/request"
+      [ -z "${FAKE_EXISTS:-}" ] || { echo 'Error from server (AlreadyExists): secrets "backup-target-request" already exists' >&2; return 1; }
+      echo uid-1
+      ;;
+    *"get secret backup-target-request"*)
+      polls=$(($(cat "$tmp/polls") + 1)) && echo "$polls" >"$tmp/polls"
+      [ "$polls" -gt 2 ] || echo secret/backup-target-request
+      ;;
+    *"get configmap backup-target-status"*) printf '%s' "$FAKE_STATUS" ;;
+    *) echo "unexpected: $*" >&2; return 1 ;;
+  esac
+}
+sleep() { :; }
+ask() { (: >"$CELL_STEP_FILE"; echo 0 >"$tmp/polls"; export CELL_BACKUP_S3_ENDPOINT=https://b CELL_BACKUP_S3_BUCKET=bk CELL_BACKUP_S3_ACCESS_KEY=AK CELL_BACKUP_S3_SECRET_KEY=plain-secret-key; [ $# -eq 0 ] || export "${@?}"; request_backup_target) 2>&1; }
+b64() { printf '%s' "$1" | base64; }
+status() { python3 -c 'import json, sys; print(json.dumps({"data": {"request": sys.argv[1], "target.json": sys.argv[2]}}))' "$@"; }
+out=$(FAKE_STATUS=$(status uid-1 '{"configured":true,"check":{"state":"passed","by":"installer"}}') ask) && rc=0 || rc=$?
+check "the operator's switch ends the request" "0:3" "$rc:$(cat "$tmp/polls")"
+check "the request names the installer and the S3 target" "4" "$(grep -cE "requester: \"$(b64 installer)\"|privateNetwork: \"$(b64 false)\"|endpoint: \"$(b64 https://b)\"|requestedAt: \"" "$tmp/request")"
+check "the request holds no key in plain text" "0" "$(grep -c plain-secret-key "$tmp/request" || true)"
+out=$(FAKE_STATUS=$(status uid-1 '{"check":{"state":"passed","by":"installer"}}') ask CELL_BACKUP_S3_PRIVATE_NETWORK=true) && rc=0 || rc=$?
+check "the request carries the private network asked for" "0:1" "$rc:$(grep -c "privateNetwork: \"$(b64 true)\"" "$tmp/request")"
+out=$(FAKE_STATUS=$(status uid-1 '{"check":{"state":"failed","by":"installer","message":"403 Forbidden from the bucket"}}') ask) && rc=0 || rc=$?
+check "a failed check stops the run with its reason" "1:1" "$rc:$(grep -c '403 Forbidden from the bucket' <<<"$out")"
+out=$(FAKE_STATUS=$(status uid-1 '{"check":{"state":"failed","message":"passed"}}') ask) && rc=0 || rc=$?
+check "a failed check is no success, whatever its message" "1" "$rc"
+out=$(FAKE_STATUS=$(status uid-2 '{"check":{"state":"passed","by":"installer"}}') ask) && rc=0 || rc=$?
+check "a later check's result is not taken for this one" "1:1" "$rc:$(grep -c 'another check answered last' <<<"$out")"
+out=$(FAKE_EXISTS=1 ask) && rc=0 || rc=$?
+check "a check running already stops the run" "1:1" "$rc:$(grep -c 'being checked already' <<<"$out")"
+unset -f kubectl sleep
+
 [ "$fails" -eq 0 ]

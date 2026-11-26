@@ -21,6 +21,9 @@ const (
 	BackupTargetRequest   = "backup-target-request"
 	BackupTargetStatus    = "backup-target-status"
 	BackupTargetStatusKey = "target.json"
+	// The UID of the request the check in BackupTargetStatusKey answers:
+	// whoever asked (the installer does) tells its own result by it.
+	BackupTargetStatusRequestKey = "request"
 
 	CheckRunning = "checking"
 	CheckPassed  = "passed"
