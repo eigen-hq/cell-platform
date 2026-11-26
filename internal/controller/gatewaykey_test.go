@@ -115,4 +115,11 @@ func TestArchiveStores(t *testing.T) {
 	if key != "CRYPT_ACCESS_KEY_ID" {
 		t.Errorf("encrypted store signs with %s", key)
 	}
+	// An unrecorded backup waits for one catalog check of the plugin.
+	for _, o := range objs[1:] {
+		every, _, _ := unstructured.NestedInt64(o.(*unstructured.Unstructured).Object, "spec", "instanceSidecarConfiguration", "retentionPolicyIntervalSeconds")
+		if every <= 0 || time.Duration(every)*time.Second >= archiveConfirm {
+			t.Errorf("store %s checks its catalog every %d s, the backup waits %s", o.GetName(), every, archiveConfirm)
+		}
+	}
 }

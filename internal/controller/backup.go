@@ -116,6 +116,9 @@ func backupResources(app *cellv1.App, t *backupTarget) []client.Object {
 			"metadata": map[string]any{"name": name, "namespace": Namespace(app.Name), "labels": toAny(labels(app))},
 			"spec": map[string]any{
 				"retentionPolicy": "30d",
+				// The plugin's catalog check also records the last base
+				// backup; backupArchive waits for it (archiveConfirm).
+				"instanceSidecarConfiguration": map[string]any{"retentionPolicyIntervalSeconds": int64(catalogCheck / time.Second)},
 				"configuration": map[string]any{
 					"destinationPath": "s3://postgres",
 					"endpointURL":     gatewayURL,

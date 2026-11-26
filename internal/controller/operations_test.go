@@ -2178,6 +2178,50 @@ func TestUnrecordedBaseBackupFailsAfterAWhile(t *testing.T) {
 	unconfirmedBackupFails(t, "almanac", "almanac-b")
 }
 
+// The record the plugin failed to write comes with its next catalog
+// check: the waiting backup goes on with the archive it was asked of.
+func TestLateRecordedBaseBackupCompletes(t *testing.T) {
+	ctx := context.Background()
+	app := readyDataApp(t, "beacon")
+	defer removeApp(t, app)
+	cluster, err := get(ctx, gvkCluster, "app-beacon", "db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sn := serverName(cluster)
+	b := cellv1.Backup{ObjectMeta: metav1.ObjectMeta{Name: "beacon-b"}, Spec: cellv1.BackupSpec{App: "beacon"}}
+	if err := k8s.Create(ctx, &b); err != nil {
+		t.Fatal(err)
+	}
+	var pg *unstructured.Unstructured
+	eventually(t, func() (err error) { pg, err = get(ctx, gvkCNPGBackup, "app-beacon", "beacon-b"); return err })
+	end := time.Now().UTC().Format(time.RFC3339)
+	_ = unstructured.SetNestedField(pg.Object, "completed", "status", "phase")
+	_ = unstructured.SetNestedField(pg.Object, "late-1", "status", "backupId")
+	_ = unstructured.SetNestedField(pg.Object, end, "status", "stoppedAt")
+	_ = unstructured.SetNestedField(pg.Object, pg.GetAnnotations()[annotationCluster], "status", "pluginMetadata", "clusterUID")
+	if err := k8s.Status().Update(ctx, pg); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(6 * time.Second) // past the backup's 5 s look at its base backup
+	if err := k8s.Get(ctx, client.ObjectKey{Name: "beacon-b"}, &b); err != nil {
+		t.Fatal(err)
+	}
+	if b.Status.Phase != cellv1.RunRunning || b.Status.Database != nil {
+		t.Fatalf("backup %s (%s) recorded %+v before the record", b.Status.Phase, b.Status.Message, b.Status.Database)
+	}
+	archived(t, "app-beacon", sn, end)
+	eventually(t, func() error {
+		if err := k8s.Get(ctx, client.ObjectKey{Name: "beacon-b"}, &b); err != nil {
+			return err
+		}
+		if d := b.Status.Database; d == nil || d.ServerName != sn || d.BackupID != "late-1" {
+			return fmt.Errorf("backup %s (%s) recorded %+v", b.Status.Phase, b.Status.Message, d)
+		}
+		return nil
+	})
+}
+
 // unconfirmedBackupFails runs backup name of app to a base backup the
 // plugin reports done but never records, and expects it to wait and then
 // fail.
@@ -2197,7 +2241,7 @@ func unconfirmedBackupFails(t *testing.T, app, name string) {
 	if err := k8s.Status().Update(ctx, pg); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(2 * time.Second)
+	time.Sleep(6 * time.Second) // past the backup's 5 s look at its base backup
 	if err := k8s.Get(ctx, client.ObjectKey{Name: name}, &b); err != nil {
 		t.Fatal(err)
 	}

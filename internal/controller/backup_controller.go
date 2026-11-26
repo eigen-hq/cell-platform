@@ -278,19 +278,25 @@ func (r *BackupReconciler) encryptArchive(ctx context.Context, b *cellv1.Backup,
 	return ctrl.Result{RequeueAfter: archiveSettle}, r.Patch(ctx, cluster, client.RawPatch(types.MergePatchType, raw))
 }
 
-// archiveConfirm bounds the wait for the barman-cloud plugin to record a
-// base backup in its ObjectStore.
-const archiveConfirm = 2 * time.Minute
+// catalogCheck is how often the barman-cloud plugin lists the archive of
+// the cluster's current configuration and records its last base backup
+// in the ObjectStore (plugin default 30 minutes).
+const catalogCheck = 5 * time.Minute
+
+// archiveConfirm bounds the wait for that record: one catalog check and
+// some margin.
+const archiveConfirm = catalogCheck + 2*time.Minute
 
 // backupArchive returns the archive a completed CloudNativePG backup asked
 // of archive sn lies in, or a wait. The instance takes a base backup with
 // its own view of the cluster, which may still name the archive before a
 // switch (E-67). The barman-cloud plugin records each archive's last base
 // backup in its ObjectStore before it reports the backup done, but goes on
-// if that update fails. So an archive whose last base backup ended no
-// earlier than this one is where it went. With no such archive it waits
-// up to archiveConfirm, then returns "": unconfirmed, the backup may lie in
-// an archive nothing records.
+// if that update fails; its next catalog check records it from the
+// archive itself. So an archive whose last base backup ended no earlier
+// than this one is where it went. With no such archive it waits up to
+// archiveConfirm, then returns "": unconfirmed, the backup is not in the
+// archive the cluster names.
 func (r *BackupReconciler) backupArchive(ctx context.Context, pg *unstructured.Unstructured, sn string) (string, time.Duration, error) {
 	stopped, _, _ := unstructured.NestedString(pg.Object, "status", "stoppedAt")
 	if stopped == "" {
