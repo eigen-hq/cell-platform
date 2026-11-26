@@ -68,7 +68,7 @@ done | kubectl apply --server-side --field-manager=cell-bootstrap -f - >/dev/nul
 
 step "Certificates and databases"
 progress "downloading components"
-cm=$(curl -fsSL "https://github.com/cert-manager/cert-manager/releases/download/$CERT_MANAGER_VERSION/cert-manager.yaml")
+cm=$(fetch "https://github.com/cert-manager/cert-manager/releases/download/$CERT_MANAGER_VERSION/cert-manager.yaml" "$CERT_MANAGER_SHA256")
 if [ "$CELL_TLS" = names ]; then
   # DNS-01 checks ask public resolvers: the cluster DNS answers every cell
   # host with the ingress (below), also the challenge records.
@@ -77,12 +77,16 @@ if [ "$CELL_TLS" = names ]; then
   grep -q -- '^ *- --dns01-recursive-nameservers-only$' <<<"$cm" || die "could not point cert-manager at public resolvers"
 fi
 kubectl apply --server-side -f - <<<"$cm" >/dev/null
-kubectl apply --server-side -f "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$CNPG_VERSION/cnpg-$CNPG_VERSION.yaml" >/dev/null
+fetch "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$CNPG_VERSION/cnpg-$CNPG_VERSION.yaml" "$CNPG_SHA256" |
+  kubectl apply --server-side -f - >/dev/null
 wait_ready cert-manager cert-manager 5
 wait_ready CloudNativePG cnpg-system 5
 # The databases' backups (barman-cloud plugin).
 progress "database backup plugin"
-retry kubectl apply --server-side -f "https://github.com/cloudnative-pg/plugin-barman-cloud/releases/download/v$BARMAN_PLUGIN_VERSION/manifest.yaml" >/dev/null
+barman=$(fetch "https://github.com/cloudnative-pg/plugin-barman-cloud/releases/download/v$BARMAN_PLUGIN_VERSION/manifest.yaml" "$BARMAN_PLUGIN_SHA256")
+# Each attempt applies the whole manifest again.
+apply_barman() { kubectl apply --server-side -f - <<<"$barman" >/dev/null; }
+retry apply_barman
 wait_ready CloudNativePG cnpg-system 5
 
 case $CELL_STORAGE in longhorn) step "Storage (Longhorn $LONGHORN_VERSION)" ;; *) step "Storage ($CELL_STORAGE)" ;; esac
@@ -90,8 +94,8 @@ case $CELL_STORAGE in
   local-path) ;; # k3s default StorageClass, no snapshots
   longhorn)
     progress "snapshot controller"
-    kubectl apply -k "https://github.com/kubernetes-csi/external-snapshotter/client/config/crd?ref=$EXTERNAL_SNAPSHOTTER_VERSION" >/dev/null
-    kubectl -n kube-system apply -k "https://github.com/kubernetes-csi/external-snapshotter/deploy/kubernetes/snapshot-controller?ref=$EXTERNAL_SNAPSHOTTER_VERSION" >/dev/null
+    kubectl apply -k "https://github.com/kubernetes-csi/external-snapshotter/client/config/crd?ref=$EXTERNAL_SNAPSHOTTER_COMMIT" >/dev/null
+    kubectl -n kube-system apply -k "https://github.com/kubernetes-csi/external-snapshotter/deploy/kubernetes/snapshot-controller?ref=$EXTERNAL_SNAPSHOTTER_COMMIT" >/dev/null
     apply storage-longhorn.yaml
     wait_ready Longhorn longhorn-system 20
     retry apply storage-longhorn-classes.yaml

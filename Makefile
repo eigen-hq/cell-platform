@@ -13,7 +13,7 @@ K3D := $(BIN)/k3d-$(K3D_VERSION)
 KUBECTL := $(BIN)/kubectl-$(KUBECTL_VERSION)
 FLUX := $(BIN)/flux-$(FLUX_VERSION)
 
-.PHONY: help tools cell-up cell-down status test e2e demo lima vm-test generate dr-test console console-browser
+.PHONY: help tools cell-up cell-down status test e2e demo lima vm-test generate dr-test console console-browser release
 
 help:
 	@grep -hE '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
@@ -67,6 +67,10 @@ e2e: console-browser ## End-to-end tests against the local cell (with a browser 
 
 demo: cell-up ## Target demo on the local cell, step by step (docs/status.md)
 	test/demo.sh
+
+release: ## Sign and publish the tagged release VERSION=vX.Y.Z (key: CELL_RELEASE_KEY)
+	@[ -n "$(VERSION)" ] || { echo "usage: make release VERSION=vX.Y.Z" >&2; exit 1; }
+	deploy/release.sh publish $(VERSION)
 
 dr-test: ## Restore an app into a freshly recreated local cell (destroys the cell)
 	go test -tags 'e2e dr' -count=1 -timeout 60m -run TestRestoreIntoFreshCell -v ./test/e2e/...

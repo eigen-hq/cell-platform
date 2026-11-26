@@ -5,6 +5,8 @@
 # Idempotent: a second run with the same settings changes nothing.
 #
 #   K3S_VERSION        k3s release (versions.env)
+#   K3S_INSTALL_SHA256, K3S_SHA256_AMD64, K3S_SHA256_ARM64
+#                      its pinned install script and binaries (versions.env)
 #   CELL_STORAGE       longhorn (default) | local-path
 #   CELL_NODE_IP       address of this machine in the network of the cell's
 #                      machines, one of its own (default: the source address
@@ -19,7 +21,8 @@ set -euo pipefail
 # shellcheck source=ui.sh
 declare -F step >/dev/null || source "$(dirname "${BASH_SOURCE[0]}")/ui.sh"
 [ "$(id -u)" -eq 0 ] || die "run as root (sudo)"
-: "${K3S_VERSION:?K3S_VERSION must be set}"
+: "${K3S_VERSION:?K3S_VERSION must be set}" "${K3S_INSTALL_SHA256:?K3S_INSTALL_SHA256 must be set}" \
+  "${K3S_SHA256_AMD64:?K3S_SHA256_AMD64 must be set}" "${K3S_SHA256_ARM64:?K3S_SHA256_ARM64 must be set}"
 CELL_STORAGE=${CELL_STORAGE:-longhorn}
 role=server
 if [ -n "${CELL_JOIN_SERVER:-}" ]; then
@@ -109,17 +112,30 @@ if [ "$(cat /etc/rancher/k3s/registries.yaml 2>/dev/null)" != "$mirrors" ]; then
   printf '%s\n' "$mirrors" >/etc/rancher/k3s/registries.yaml
   changed=1
 fi
+# install_k3s <role> <dir> puts the pinned k3s binary into dir and runs
+# k3s' pinned install script, which then only sets up the service (E-65).
+# Both are downloaded and checked first: a failed download leaves the k3s
+# in dir as it was, so a rerun tries again. The script sees the new binary
+# as unchanged, so it is told to restart.
+install_k3s() {
+  local file sum script
+  case $(uname -m) in
+    x86_64) file=k3s sum=$K3S_SHA256_AMD64 ;;
+    aarch64) file=k3s-arm64 sum=$K3S_SHA256_ARM64 ;;
+    *) die "k3s has no pinned build for $(uname -m)" ;;
+  esac
+  script=$(fetch "https://raw.githubusercontent.com/k3s-io/k3s/$K3S_VERSION/install.sh" "$K3S_INSTALL_SHA256") || return
+  fetch "https://github.com/k3s-io/k3s/releases/download/${K3S_VERSION/+/%2B}/$file" "$sum" >"$2/k3s.new" || return
+  chmod 755 "$2/k3s.new"
+  mv -f "$2/k3s.new" "$2/k3s"
+  INSTALL_K3S_BIN_DIR=$2 INSTALL_K3S_SKIP_DOWNLOAD=binary INSTALL_K3S_FORCE_RESTART=true sh -s - "$1" <<<"$script"
+}
 service=k3s
 [ "$role" = agent ] && service=k3s-agent
 if [ "$(k3s --version 2>/dev/null | awk 'NR==1{print $3}')" != "$K3S_VERSION" ] || ! systemctl is-enabled -q "$service" 2>/dev/null; then
   progress "downloading and starting k3s"
-  if [ "$role" = server ]; then
-    curl -sfL "https://raw.githubusercontent.com/k3s-io/k3s/$K3S_VERSION/install.sh" |
-      INSTALL_K3S_VERSION="$K3S_VERSION" sh -s - server
-  else
-    curl -sfL "https://raw.githubusercontent.com/k3s-io/k3s/$K3S_VERSION/install.sh" |
-      INSTALL_K3S_VERSION="$K3S_VERSION" K3S_URL="https://$CELL_JOIN_SERVER:6443" K3S_TOKEN="$CELL_JOIN_TOKEN" sh -s - agent
-  fi
+  [ "$role" = server ] || export K3S_URL="https://$CELL_JOIN_SERVER:6443" K3S_TOKEN="$CELL_JOIN_TOKEN"
+  install_k3s "$role" /usr/local/bin
 elif [ "$changed" = 1 ]; then
   systemctl restart "$service"
 fi
