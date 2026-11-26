@@ -316,7 +316,10 @@ paths:
   /v0/mail:
     get:
       operationId: getMail
-      description: The SMTP server the cell sends its mail through (invites). Never the password.
+      description: |
+        The SMTP server the cell sends its mail through (invites). Never the
+        password. On a cell with a mail server of its own, also that server's
+        sender and the DNS records receivers need, each looked up now.
       responses:
         default: {$ref: "#/components/responses/Error"}
         "200": {description: The mail settings., content: {application/json: {schema: {$ref: "#/components/schemas/Mail"}}}}
@@ -327,7 +330,10 @@ paths:
       description: |
         Sets the SMTP server. The cell first checks it: it connects with
         TLS, logs in and has the sender accepted, without sending a mail.
-        Only if that works do the settings change.
+        Only if that works do the settings change. With own the cell sends
+        through its own mail server instead: the check then also connects
+        to port 25 of the mail server of a person's address, which many
+        hosting providers block until asked.
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: "#/components/schemas/MailRequest"}}}
@@ -1036,11 +1042,32 @@ components:
         username: {type: string}
         from: {type: string}
         tls: {type: boolean, description: "TLS from the start (port 465); false: STARTTLS."}
+        own: {type: boolean, description: "The cell sends through its own mail server."}
+        ownServer:
+          type: object
+          additionalProperties: false
+          description: The cell's own mail server; absent on a cell without one.
+          required: [from, records]
+          properties:
+            from: {type: string, description: "Its sender."}
+            records:
+              type: array
+              description: The DNS records receivers check before they take its mail.
+              items:
+                type: object
+                additionalProperties: false
+                required: [type, name, value, set]
+                properties:
+                  type: {type: string, enum: [TXT, A, AAAA, PTR]}
+                  name: {type: string, description: "The name, for PTR the address (set at the hosting provider)."}
+                  value: {type: string}
+                  set: {type: boolean, description: "DNS answers with it now."}
     MailRequest:
       type: object
       additionalProperties: false
-      required: [host, from]
+      description: Either own, or host and from.
       properties:
+        own: {type: boolean, description: "Send through the cell's own mail server; takes no other field."}
         host: {type: string}
         port: {type: integer, minimum: 1, maximum: 65535, description: "Default: 587, with tls 465."}
         username: {type: string}

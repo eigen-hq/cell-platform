@@ -225,7 +225,8 @@
   let mailNote = $state<{ text: string; bad?: boolean } | null>(null);
   let savingMail = $state(false);
   function editMail() {
-    const m = mail;
+    // A relay replaces the own server: nothing of it to keep.
+    const m = mail?.own ? null : mail;
     mailForm = { host: m?.host ?? "", port: m?.port ? String(m.port) : "", username: m?.username ?? "", password: "", from: m?.from ?? "", tls: m?.tls ?? false };
     mailNote = null;
     editingMail = true;
@@ -245,6 +246,23 @@
       mailNote = { text: msg(err), bad: true };
     } finally {
       savingMail = false;
+    }
+  }
+
+  // The cell's own mail server (E-84): no outside service, but receivers
+  // take its mail only with the DNS records below and port 25 open.
+  let usingOwn = $state(false);
+  async function useOwnMail() {
+    if (usingOwn) return;
+    usingOwn = true;
+    mailNote = null;
+    try {
+      mail = must(await api.PUT("/v0/mail", { body: { own: true } }));
+      mailNote = { text: "The cell sends its own mail now." };
+    } catch (err) {
+      mailNote = { text: msg(err), bad: true };
+    } finally {
+      usingOwn = false;
     }
   }
 
@@ -415,7 +433,12 @@
   <section class="mail">
     <div class="head">
       <h2 class="sec-title">System mail</h2>
-      {#if !editingMail}<Button kind="quiet" onclick={editMail}>{mail?.configured ? "Change" : "Set up"}</Button>{/if}
+      {#if !editingMail}
+        <span class="acts">
+          {#if mail?.ownServer && !mail.own}<Button kind="quiet" disabled={usingOwn} onclick={useOwnMail}>{usingOwn ? "Checking delivery" : "Use the cell's own server"}</Button>{/if}
+          <Button kind="quiet" onclick={editMail}>{mail?.configured && !mail.own ? "Change" : mail?.ownServer ? "Use another server" : "Set up"}</Button>
+        </span>
+      {/if}
     </div>
     {#if mailNote}<p class="note" class:fail={mailNote.bad} role="status">{mailNote.text}</p>{/if}
     {#if mailFailed}<p class="note fail" role="alert">{mailFailed}</p>{/if}
@@ -432,10 +455,25 @@
           <Button kind="quiet" type="button" onclick={() => { editingMail = false; mailNote = null; }}>Cancel</Button>
         </div>
       </form>
+    {:else if mail?.own}
+      <p class="mail-line"><span class="chip">{mail.from}</span><small>from the cell's own mail server, straight to each receiver. Admins with a mail address hear when an app needs attention.</small></p>
     {:else if mail?.configured}
       <p class="mail-line"><span class="chip">{mail.from}</span><small>through {mail.host}:{mail.port}{mail.username ? ` as ${mail.username}` : ""}, {mail.tls ? "TLS" : "STARTTLS"}. Admins with a mail address hear when an app needs attention.</small></p>
     {:else}
       <p class="mail-line"><small>No mail server yet. Invites come back as links to hand over, and warnings stay in the console.</small></p>
+    {/if}
+    {#if mail?.ownServer && !editingMail}
+      <p class="mail-line"><small>The cell's own server needs these records, or receivers file its mail as spam. Set the PTR at the hosting provider, the others in your DNS.</small></p>
+      <ul class="records">
+        {#each mail.ownServer.records as r (r.type + r.name)}
+          <li>
+            <span class="chip" class:missing={!r.set}>{r.set ? "Set" : "Missing"}</span>
+            <code>{r.type}</code>
+            <code class="name">{r.name}</code>
+            <code class="value">{r.value}</code>
+          </li>
+        {/each}
+      </ul>
     {/if}
   </section>
 
@@ -615,6 +653,42 @@
     align-items: center;
     gap: 10px;
     margin: 0;
+  }
+  .records {
+    display: grid;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .records li {
+    display: grid;
+    grid-template-columns: 76px 44px minmax(0, 14rem) minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: var(--radius-part);
+    background: var(--color-panel);
+  }
+  .records code {
+    overflow-wrap: anywhere;
+    user-select: all;
+  }
+  .records .chip {
+    justify-self: start;
+    background: color-mix(in srgb, var(--color-ok) 22%, transparent);
+  }
+  .records .chip.missing {
+    background: color-mix(in srgb, var(--color-bad) 22%, transparent);
+  }
+  @media (max-width: 760px) {
+    .records li {
+      grid-template-columns: 76px 1fr;
+    }
+    .records .name,
+    .records .value {
+      grid-column: 1 / -1;
+    }
   }
   .mail,
   .people {

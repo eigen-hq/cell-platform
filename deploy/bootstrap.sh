@@ -51,7 +51,7 @@ source "$here/versions.env"
 export BRIDGE_IMAGE=${BRIDGE_IMAGE:-}
 case $CELL_DOMAIN in *.localhost | localhost) [ -n "$BRIDGE_IMAGE" ] || die "BRIDGE_IMAGE must be set for *.localhost cells" ;; esac
 export CELL_JOIN_SERVER=${CELL_JOIN_SERVER:-}
-export CELL_DOMAIN AUTHENTIK_CHART_VERSION LONGHORN_VERSION OPERATOR_IMAGE RESTIC_VERSION RCLONE_VERSION AGENTGATEWAY_VERSION POSTGRES_VERSION AUTHENTIK_DIGEST
+export CELL_DOMAIN AUTHENTIK_CHART_VERSION LONGHORN_VERSION OPERATOR_IMAGE RESTIC_VERSION RCLONE_VERSION AGENTGATEWAY_VERSION POSTGRES_VERSION AUTHENTIK_DIGEST POSTFIX_VERSION
 export CELL_TLS=${CELL_TLS:-selfsigned}
 export CELL_ACME_EMAIL=${CELL_ACME_EMAIL:-}
 export CELL_ACME_SERVER=${CELL_ACME_SERVER:-https://acme-v02.api.letsencrypt.org/directory}
@@ -307,7 +307,8 @@ wait_ready Flux flux-system 5
 
 step "Cluster DNS"
 # Pods reach cell hosts (e.g. the OIDC issuer) through the ingress, like
-# browsers do, without hairpin NAT or public DNS.
+# browsers do, without hairpin NAT or public DNS. Only addresses: the other
+# records of the domain (the mail server's TXT, E-84) come from its DNS.
 domain_re=$(printf '%s' "$CELL_DOMAIN" | sed 's/[.]/\\./g')
 dns=$(kubectl apply -f - <<EOF
 apiVersion: v1
@@ -316,8 +317,21 @@ metadata:
   name: coredns-custom
   namespace: kube-system
 data:
-  cell.override: |
-    rewrite name regex ^(.+\.)?$domain_re\.?$ traefik.kube-system.svc.cluster.local answer auto
+  cell.server: |
+    $CELL_DOMAIN:53 {
+      view addresses {
+        expr type() in ['A', 'AAAA'] && name() != 'mail.$CELL_DOMAIN.'
+      }
+      errors
+      rewrite name regex ^(.+\.)?$domain_re\.?$ traefik.kube-system.svc.cluster.local answer auto
+      kubernetes cluster.local
+      cache 30
+    }
+    $CELL_DOMAIN:53 {
+      errors
+      forward . /etc/resolv.conf
+      cache 30
+    }
 EOF
 )
 case $dns in *unchanged*) ;; *) kubectl -n kube-system rollout restart deploy/coredns >/dev/null ;; esac
@@ -328,6 +342,34 @@ kubectl apply --server-side -f "$here/crd/" >/dev/null
 apply operator.yaml
 kubectl -n cell-system rollout status deploy/cell-operator --timeout=5m >/dev/null
 [ -z "$backup_request" ] || request_backup_target
+
+# Only a cell with a public address of its own sends its own mail: receivers
+# check the address its mail leaves with (SPF, PTR). That is the route's
+# source (pod traffic is masqueraded), not always the ingress address.
+mail_ip=$CELL_INGRESS_IP
+if [ "$mail_ip" != 127.0.0.1 ]; then
+  src=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}') || src=
+  if [ -n "$src" ] && ! private_ip "$src"; then mail_ip=$src; fi
+fi
+if [ "$mail_ip" = 127.0.0.1 ] || private_ip "$mail_ip"; then
+  [ "$CELL_INGRESS_IP" = 127.0.0.1 ] || echo "  No public address of its own (behind NAT): the cell sends mail through a server the admin sets." >&2
+else
+  step "Mail server (Postfix $POSTFIX_VERSION)"
+  # The DKIM key is made once and never leaves the cell; the API shows the
+  # DNS records from ConfigMap cell-mail-dns (E-84).
+  if [ -z "$(secret_value cell-system cell-mail-dkim key)" ]; then
+    key=$(openssl genrsa 2048 2>/dev/null) && [ -n "$key" ] || die "could not make the mail server's DKIM key"
+    kubectl -n cell-system create secret generic cell-mail-dkim --from-file=key=<(printf '%s\n' "$key") >/dev/null
+    unset key
+  fi
+  dkim=$(secret_value cell-system cell-mail-dkim key | openssl rsa -pubout -outform DER 2>/dev/null | base64 | tr -d '\n')
+  [ -n "$dkim" ] || die "secret cell-system/cell-mail-dkim holds no RSA key"
+  kubectl -n cell-system create configmap cell-mail-dns --from-literal=domain="$CELL_DOMAIN" \
+    --from-literal=address="$mail_ip" --from-literal=selector=mail --from-literal=dkim="$dkim" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  apply mail.yaml
+  kubectl -n cell-system rollout status deploy/mail --timeout=5m >/dev/null
+fi
 
 step "Platform API"
 apply change-approval.yaml

@@ -53,7 +53,7 @@ func (c *Client) SetMail(ctx context.Context, m Mail) error {
 		"port":                m.Port,
 		"username":            m.Username,
 		"password":            m.Password,
-		"use_tls":             !m.TLS,
+		"use_tls":             !m.TLS && !m.Own(),
 		"use_ssl":             m.TLS,
 		"timeout":             10,
 		"from_address":        m.From,

@@ -20,6 +20,18 @@ import (
 // operator sets the identity's mail stage from it and sends warnings with it.
 const MailSettings = "cell-mail"
 
+// OwnMail is the ConfigMap in SystemNamespace that describes the cell's own
+// mail server (E-84): domain, address, DKIM selector and public key, for
+// the DNS records the admin sets.
+const OwnMail = "cell-mail-dns"
+
+// OwnMailHost is the cell's own mail server, reachable only inside the cell.
+// It takes plain SMTP: traffic between the machines is WireGuard (E-42).
+const OwnMailHost = "mail.cell-system.svc.cluster.local"
+
+// OwnMailPort is the submission port of the cell's own mail server.
+const OwnMailPort = 587
+
 // Mail is the SMTP server the cell sends through. TLS means implicit TLS
 // (usually port 465); otherwise the connection must offer STARTTLS.
 type Mail struct {
@@ -30,6 +42,9 @@ type Mail struct {
 	From     string
 	TLS      bool
 }
+
+// Own reports whether m is the cell's own mail server.
+func (m Mail) Own() bool { return m.Host == OwnMailHost && m.Port == OwnMailPort && !m.TLS }
 
 // Data is the Mail as Secret data.
 func (m Mail) Data() map[string][]byte {
@@ -47,7 +62,7 @@ func ReadMail(data map[string][]byte) (Mail, error) {
 		From: string(data["from"]), TLS: string(data["tls"]) == "true"}, nil
 }
 
-// Dial connects with TLS and logs in. The caller quits the client; the
+// Dial connects with TLS (plain to the cell's own server) and logs in. The caller quits the client; the
 // connection ends with ctx's deadline at the latest.
 func (m Mail) Dial(ctx context.Context) (*smtp.Client, error) {
 	addr := net.JoinHostPort(m.Host, strconv.Itoa(m.Port))
@@ -85,7 +100,7 @@ func (m Mail) Dial(ctx context.Context) (*smtp.Client, error) {
 			return fail(err)
 		}
 	}
-	if !m.TLS {
+	if !m.TLS && !m.Own() {
 		if ok, _ := c.Extension("STARTTLS"); !ok {
 			return fail(errors.New("the server offers no STARTTLS; turn on TLS if it speaks TLS from the start (port 465)"))
 		}

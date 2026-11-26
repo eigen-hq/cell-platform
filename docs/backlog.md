@@ -172,7 +172,7 @@ A core part of the platform, not an add-on (E-78): agents and apps reach models 
 | Feature | Status | Depends on |
 |---|---|---|
 | Cell and domain | open | |
-| System mail of the cell (send only: invitations, password links, warnings) | built (invitations, warnings), not yet verified on a cell | |
+| System mail of the cell (send only: invitations, password links, warnings) | built (invitations, warnings), through a mail server of the admin's or the cell's own (E-84) | |
 
 ### Distributed cell
 

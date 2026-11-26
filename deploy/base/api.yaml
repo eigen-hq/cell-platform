@@ -244,7 +244,7 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: [configmaps]
-    resourceNames: [cell-models-status]
+    resourceNames: [cell-models-status, cell-mail-dns]
     verbs: [get]
   - apiGroups: [""]
     resources: [secrets]

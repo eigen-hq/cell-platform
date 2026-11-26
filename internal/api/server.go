@@ -94,6 +94,11 @@ type Server struct {
 	// CheckMail checks a mail server before it is taken; nil means a real
 	// SMTP check.
 	CheckMail func(ctx context.Context, m authentik.Mail) error
+	// CheckDelivery checks that the cell's own mail server can reach the
+	// mail servers of the given domains; nil means a real connection.
+	CheckDelivery func(ctx context.Context, domains []string) error
+	// DNS looks up the own mail server's records; nil means the system's.
+	DNS Resolver
 	// CheckModels checks a model provider's key before it is taken; nil
 	// means a real request to the provider.
 	CheckModels func(ctx context.Context, p cell.ModelProvider) error
