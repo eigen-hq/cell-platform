@@ -118,7 +118,7 @@ What is wanted and tried out happens in the office UI; the platform builds, oper
 | A target set again by the installer goes through the operator's checked switch under the gateway lock | open | |
 | Join keys: the joining machine reads the key without the command line, the key expires on join, the policy bounds its lifetime | running, not yet verified on a real cell (E-64) | |
 | Namespaced permissions for operator and API instead of cluster-wide ones | running, not yet verified (E-70) | |
-| Signed releases: the installer checks the release and its downloads against a signature | running, waits for the release key; not yet verified (E-65) | |
+| Signed releases: the installer checks the release and its downloads against a signature | running, release key committed; not yet verified (E-65) | |
 
 ### Identity
 

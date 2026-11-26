@@ -1,3 +1,3 @@
 # The public key that signs the releases (E-65), as ssh-keygen allowed
 # signers. get.sh carries the same line; deploy/lib_test.sh checks that.
-cell-release namespaces="cell-release" ssh-ed25519 PLACEHOLDER-no-release-key-yet
+cell-release namespaces="cell-release" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJAf1fP9JzJsAF+OgS11THHJw7VAEQjk/07XFARsAQ22

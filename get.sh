@@ -27,7 +27,7 @@ fail() { printf '\n  error: %s\n\n' "$*" >&2; exit 1; }
 # The key that signs the releases (deploy/release-signers, E-65). Every
 # release after v0.2.5 carries SHA256SUMS and its signature; this script
 # installs one only when both match.
-signers='cell-release namespaces="cell-release" ssh-ed25519 PLACEHOLDER-no-release-key-yet'
+signers='cell-release namespaces="cell-release" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJAf1fP9JzJsAF+OgS11THHJw7VAEQjk/07XFARsAQ22'
 # The releases from before signing, each by its commit: a moved tag changes
 # nothing.
 legacy() {

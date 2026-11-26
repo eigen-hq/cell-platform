@@ -312,7 +312,8 @@ ssh-keygen -q -t ed25519 -N '' -C test -f "$rel/other"
 signer() { printf 'cell-release namespaces="cell-release" %s' "$(cut -d' ' -f1,2 "$1")"; }
 g() { git -C "$rel/repo" -c user.name=test -c user.email=test@example.invalid -c commit.gpgsign=false -c tag.gpgsign=false -c core.hooksPath=/dev/null -c init.defaultBranch=main "$@"; }
 cp "$here/release.sh" "$rel/repo/deploy/"
-cp "$here/release-signers" "$rel/repo/deploy/"
+placeholder='cell-release namespaces="cell-release" ssh-ed25519 PLACEHOLDER-no-release-key-yet'
+echo "$placeholder" >"$rel/repo/deploy/release-signers"
 echo hello >"$rel/repo/README"
 g init -q
 g add -A
@@ -382,7 +383,7 @@ mv "$rel/sig" "$pub/SHA256SUMS.sig"
 check "a release under another name is refused" "1:no" "$(cp -R "$pub" "$pub/../v9.9.10" && mv "$pub/../v9.9.10/cell-v9.9.9.tar.gz" "$pub/../v9.9.10/cell-v9.9.10.tar.gz" && installs v9.9.10)"
 signers=$(signer "$rel/other.pub")
 check "a release signed with another key is refused" "1:no:1" "$(installs v9.9.9):$(grep -c 'does not match the release key' "$rel/out")"
-signers=$(grep -v '^#' "$here/release-signers")
+signers=$placeholder
 check "the placeholder key installs no signed release" "1:no:1" "$(installs v9.9.9):$(grep -c 'no release key yet' "$rel/out")"
 # The releases from before signing come by commit, without a signature.
 mkdir -p "$rel/old/cell-platform-x" "$rel/srv/test/cell/archive"
