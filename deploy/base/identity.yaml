@@ -91,6 +91,29 @@ metadata:
   name: identity-blueprints
   namespace: cell-system
 data:
+  # The login page shows the cell, not the identity product: a sign-in page
+  # in another product's look on this domain is what browsers flag as
+  # phishing. The console serves the mark.
+  brand.yaml: |
+    version: 1
+    metadata:
+      name: cell brand
+    entries:
+      # The built-in default brand first, so this never creates a brand of
+      # its own on a fresh cell.
+      - model: authentik_blueprints.metaapplyblueprint
+        attrs:
+          identifiers:
+            name: Default - Brand
+          required: true
+      - model: authentik_brands.brand
+        state: present
+        identifiers:
+          domain: authentik-default
+        attrs:
+          branding_title: ${CELL_DOMAIN}
+          branding_logo: https://console.${CELL_DOMAIN}/favicon.svg
+          branding_favicon: https://console.${CELL_DOMAIN}/favicon.svg
   platform.yaml: |
     version: 1
     metadata:
