@@ -361,8 +361,8 @@ spec:
             - name: AUTHENTIK_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: identity
-                  key: AUTHENTIK_BOOTSTRAP_TOKEN
+                  name: identity-platform
+                  key: token
           ports:
             - name: health
               containerPort: 8081

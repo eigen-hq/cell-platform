@@ -59,9 +59,14 @@ func (c *Client) list(ctx context.Context, path string, query url.Values) ([]map
 	return nil, fmt.Errorf("authentik: %s has more than 1000 pages", path)
 }
 
-// internalUser hides authentik's own accounts (outposts, anonymous).
+// PlatformAccount is the superuser account operator and API use (E-77);
+// deploy/base/identity.yaml creates it.
+const PlatformAccount = "cell-platform"
+
+// internalUser hides authentik's own accounts (outposts, anonymous) and
+// the platform's.
 func internalUser(username string) bool {
-	return username == "AnonymousUser" || strings.HasPrefix(username, "ak-outpost-")
+	return username == "AnonymousUser" || username == PlatformAccount || strings.HasPrefix(username, "ak-outpost-")
 }
 
 func names(objs any, key string) []string {
@@ -90,7 +95,12 @@ func (c *Client) ListUsers(ctx context.Context) ([]User, error) {
 	return users, nil
 }
 
+// userPK finds a user by name. Hidden accounts count as missing, so no app
+// password or group change reaches them.
 func (c *Client) userPK(ctx context.Context, username string) (any, error) {
+	if internalUser(username) {
+		return nil, fmt.Errorf("user %q: %w", username, ErrNotFound)
+	}
 	u, err := c.find(ctx, "core/users/", url.Values{"username": {username}})
 	if err != nil {
 		return nil, err
@@ -101,7 +111,12 @@ func (c *Client) userPK(ctx context.Context, username string) (any, error) {
 	return u["pk"], nil
 }
 
+// groupObj finds a group by name. The platform account's superuser group
+// counts as missing, so nobody joins it through the API.
 func (c *Client) groupObj(ctx context.Context, name string) (map[string]any, error) {
+	if name == PlatformAccount {
+		return nil, fmt.Errorf("group %q: %w", name, ErrNotFound)
+	}
 	g, err := c.find(ctx, "core/groups/", url.Values{"name": {name}})
 	if err != nil {
 		return nil, err
@@ -159,7 +174,10 @@ func (c *Client) EnsureServiceAccount(ctx context.Context, username string, grou
 }
 
 // CreateAppPassword creates a non-expiring app password for API logins
-// (client credentials grant) and returns its key.
+// (client credentials grant) and returns its key. authentik makes a token
+// a caller without superuser rights creates its own, whatever user the
+// request names: the owner is read back, and a token of anyone else is
+// deleted and never handed out.
 func (c *Client) CreateAppPassword(ctx context.Context, username string) (string, error) {
 	pk, err := c.userPK(ctx, username)
 	if err != nil {
@@ -173,6 +191,19 @@ func (c *Client) CreateAppPassword(ctx context.Context, username string) (string
 	if err := c.do(ctx, http.MethodPost, "core/tokens/", map[string]any{
 		"identifier": id, "intent": "app_password", "user": pk, "expiring": false, "description": "cell platform API",
 	}, nil); err != nil {
+		return "", err
+	}
+	var created struct {
+		User any `json:"user"`
+	}
+	if err := c.do(ctx, http.MethodGet, "core/tokens/"+id+"/", nil, &created); err != nil {
+		return "", err
+	}
+	if fmt.Sprint(created.User) != fmt.Sprint(pk) {
+		err := fmt.Errorf("authentik: app password %s belongs to user %v, not %q (%v)", id, created.User, username, pk)
+		if derr := c.do(ctx, http.MethodDelete, "core/tokens/"+id+"/", nil, nil); derr != nil {
+			err = errors.Join(err, fmt.Errorf("deleting it: %w", derr))
+		}
 		return "", err
 	}
 	var key struct {
@@ -192,6 +223,9 @@ func (c *Client) ListGroups(ctx context.Context) ([]Group, error) {
 	var groups []Group
 	for _, o := range objs {
 		g := Group{Name: fmt.Sprint(o["name"])}
+		if g.Name == PlatformAccount {
+			continue
+		}
 		for _, u := range names(o["users_obj"], "username") {
 			if !internalUser(u) {
 				g.Members = append(g.Members, u)

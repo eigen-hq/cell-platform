@@ -395,3 +395,101 @@ func TestEnsureAPIClientTokenValidity(t *testing.T) {
 		t.Errorf("token validity per provider: %v", got)
 	}
 }
+
+// authentik makes a token that a caller without superuser rights creates
+// its own, whatever user the request names. Such a token is deleted and
+// never handed out; one of the named user is.
+func TestCreateAppPasswordChecksOwner(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		owner any // nil: the user the request names
+	}{{"named user", nil}, {"caller instead", 7}} {
+		t.Run(tc.name, func(t *testing.T) {
+			api := newFakeAPI()
+			api.objects["core/users/"] = []map[string]any{{"pk": 7, "username": "platform"}, {"pk": 9, "username": "alice"}}
+			tokens := map[string]map[string]any{}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				rest, ok := strings.CutPrefix(r.URL.Path, "/api/v3/core/tokens/")
+				if !ok {
+					api.ServeHTTP(w, r)
+					return
+				}
+				id, view := strings.CutSuffix(strings.Trim(rest, "/"), "/view_key")
+				switch {
+				case r.Method == http.MethodPost && id == "":
+					var tok map[string]any
+					_ = json.NewDecoder(r.Body).Decode(&tok)
+					if tc.owner != nil {
+						tok["user"] = tc.owner
+					}
+					tokens[fmt.Sprint(tok["identifier"])] = tok
+					w.WriteHeader(http.StatusCreated)
+					_ = json.NewEncoder(w).Encode(tok)
+				case tokens[id] == nil:
+					http.Error(w, `{"detail":"Not found."}`, http.StatusNotFound)
+				case r.Method == http.MethodGet && view:
+					_ = json.NewEncoder(w).Encode(map[string]string{"key": "secret-" + id})
+				case r.Method == http.MethodGet:
+					_ = json.NewEncoder(w).Encode(tokens[id])
+				case r.Method == http.MethodDelete:
+					delete(tokens, id)
+					w.WriteHeader(http.StatusNoContent)
+				}
+			}))
+			defer srv.Close()
+			c := &Client{BaseURL: srv.URL, Token: "t", HTTP: srv.Client()}
+			key, err := c.CreateAppPassword(context.Background(), "alice")
+			if tc.owner == nil {
+				if err != nil || !strings.HasPrefix(key, "secret-cell-api-alice-") || len(tokens) != 1 {
+					t.Fatalf("key %q, err %v, tokens %v", key, err, tokens)
+				}
+				return
+			}
+			if err == nil || key != "" || !strings.Contains(err.Error(), "belongs to user 7") {
+				t.Fatalf("key %q, err %v: want an error and no key", key, err)
+			}
+			if len(tokens) != 0 {
+				t.Errorf("tokens left %v, want the wrong one deleted", tokens)
+			}
+		})
+	}
+}
+
+// The platform's own account is hidden: not listed, no app password, no
+// group change through the API.
+func TestPlatformAccountHidden(t *testing.T) {
+	api := newFakeAPI()
+	api.objects["core/users/"] = []map[string]any{{"pk": 7, "username": PlatformAccount}, {"pk": 9, "username": "alice"}}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		q.Del("include_users")
+		r.URL.RawQuery = q.Encode()
+		api.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+	c := &Client{BaseURL: srv.URL, Token: "t", HTTP: srv.Client()}
+	ctx := context.Background()
+	users, err := c.ListUsers(ctx)
+	if err != nil || len(users) != 1 || users[0].Username != "alice" {
+		t.Errorf("users %v, err %v", users, err)
+	}
+	if _, err := c.CreateAppPassword(ctx, PlatformAccount); !errors.Is(err, ErrNotFound) {
+		t.Errorf("app password for the platform account: %v", err)
+	}
+	api.objects["core/groups/"] = []map[string]any{{"pk": "g-1", "name": "finance"}, {"pk": "g-2", "name": PlatformAccount}}
+	if _, err := c.ChangeGroupMembers(ctx, "finance", []string{PlatformAccount}, nil); !errors.Is(err, ErrNotFound) {
+		t.Errorf("adding the platform account to a group: %v", err)
+	}
+	// Its superuser group: not listed, nobody joins it.
+	if groups, err := c.ListGroups(ctx); err != nil || len(groups) != 1 || groups[0].Name != "finance" {
+		t.Errorf("groups %v, err %v", groups, err)
+	}
+	if _, err := c.ChangeGroupMembers(ctx, PlatformAccount, []string{"alice"}, nil); !errors.Is(err, ErrNotFound) {
+		t.Errorf("joining the platform's group: %v", err)
+	}
+	for _, call := range api.calls {
+		if strings.HasPrefix(call, "POST core/tokens/") || strings.HasPrefix(call, "POST core/groups/g-") {
+			t.Errorf("call reached authentik: %s", call)
+		}
+	}
+}
