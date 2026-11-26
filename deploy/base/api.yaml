@@ -129,16 +129,41 @@ spec:
   matchConditions:
     - name: api
       expression: "request.userInfo.username == 'system:serviceaccount:cell-system:cell-api'"
-  # Secret data is base64 here: the group is
-  # system:bootstrappers:k3s:default-node-token.
+  # Secret data is base64 here and CEL has no base64 decoder: the group is
+  # system:bootstrappers:k3s:default-node-token, and the expiry (20
+  # characters, 2026-11-19T13:00:00Z) is decoded by hand: 28 base64
+  # characters, 6 bits each, to 20 bytes, each one character from '-' to
+  # 'Z'. It may be at most an hour after the key is made, plus 5 minutes
+  # for clocks apart (E-64).
+  variables:
+    - name: b64
+      expression: >-
+        has(object.data) && 'expiration' in object.data &&
+        object.data['expiration'].matches('^[A-Za-z0-9+/]{27}=$') ? object.data['expiration'] : ''
+    - name: sextets
+      expression: >-
+        variables.b64 == '' ? [] :
+        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26].map(i,
+          'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'.indexOf(variables.b64.charAt(i)))
+    - name: expiration
+      expression: >-
+        variables.sextets.size() != 27 ? '' :
+        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19].map(j,
+          j % 3 == 0 ? variables.sextets[j / 3 * 4] * 4 + variables.sextets[j / 3 * 4 + 1] / 16 :
+          j % 3 == 1 ? variables.sextets[j / 3 * 4 + 1] % 16 * 16 + variables.sextets[j / 3 * 4 + 2] / 4 :
+          variables.sextets[j / 3 * 4 + 2] % 4 * 64 + variables.sextets[j / 3 * 4 + 3]
+        ).map(b, '-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ'.charAt(b >= 45 && b <= 90 ? b - 45 : 18)).join()
   validations:
     - expression: >-
         object.type == 'bootstrap.kubernetes.io/token' &&
         object.metadata.name.startsWith('bootstrap-token-') &&
         has(object.data) && 'auth-extra-groups' in object.data &&
-        object.data['auth-extra-groups'] == 'c3lzdGVtOmJvb3RzdHJhcHBlcnM6azNzOmRlZmF1bHQtbm9kZS10b2tlbg==' &&
-        'expiration' in object.data && size(object.data['expiration']) >= 20
-      message: "the platform API only creates join keys for machines (k3s bootstrap tokens with an expiry)"
+        object.data['auth-extra-groups'] == 'c3lzdGVtOmJvb3RzdHJhcHBlcnM6azNzOmRlZmF1bHQtbm9kZS10b2tlbg=='
+      message: "the platform API only creates join keys for machines (k3s bootstrap tokens)"
+    - expression: >-
+        variables.expiration.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$') &&
+        timestamp(variables.expiration) <= timestamp(object.metadata.creationTimestamp) + duration('1h5m')
+      message: "a join key expires within an hour (expiration, RFC 3339 in UTC)"
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

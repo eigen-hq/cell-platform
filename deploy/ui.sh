@@ -95,6 +95,28 @@ ui_notes() {
 # log stays for the local cell's scripts: a step there.
 log() { step "$@"; }
 
+# fetch <url> <sha256> prints the file at url once it matches its pin in
+# versions.env (E-65). Otherwise it prints nothing and fails: a pipe after
+# it gets no part of a file that was changed or cut short.
+fetch() {
+  local f sum
+  f=$(mktemp)
+  if ! curl -fsSL --retry 3 -o "$f" "$1"; then
+    rm -f "$f"
+    die "could not download $1"
+  fi
+  sum=$( (sha256sum "$f" 2>/dev/null || shasum -a 256 "$f") | awk '{print $1}')
+  if [ "$sum" != "$2" ]; then
+    rm -f "$f"
+    die "$1 is not the pinned file (sha256 $sum, pinned $2): refusing it"
+  fi
+  if ! cat "$f"; then
+    rm -f "$f"
+    die "could not pass on $1 (disk full?)"
+  fi
+  rm -f "$f"
+}
+
 die() {
   ui_locked ui_die "$@"
   [ -z "${CELL_UI_LOG:-}" ] || printf 'error: %s\n' "$*"

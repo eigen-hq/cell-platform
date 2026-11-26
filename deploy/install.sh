@@ -116,7 +116,12 @@ fi
 if [ "$(flux version --client 2>/dev/null | awk '{print $2}')" != "v$FLUX_VERSION" ]; then
   progress "downloading the Flux CLI"
   arch=$(dpkg --print-architecture)
-  curl -fsSL "https://github.com/fluxcd/flux2/releases/download/v$FLUX_VERSION/flux_${FLUX_VERSION}_linux_$arch.tar.gz" |
+  case $arch in
+    amd64) flux_sum=$FLUX_SHA256_AMD64 ;;
+    arm64) flux_sum=$FLUX_SHA256_ARM64 ;;
+    *) die "the Flux CLI has no pinned build for $arch" ;;
+  esac
+  fetch "https://github.com/fluxcd/flux2/releases/download/v$FLUX_VERSION/flux_${FLUX_VERSION}_linux_$arch.tar.gz" "$flux_sum" |
     tar xz -C /usr/local/bin flux
 fi
 
@@ -163,7 +168,7 @@ if [ -f "$names" ]; then
   curl -fsS -o /dev/null -X PUT -H @<(printf 'Authorization: Bearer %s\n' "$CELL_NAMES_TOKEN") -H 'Content-Type: application/json' \
     -d "{\"address\":\"$CELL_INGRESS_IP\"}" "$CELL_NAMES_URL/v0/cells/$CELL_NAMES_LABEL" || die "the naming service did not take this machine's address"
 fi
-K3S_VERSION=$K3S_VERSION "$here/node.sh"
+K3S_VERSION=$K3S_VERSION K3S_INSTALL_SHA256=$K3S_INSTALL_SHA256 K3S_SHA256_AMD64=$K3S_SHA256_AMD64 K3S_SHA256_ARM64=$K3S_SHA256_ARM64 "$here/node.sh"
 mkdir -p /etc/cell
 for key in "${saved[@]}"; do printf '%s=%s\n' "$key" "${!key:-}"; done >"$settings"
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml

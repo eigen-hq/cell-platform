@@ -250,4 +250,150 @@ out=$(pin_images strict <<<'image: quay.io/x/y:v1' 2>&1) && rc=0 || rc=$?
 check "pin_images strict accepts a listed image" "0" "$rc"
 unset CELL_IMAGES_LOCK
 
+# fetch passes on a download only when it matches its pin (E-65).
+printf 'kind: List\n' >"$tmp/served"
+pin=$( (sha256sum "$tmp/served" 2>/dev/null || shasum -a 256 "$tmp/served") | awk '{print $1}')
+curl() { while [ $# -gt 1 ]; do [ "$1" = -o ] && cp "$tmp/served" "$2"; shift; done; }
+mkdir "$tmp/fetch"
+check "fetch prints the pinned file" "kind: List" "$(TMPDIR=$tmp/fetch fetch https://example.invalid/m "$pin")"
+out=$(: >"$CELL_STEP_FILE"; TMPDIR=$tmp/fetch fetch https://example.invalid/m 0000 2>&1) && rc=0 || rc=$?
+check "fetch refuses another file and keeps none of it" "1:0:1:" "$rc:$(grep -c 'kind: List' <<<"$out"):$(grep -c 'not the pinned file' <<<"$out"):$(ls "$tmp/fetch")"
+out=$( (: >"$CELL_STEP_FILE"; TMPDIR=$tmp/fetch fetch https://example.invalid/m "$pin" >&- || exit) 2>&1) && rc=0 || rc=$?
+check "fetch fails when it cannot pass the file on" "1:1:" "$rc:$(grep -c 'could not pass on' <<<"$out"):$(ls "$tmp/fetch")"
+curl() { return 22; }
+out=$(: >"$CELL_STEP_FILE"; TMPDIR=$tmp/fetch fetch https://example.invalid/m "$pin" 2>&1) && rc=0 || rc=$?
+check "fetch fails when the download fails" "1:1:" "$rc:$(grep -c 'could not download' <<<"$out"):$(ls "$tmp/fetch")"
+unset -f curl
+check "the installer downloads from GitHub only through fetch" "" \
+  "$(grep -nE 'https://(github\.com|raw\.githubusercontent\.com)' "$here"/{node,bootstrap,install,lib,ui}.sh | grep -vE ':[0-9]+:[[:space:]]*#|fetch "https|\?ref=\$EXTERNAL_SNAPSHOTTER_COMMIT"' || true)"
+
+# install_k3s replaces k3s only when its binary and install script both
+# match their pins; a failed download keeps the old one, so a rerun
+# installs again.
+source <(sed -n '/^install_k3s()/,/^}/p' "$here/node.sh")
+mkdir -p "$tmp/k3s/bin"
+printf 'new k3s\n' >"$tmp/k3s/binary"
+printf 'echo "$INSTALL_K3S_SKIP_DOWNLOAD $INSTALL_K3S_BIN_DIR $*" >"$K3S_TEST_RAN"\n' >"$tmp/k3s/install.sh"
+uname() { echo x86_64; }
+# A fake download: install.sh and the binary, or a failed one for $K3S_TEST_FAIL.
+curl() {
+  local o="" u
+  while [ $# -gt 0 ]; do case $1 in -o) o=$2; shift 2 ;; -*) shift ;; *) u=$1; shift ;; esac; done
+  [ "${u##*/}" != "${K3S_TEST_FAIL:-}" ] || return 22
+  case $u in */install.sh) cp "$tmp/k3s/install.sh" "$o" ;; *) cp "$tmp/k3s/binary" "$o" ;; esac
+}
+k3s_sums() {
+  K3S_VERSION=v1.0.0+k3s1 K3S_INSTALL_SHA256=$(sha "$tmp/k3s/install.sh") K3S_SHA256_AMD64=$(sha "$tmp/k3s/binary") K3S_SHA256_ARM64=x K3S_TEST_RAN=$tmp/k3s/ran "$@"
+}
+sha() { (sha256sum "$1" 2>/dev/null || shasum -a 256 "$1") | awk '{print $1}'; }
+for fail in install.sh k3s; do
+  printf 'old k3s\n' >"$tmp/k3s/bin/k3s"
+  rm -f "$tmp/k3s/ran"
+  out=$(: >"$CELL_STEP_FILE"; K3S_TEST_FAIL=$fail k3s_sums install_k3s agent "$tmp/k3s/bin" 2>&1) && rc=0 || rc=$?
+  check "a failed download of $fail keeps the old k3s" "1:old k3s:no" "$rc:$(cat "$tmp/k3s/bin/k3s"):$([ -e "$tmp/k3s/ran" ] && echo yes || echo no)"
+done
+out=$(: >"$CELL_STEP_FILE"; K3S_TEST_FAIL=none k3s_sums install_k3s agent "$tmp/k3s/bin" 2>&1) && rc=0 || rc=$?
+check "install_k3s puts the pinned k3s in place and sets up the service" "0:new k3s:binary $tmp/k3s/bin agent" "$rc:$(cat "$tmp/k3s/bin/k3s"):$(cat "$tmp/k3s/ran" 2>/dev/null)"
+unset -f curl uname k3s_sums sha install_k3s
+
+# install.sh starts node.sh as a process of its own: it passes every pin
+# node.sh needs.
+call=$(grep '"$here/node.sh"' "$here/install.sh")
+for v in $(grep -oE '\$\{K3S_[A-Z0-9_]+:\?' "$here/node.sh" | tr -d '${:?' | sort -u); do
+  check "install.sh passes $v to node.sh" "1" "$(grep -c "$v=\$$v " <<<"$call")"
+done
+
+# Signed releases (E-65): release.sh builds and signs one with a key made
+# here, get.sh's release checks it.
+rel=$tmp/rel
+mkdir -p "$rel/repo/deploy" "$rel/srv/test/cell/releases/download/v9.9.9"
+ssh-keygen -q -t ed25519 -N '' -C test -f "$rel/key"
+ssh-keygen -q -t ed25519 -N '' -C test -f "$rel/other"
+signer() { printf 'cell-release namespaces="cell-release" %s' "$(cut -d' ' -f1,2 "$1")"; }
+g() { git -C "$rel/repo" -c user.name=test -c user.email=test@example.invalid -c commit.gpgsign=false -c tag.gpgsign=false -c core.hooksPath=/dev/null -c init.defaultBranch=main "$@"; }
+cp "$here/release.sh" "$rel/repo/deploy/"
+cp "$here/release-signers" "$rel/repo/deploy/"
+echo hello >"$rel/repo/README"
+g init -q
+g add -A
+g commit -qm placeholder
+g tag v9.9.8
+signer "$rel/key.pub" >"$rel/repo/deploy/release-signers"
+g commit -qam key
+g tag v9.9.9
+out=$(CELL_RELEASE_KEY=$rel/key "$rel/repo/deploy/release.sh" build v9.9.8 "$rel" 2>&1) && rc=0 || rc=$?
+check "release.sh signs nothing with the placeholder key" "1:1" "$rc:$(grep -c 'holds no key yet' <<<"$out")"
+mkdir "$rel/wrong"
+out=$(CELL_RELEASE_KEY=$rel/other "$rel/repo/deploy/release.sh" build v9.9.9 "$rel/wrong" 2>&1) && rc=0 || rc=$?
+check "release.sh refuses a key the release does not carry" "1:1" "$rc:$(grep -c 'does not match' <<<"$out")"
+pub=$rel/srv/test/cell/releases/download/v9.9.9
+CELL_RELEASE_KEY=$rel/key "$rel/repo/deploy/release.sh" build v9.9.9 "$pub" 2>&1 && rc=0 || rc=$?
+check "release.sh signs a tagged release" "0:yes" "$rc:$([ -f "$pub/cell-v9.9.9.tar.gz" ] && [ -f "$pub/SHA256SUMS" ] && [ -f "$pub/SHA256SUMS.sig" ] && [ ! -e "$pub/signers" ] && echo yes)"
+
+# publish: the tag on the remote and the live installer's key checked, the
+# three files handed to gh, nothing left behind.
+git init -q --bare "$rel/origin.git"
+g remote add origin "$rel/origin.git"
+g push -q origin v9.9.9
+mkdir -p "$rel/bin" "$rel/published" "$rel/pubtmp"
+live() { printf '#!/bin/sh\nprintf "%%s\\n" %q\n' "signers='$1'" >"$rel/bin/curl"; }
+live "$(grep -v '^#' "$rel/repo/deploy/release-signers")"
+printf '#!/bin/sh\necho "$*" >"%s/gh-args"\nfor a; do [ -f "$a" ] && cp "$a" "%s/published/"; done\nexit 0\n' "$rel" "$rel" >"$rel/bin/gh"
+chmod +x "$rel/bin/curl" "$rel/bin/gh"
+out=$(PATH=$rel/bin:$PATH TMPDIR=$rel/pubtmp CELL_RELEASE_KEY=$rel/key "$rel/repo/deploy/release.sh" publish v9.9.9 2>&1) && rc=0 || rc=$?
+check "release.sh publishes a tagged release and cleans up" "0:release create v9.9.9:3:" \
+  "$rc:$(grep -o 'release create v9.9.9' "$rel/gh-args"):$(find "$rel/published" -type f | wc -l | tr -d ' '):$(ls "$rel/pubtmp")"
+rm "$rel/gh-args"
+live "$(signer "$rel/other.pub")"
+out=$(PATH=$rel/bin:$PATH TMPDIR=$rel/pubtmp CELL_RELEASE_KEY=$rel/key "$rel/repo/deploy/release.sh" publish v9.9.9 2>&1) && rc=0 || rc=$?
+check "release.sh publishes nothing the live installer would refuse" "1:1:no:" "$rc:$(grep -c 'another release key' <<<"$out"):$([ -e "$rel/gh-args" ] && echo yes || echo no):$(ls "$rel/pubtmp")"
+unset -f live
+
+check "get.sh carries the key of deploy/release-signers" "$(grep -v '^#' "$here/release-signers")" "$(sed -n "s/^signers='\(.*\)'$/\1/p" "$here/../get.sh")"
+source <(sed -n '/^fail()/p; /^legacy()/,/^}/p; /^sha256()/p; /^release()/,/^}/p' "$here/../get.sh")
+export repo=test/cell
+# A fake GitHub: URLs below https://github.com/ are files below $rel/srv.
+curl() {
+  local o="" u f
+  while [ $# -gt 0 ]; do case $1 in -o) o=$2; shift 2 ;; -*) shift ;; *) u=$1; shift ;; esac; done
+  echo "$u" >>"$rel/urls"
+  f=$rel/srv/${u#https://github.com/}
+  [ -f "$f" ] || return 22
+  if [ -n "$o" ]; then cp "$f" "$o"; else cat "$f"; fi
+}
+# installs <version> prints "<exit>:<README there?>" and keeps the output.
+installs() {
+  local dl to
+  dl=$(mktemp -d "$rel/dl.XXXXXX") to=$(mktemp -d "$rel/to.XXXXXX")
+  (release "$1" "$dl" "$to") >"$rel/out" 2>&1 && rc=0 || rc=$?
+  echo "$rc:$([ -f "$to/README" ] && echo yes || echo no)"
+}
+signers=$(signer "$rel/key.pub")
+export signers
+check "a signed release installs" "0:yes" "$(installs v9.9.9)"
+check "a signed release leaves no download behind" "" "$(rm -rf "$rel"/dl.*; installs v9.9.9 >/dev/null; ls -d "$rel"/dl.* 2>/dev/null)"
+cp "$pub/cell-v9.9.9.tar.gz" "$rel/good.tar.gz"
+printf x >>"$pub/cell-v9.9.9.tar.gz"
+check "a changed archive is refused" "1:no:1" "$(installs v9.9.9):$(grep -c 'does not match the signed checksums' "$rel/out")"
+cp "$rel/good.tar.gz" "$pub/cell-v9.9.9.tar.gz"
+mv "$pub/SHA256SUMS.sig" "$rel/sig"
+check "a release without signature is refused" "1:no" "$(installs v9.9.9)"
+mv "$rel/sig" "$pub/SHA256SUMS.sig"
+check "a release under another name is refused" "1:no" "$(cp -R "$pub" "$pub/../v9.9.10" && mv "$pub/../v9.9.10/cell-v9.9.9.tar.gz" "$pub/../v9.9.10/cell-v9.9.10.tar.gz" && installs v9.9.10)"
+signers=$(signer "$rel/other.pub")
+check "a release signed with another key is refused" "1:no:1" "$(installs v9.9.9):$(grep -c 'does not match the release key' "$rel/out")"
+signers=$(grep -v '^#' "$here/release-signers")
+check "the placeholder key installs no signed release" "1:no:1" "$(installs v9.9.9):$(grep -c 'no release key yet' "$rel/out")"
+# The releases from before signing come by commit, without a signature.
+mkdir -p "$rel/old/cell-platform-x" "$rel/srv/test/cell/archive"
+echo old >"$rel/old/cell-platform-x/README"
+tar czf "$rel/srv/test/cell/archive/8ee23ea2f8b6c24f2ac59ec5e7ca26c578061dcc.tar.gz" -C "$rel/old" cell-platform-x
+: >"$rel/urls"
+check "v0.2.5 installs unsigned, by its commit" "0:yes:https://github.com/test/cell/archive/8ee23ea2f8b6c24f2ac59ec5e7ca26c578061dcc.tar.gz" "$(installs v0.2.5):$(cat "$rel/urls")"
+check "v0.2.5 leaves no download behind" "" "$(rm -rf "$rel"/dl.*; installs v0.2.5 >/dev/null; ls -d "$rel"/dl.* 2>/dev/null)"
+for v in v0.2.6 v0.2.05 v00.2.5 v0.2.5-rc1 v0.2.5.1 v0.10.0 v1.0.0; do
+  check "$v needs a signature" "1:no:1" "$(installs "$v"):$(grep -c 'no release key yet' "$rel/out")"
+done
+unset -f curl fail
+
 [ "$fails" -eq 0 ]

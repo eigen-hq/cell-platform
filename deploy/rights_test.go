@@ -29,7 +29,7 @@ var clusterWide = map[string][]string{
 		"apps/deployments:get,list,watch", "batch/jobs:get,list,watch",
 		"postgresql.cnpg.io/clusters:get,list,watch", "helm.toolkit.fluxcd.io/helmreleases:get,list,watch",
 		"networking.k8s.io/ingresses:list",
-		"/namespaces:get,create,patch,delete",
+		"/namespaces:get,create,patch,delete", "/nodes:get,list,watch",
 		"rbac.authorization.k8s.io/rolebindings:create,patch",
 		"rbac.authorization.k8s.io/clusterroles#admin:bind",
 		"rbac.authorization.k8s.io/clusterroles#cell-operator-app:bind",
@@ -46,7 +46,7 @@ var clusterWide = map[string][]string{
 
 // The namespaces an account holds a Role in.
 var roleNamespaces = map[string][]string{
-	"cell-operator": {"cell-system", "cert-manager"},
+	"cell-operator": {"cell-system", "cert-manager", "kube-system"},
 	"cell-api":      {"cell-system", "kube-system", "longhorn-system"},
 }
 
