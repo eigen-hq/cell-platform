@@ -66,7 +66,7 @@ spec:
 |---|---|
 | `version` | Version of the app. For images the default tag, for charts available through `{{ .app.version }}` in the values |
 | `source.helm` | `repo` (`https://…` or `oci://…`), `chart`, `version`, `values` with placeholders |
-| `source.image` | `repository`, `tag` (default: `version`), `command`, `args`, `env` (as in Kubernetes, including `valueFrom`), `files` |
+| `source.image` | `repository`, `tag` (default: `version`; the catalog sets `<version>@sha256:<index digest>`, so a version change must patch the tag too), `command`, `args`, `env` (as in Kubernetes, including `valueFrom`), `files` |
 | `source.image.files` | Files that go into the container read-only (`path`, `content`, `executable`). This is how app-specific steps run after installation, for example as a start hook of the image |
 | `needs.database` | `engine: postgres`, `size`. One CloudNativePG database per app |
 | `needs.volumes` | `name`, `size`, `mountPath` (image apps), at most 16. Charts create their volumes themselves. As with the database, the size cannot be changed yet, because a rollback cannot shrink a volume |

@@ -48,7 +48,7 @@ source "$here/versions.env"
 export BRIDGE_IMAGE=${BRIDGE_IMAGE:-}
 case $CELL_DOMAIN in *.localhost | localhost) [ -n "$BRIDGE_IMAGE" ] || die "BRIDGE_IMAGE must be set for *.localhost cells" ;; esac
 export CELL_JOIN_SERVER=${CELL_JOIN_SERVER:-}
-export CELL_DOMAIN AUTHENTIK_CHART_VERSION LONGHORN_VERSION OPERATOR_IMAGE RESTIC_VERSION RCLONE_VERSION AGENTGATEWAY_VERSION
+export CELL_DOMAIN AUTHENTIK_CHART_VERSION LONGHORN_VERSION OPERATOR_IMAGE RESTIC_VERSION RCLONE_VERSION AGENTGATEWAY_VERSION POSTGRES_VERSION AUTHENTIK_DIGEST
 export CELL_TLS=${CELL_TLS:-selfsigned}
 export CELL_ACME_EMAIL=${CELL_ACME_EMAIL:-}
 export CELL_ACME_SERVER=${CELL_ACME_SERVER:-https://acme-v02.api.letsencrypt.org/directory}
@@ -68,7 +68,7 @@ done | kubectl apply --server-side --field-manager=cell-bootstrap -f - >/dev/nul
 
 step "Certificates and databases"
 progress "downloading components"
-cm=$(curl -fsSL "https://github.com/cert-manager/cert-manager/releases/download/$CERT_MANAGER_VERSION/cert-manager.yaml")
+cm=$(curl -fsSL "https://github.com/cert-manager/cert-manager/releases/download/$CERT_MANAGER_VERSION/cert-manager.yaml" | pin_images strict)
 if [ "$CELL_TLS" = names ]; then
   # DNS-01 checks ask public resolvers: the cluster DNS answers every cell
   # host with the ingress (below), also the challenge records.
@@ -77,12 +77,18 @@ if [ "$CELL_TLS" = names ]; then
   grep -q -- '^ *- --dns01-recursive-nameservers-only$' <<<"$cm" || die "could not point cert-manager at public resolvers"
 fi
 kubectl apply --server-side -f - <<<"$cm" >/dev/null
-kubectl apply --server-side -f "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$CNPG_VERSION/cnpg-$CNPG_VERSION.yaml" >/dev/null
+curl -fsSL "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$CNPG_VERSION/cnpg-$CNPG_VERSION.yaml" |
+  pin_images strict | kubectl apply --server-side -f - >/dev/null
 wait_ready cert-manager cert-manager 5
 wait_ready CloudNativePG cnpg-system 5
 # The databases' backups (barman-cloud plugin).
 progress "database backup plugin"
-retry kubectl apply --server-side -f "https://github.com/cloudnative-pg/plugin-barman-cloud/releases/download/v$BARMAN_PLUGIN_VERSION/manifest.yaml" >/dev/null
+# The plugin's sidecar image sits base64-encoded in a Secret and stays tag-pinned (E-76).
+barman_plugin() {
+  curl -fsSL "https://github.com/cloudnative-pg/plugin-barman-cloud/releases/download/v$BARMAN_PLUGIN_VERSION/manifest.yaml" |
+    pin_images strict | kubectl apply --server-side -f - >/dev/null
+}
+retry barman_plugin
 wait_ready CloudNativePG cnpg-system 5
 
 case $CELL_STORAGE in longhorn) step "Storage (Longhorn $LONGHORN_VERSION)" ;; *) step "Storage ($CELL_STORAGE)" ;; esac
@@ -91,7 +97,9 @@ case $CELL_STORAGE in
   longhorn)
     progress "snapshot controller"
     kubectl apply -k "https://github.com/kubernetes-csi/external-snapshotter/client/config/crd?ref=$EXTERNAL_SNAPSHOTTER_VERSION" >/dev/null
-    kubectl -n kube-system apply -k "https://github.com/kubernetes-csi/external-snapshotter/deploy/kubernetes/snapshot-controller?ref=$EXTERNAL_SNAPSHOTTER_VERSION" >/dev/null
+    # The kustomization sets the controller's image tag itself (v8.6.0 for v8.7.0).
+    kubectl kustomize "https://github.com/kubernetes-csi/external-snapshotter/deploy/kubernetes/snapshot-controller?ref=$EXTERNAL_SNAPSHOTTER_VERSION" |
+      pin_images strict | kubectl -n kube-system apply -f - >/dev/null
     apply storage-longhorn.yaml
     wait_ready Longhorn longhorn-system 20
     retry apply storage-longhorn-classes.yaml
@@ -263,6 +271,7 @@ step "App delivery (Flux $FLUX_VERSION)"
 # releases use sources of their own namespace only.
 flux=$(flux install --version="v$FLUX_VERSION" --components=source-controller,helm-controller --export |
   perl -0777 -pe 's{(- --enable-leader-election\n)((?:(?!\n---\n).)*?image: ghcr\.io/fluxcd/helm-controller:)}{$1        - --default-service-account=helm-deployer\n        - --no-cross-namespace-refs=true\n$2}s')
+flux=$(pin_images strict <<<"$flux")
 grep -q -- '^ *- --default-service-account=helm-deployer$' <<<"$flux" || die "could not lock helm-controller to the apps' deployers"
 kubectl apply --server-side -f - <<<"$flux" >/dev/null
 wait_ready Flux flux-system 5

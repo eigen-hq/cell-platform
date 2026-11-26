@@ -88,6 +88,9 @@ func run() error {
 	})); err != nil {
 		return err
 	}
+	if controller.PostgresImage = os.Getenv("POSTGRES_IMAGE"); controller.PostgresImage == "" {
+		return fmt.Errorf("POSTGRES_IMAGE is not set")
+	}
 	restic := os.Getenv("RESTIC_IMAGE")
 	if restic == "" {
 		return fmt.Errorf("RESTIC_IMAGE is not set")

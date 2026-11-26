@@ -20,6 +20,11 @@ import (
 	"github.com/eigen-hq/cell-platform/internal/cell"
 )
 
+// PostgresImage is the operand image of every app database, set once at
+// start from POSTGRES_IMAGE (pinned by digest, E-76). Empty (tests): the
+// database operator picks its own default.
+var PostgresImage string
+
 // Names of objects the operator creates in an app namespace.
 const (
 	caConfigMap   = "cell-ca"
@@ -113,6 +118,9 @@ func database(app *cellv1.App, archive string) *unstructured.Unstructured {
 			"secret": map[string]any{"name": dbCredentials},
 		}},
 		"managed": map[string]any{"roles": []any{ownerRole(app)}},
+	}
+	if PostgresImage != "" {
+		spec["imageName"] = PostgresImage
 	}
 	if archive != "" {
 		spec["plugins"] = []any{archiverPlugin(archive)}

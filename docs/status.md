@@ -159,6 +159,7 @@ Status 2026-11-24: console in Svelte at `https://console.<domain>`, served by `c
 | Helper functions | `make test` (`npm run check`): time stamps like "12 min ago", sentences, groups, participants and steps of a change (`console/unit/`, `node --test`) | passed |
 | Tokens | `make test`, `TestTokens`: tokens of the console are valid at the API, tokens of the MCP gateway and of apps are not | passed |
 | Types and contract | `make test` checks the console with `svelte-check`, the API types come from `api/openapi.yaml` | passed |
+| Third-party images pinned by digest | `go test ./deploy` (`images_test.go`): every image in `deploy/base`, the Dockerfile bases and the catalog carries a sha256 index digest or is in `deploy/images.lock`; `deploy/lib_test.sh` covers `pin_images` (renders, downloaded upstream manifests, strict mode refuses an unlisted image). Digests resolved from the registries with `docker buildx imagetools inspect` on 2026-11-26. Not yet run on a live cell | passed locally |
 | Size | production build | JavaScript 71 KB (28 KB gzip), CSS 15 KB, fonts 54 KB |
 
 ## Risks

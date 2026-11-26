@@ -11,7 +11,8 @@ spec:
   source:
     image:
       repository: nextcloud
-      tag: "{{ .app.version }}-apache"
+      # Digest of the multi-arch index, verified 2026-11-26; bump with version.
+      tag: "34.0.6-apache@sha256:82f16a4729bf5246782960824d9a5a1d48d9aa0ad36beae2f42d3ad7c6843646"
       env:
         - name: POSTGRES_HOST
           value: "{{ .database.host }}"
