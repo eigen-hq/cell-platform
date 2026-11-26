@@ -2159,7 +2159,7 @@ func TestPlainArchiveIsEncryptedByTheNextBackup(t *testing.T) {
 		if err := k8s.Get(ctx, client.ObjectKey{Name: "coffer-c"}, &b); err != nil {
 			return err
 		}
-		if b.Status.Phase != cellv1.RunFailed || !strings.Contains(b.Status.Message, "is not in archive "+sn) {
+		if b.Status.Phase != cellv1.RunFailed || !strings.Contains(b.Status.Message, "is in archive db-20261101t000000, not "+sn) {
 			return fmt.Errorf("backup %s: %s", b.Status.Phase, b.Status.Message)
 		}
 		return nil
@@ -2167,6 +2167,154 @@ func TestPlainArchiveIsEncryptedByTheNextBackup(t *testing.T) {
 	if b.Status.Database != nil {
 		t.Errorf("failed backup recorded %+v", b.Status.Database)
 	}
+}
+
+// The barman-cloud plugin reports a base backup done even when it could
+// not record it in its ObjectStore: the backup waits a while for the
+// record, then fails instead of naming an archive it may not be in.
+func TestUnrecordedBaseBackupFailsAfterAWhile(t *testing.T) {
+	app := readyDataApp(t, "almanac")
+	defer removeApp(t, app)
+	unconfirmedBackupFails(t, "almanac", "almanac-b")
+}
+
+// unconfirmedBackupFails runs backup name of app to a base backup the
+// plugin reports done but never records, and expects it to wait and then
+// fail.
+func unconfirmedBackupFails(t *testing.T, app, name string) {
+	t.Helper()
+	ctx, ns := context.Background(), "app-"+app
+	b := cellv1.Backup{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: cellv1.BackupSpec{App: app}}
+	if err := k8s.Create(ctx, &b); err != nil {
+		t.Fatal(err)
+	}
+	var pg *unstructured.Unstructured
+	eventually(t, func() (err error) { pg, err = get(ctx, gvkCNPGBackup, ns, name); return err })
+	_ = unstructured.SetNestedField(pg.Object, "completed", "status", "phase")
+	_ = unstructured.SetNestedField(pg.Object, "unrecorded-1", "status", "backupId")
+	_ = unstructured.SetNestedField(pg.Object, time.Now().UTC().Format(time.RFC3339), "status", "stoppedAt")
+	_ = unstructured.SetNestedField(pg.Object, pg.GetAnnotations()[annotationCluster], "status", "pluginMetadata", "clusterUID")
+	if err := k8s.Status().Update(ctx, pg); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * time.Second)
+	if err := k8s.Get(ctx, client.ObjectKey{Name: name}, &b); err != nil {
+		t.Fatal(err)
+	}
+	if b.Status.Phase != cellv1.RunRunning || b.Status.Database != nil {
+		t.Fatalf("backup %s (%s) recorded %+v before the wait ended", b.Status.Phase, b.Status.Message, b.Status.Database)
+	}
+	skew.Store(int64(archiveConfirm))
+	defer skew.Store(0)
+	b.Annotations = map[string]string{"test/touch": "1"} // wake the reconciler
+	if err := k8s.Update(ctx, &b); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, func() error {
+		if err := k8s.Get(ctx, client.ObjectKey{Name: name}, &b); err != nil {
+			return err
+		}
+		if b.Status.Phase != cellv1.RunFailed || !strings.Contains(b.Status.Message, "is not confirmed in archive") {
+			return fmt.Errorf("backup %s: %s", b.Status.Phase, b.Status.Message)
+		}
+		return nil
+	})
+	if b.Status.Database != nil {
+		t.Errorf("failed backup recorded %+v", b.Status.Database)
+	}
+}
+
+// After a switch cancelled before its base backup, with no record of the
+// plain archive, an unrecorded base backup still fails after the wait.
+func TestUnconfirmedBackupAfterASwitchFails(t *testing.T) {
+	ctx := context.Background()
+	app := readyDataApp(t, "cobble")
+	defer removeApp(t, app)
+	cluster, err := get(ctx, gvkCluster, "app-cobble", "db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(map[string]any{"spec": map[string]any{"plugins": []any{archiverPlugin("db-20261101t000000")}}})
+	if err := k8s.Patch(ctx, cluster, client.RawPatch(types.MergePatchType, raw)); err != nil {
+		t.Fatal(err)
+	}
+	a := cellv1.Backup{ObjectMeta: metav1.ObjectMeta{Name: "cobble-a"}, Spec: cellv1.BackupSpec{App: "cobble"}}
+	if err := k8s.Create(ctx, &a); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, func() error {
+		c, err := get(ctx, gvkCluster, "app-cobble", "db")
+		if err != nil {
+			return err
+		}
+		if !strings.HasPrefix(serverName(c), cryptArchive) {
+			return fmt.Errorf("still archived into %s", serverName(c))
+		}
+		return nil
+	})
+	// Cancelled before its base backup.
+	if err := k8s.Delete(ctx, &a); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, func() error {
+		if err := k8s.Get(ctx, client.ObjectKeyFromObject(&a), &a); !apierrors.IsNotFound(err) {
+			return fmt.Errorf("cancelled backup still there (%v)", err)
+		}
+		return nil
+	})
+	unconfirmedBackupFails(t, "cobble", "cobble-b")
+}
+
+// An app a failed restore stopped still gets the backup credentials and
+// stores an update added (here the encrypted archive of E-67): the next
+// restore waits for them.
+func TestStoppedAppGetsNewBackupResources(t *testing.T) {
+	ctx := context.Background()
+	app := readyDataApp(t, "cairn")
+	defer removeApp(t, app)
+	if err := k8s.Create(ctx, &cellv1.Restore{ObjectMeta: metav1.ObjectMeta{Name: "cairn-r1"}, Spec: cellv1.RestoreSpec{App: "cairn", Backup: "latest"}}); err != nil {
+		t.Fatal(err)
+	}
+	restorePhase(t, "cairn-r1", cellv1.RunRunning)
+	completeJob(t, "app-cairn", jobName("lookup", "cairn-r1"),
+		`[{"id":"snap-9","tags":["backup=b9","db-server=db-x","db-backup=id-9"]}]`)
+	failJob(t, "app-cairn", jobName("restore", "cairn-r1"), "restic: repository unreachable")
+	restorePhase(t, "cairn-r1", cellv1.RunFailed)
+	phase(t, "cairn", cellv1.PhaseNeedsAttention)
+
+	// The cell from before the update: no encrypted store, no keys for it.
+	store := &unstructured.Unstructured{}
+	store.SetGroupVersionKind(gvkObjectStore)
+	store.SetNamespace("app-cairn")
+	store.SetName(cryptStore)
+	if err := k8s.Delete(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, func() error {
+		var s corev1.Secret
+		if err := k8s.Get(ctx, client.ObjectKey{Namespace: "app-cairn", Name: backupSecret}, &s); err != nil {
+			return err
+		}
+		delete(s.Data, "CRYPT_ACCESS_KEY_ID")
+		delete(s.Data, "CRYPT_ACCESS_SECRET_KEY")
+		return k8s.Update(ctx, &s)
+	})
+	target, err := loadTarget(ctx, k8s)
+	if err != nil || target == nil {
+		t.Fatalf("target %v (%v)", target, err)
+	}
+	eventually(t, func() error {
+		if err := k8s.Get(ctx, client.ObjectKeyFromObject(app), app); err != nil {
+			return err
+		}
+		if app.Status.Phase != cellv1.PhaseNeedsAttention {
+			return fmt.Errorf("app %s", app.Status.Phase)
+		}
+		if ok, err := backupReady(ctx, k8s, app, target); err != nil || !ok {
+			return fmt.Errorf("backup resources not in place (%v)", err)
+		}
+		return nil
+	})
 }
 
 // The first scheduled backup after the upgrade does not wait for the

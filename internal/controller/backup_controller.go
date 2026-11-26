@@ -167,10 +167,14 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			if from == "" || from != a[annotationCluster] || a[annotationServer] == "" {
 				return fail("database backup " + id + " is not of the database it was asked of (replaced during the backup?)")
 			}
-			if ok, err := r.inArchive(ctx, pg, a[annotationServer]); err != nil {
+			if in, wait, err := r.backupArchive(ctx, pg, a[annotationServer]); err != nil {
 				return ctrl.Result{}, err
-			} else if !ok {
-				return fail("database backup " + id + " is not in archive " + a[annotationServer] + " (the database still archived elsewhere); the next backup takes a new one")
+			} else if wait > 0 {
+				return ctrl.Result{RequeueAfter: wait}, nil
+			} else if in == "" {
+				return fail("database backup " + id + " is not confirmed in archive " + a[annotationServer] + " (the plugin did not record it); the next backup takes a new one")
+			} else if in != a[annotationServer] {
+				return fail("database backup " + id + " is in archive " + in + ", not " + a[annotationServer] + " (the database still archived there); the next backup takes a new one")
 			}
 			b.Status.Database = &cellv1.DatabaseBackup{ServerName: a[annotationServer], BackupID: id}
 			b.Status.Message = "volumes"
@@ -228,7 +232,7 @@ const switchingArchive = "database: switching to an encrypted archive"
 // into the new archive.
 // ponytail: a fixed wait, as CloudNativePG shows no sign of when its
 // instance manager archives into the new archive. A base backup taken
-// before it did fails in inArchive; the next backup takes a new one.
+// before it did fails in backupArchive; the next backup takes a new one.
 const archiveSettle = 30 * time.Second
 
 // encryptArchive moves a database archived plain (from before E-67) to a
@@ -274,34 +278,64 @@ func (r *BackupReconciler) encryptArchive(ctx context.Context, b *cellv1.Backup,
 	return ctrl.Result{RequeueAfter: archiveSettle}, r.Patch(ctx, cluster, client.RawPatch(types.MergePatchType, raw))
 }
 
-// inArchive reports whether a completed CloudNativePG backup lies in the
-// archive sn. The instance takes a base backup with its own view of the
-// cluster, which may still name the archive before a switch (E-67). The
-// barman-cloud plugin records each archive's last base backup in its
-// ObjectStore before it reports the backup done, so that time is at least
-// the backup's end only in the archive the backup went to.
-func (r *BackupReconciler) inArchive(ctx context.Context, pg *unstructured.Unstructured, sn string) (bool, error) {
+// archiveConfirm bounds the wait for the barman-cloud plugin to record a
+// base backup in its ObjectStore.
+const archiveConfirm = 2 * time.Minute
+
+// backupArchive returns the archive a completed CloudNativePG backup asked
+// of archive sn lies in, or a wait. The instance takes a base backup with
+// its own view of the cluster, which may still name the archive before a
+// switch (E-67). The barman-cloud plugin records each archive's last base
+// backup in its ObjectStore before it reports the backup done, but goes on
+// if that update fails. So an archive whose last base backup ended no
+// earlier than this one is where it went. With no such archive it waits
+// up to archiveConfirm, then returns "": unconfirmed, the backup may lie in
+// an archive nothing records.
+func (r *BackupReconciler) backupArchive(ctx context.Context, pg *unstructured.Unstructured, sn string) (string, time.Duration, error) {
 	stopped, _, _ := unstructured.NestedString(pg.Object, "status", "stoppedAt")
+	if stopped == "" {
+		return "", 0, nil // CloudNativePG sets it with the phase; nothing to compare with
+	}
 	end, err := time.Parse(time.RFC3339, stopped)
 	if err != nil {
-		return false, fmt.Errorf("database backup %s: end time %q: %w", pg.GetName(), stopped, err)
+		return "", 0, fmt.Errorf("database backup %s: end time %q: %w", pg.GetName(), stopped, err)
 	}
-	store := &unstructured.Unstructured{}
-	store.SetGroupVersionKind(gvkObjectStore)
-	// Past the cache: the plugin wrote the store just before the backup.
-	key := client.ObjectKey{Namespace: pg.GetNamespace(), Name: archiveStore(sn)}
-	if err := apiReader(r.Reader, r).Get(ctx, key, store); err != nil {
-		return false, err
+	elsewhere := ""
+	for _, name := range []string{cryptStore, objectStore} {
+		store := &unstructured.Unstructured{}
+		store.SetGroupVersionKind(gvkObjectStore)
+		// Past the cache: the plugin wrote the store just before the backup.
+		if err := apiReader(r.Reader, r).Get(ctx, client.ObjectKey{Namespace: pg.GetNamespace(), Name: name}, store); apierrors.IsNotFound(err) {
+			continue
+		} else if err != nil {
+			return "", 0, err
+		}
+		windows, _, _ := unstructured.NestedMap(store.Object, "status", "serverRecoveryWindow")
+		for server := range windows {
+			last, _, _ := unstructured.NestedString(windows, server, "lastSuccessfulBackupTime")
+			if last == "" {
+				continue
+			}
+			at, err := time.Parse(time.RFC3339, last)
+			if err != nil {
+				return "", 0, fmt.Errorf("object store %s: last backup time %q: %w", name, last, err)
+			}
+			if at.Before(end) {
+				continue
+			}
+			if server == sn && name == archiveStore(sn) {
+				return sn, 0, nil
+			}
+			elsewhere = server
+		}
 	}
-	last, _, _ := unstructured.NestedString(store.Object, "status", "serverRecoveryWindow", sn, "lastSuccessfulBackupTime")
-	if last == "" {
-		return false, nil
+	if elsewhere != "" {
+		return elsewhere, 0, nil
 	}
-	at, err := time.Parse(time.RFC3339, last)
-	if err != nil {
-		return false, fmt.Errorf("object store %s: last backup time %q: %w", key.Name, last, err)
+	if wait := end.Add(archiveConfirm).Sub(r.now()); wait > 0 {
+		return "", min(wait, 10*time.Second), nil
 	}
-	return !at.Before(end), nil
+	return "", 0, nil
 }
 
 // backupFinalizer keeps a running backup until it ended.
