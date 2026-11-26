@@ -136,6 +136,18 @@ spec:
                     - weekly
                     type: string
                 type: object
+              digests:
+                additionalProperties:
+                  description: Digest is a sha256 digest of an image index.
+                  pattern: ^sha256:[0-9a-f]{64}$
+                  type: string
+                description: |-
+                  Digests maps a version to the sha256 digest of its multi-arch image
+                  index. Only the entry of the current version is used: an image gets
+                  "@<digest>" appended, templates see it as {{ .app.digest }} (empty
+                  without an entry). A version change without a new entry runs by tag.
+                maxProperties: 16
+                type: object
               health:
                 properties:
                   path:

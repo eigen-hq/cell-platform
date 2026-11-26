@@ -310,7 +310,7 @@ func (r *AppReconciler) install(ctx context.Context, app *cellv1.App, target *ba
 	}
 
 	data := map[string]any{
-		"app":    map[string]any{"name": app.Name, "version": app.Spec.Version, "namespace": ns},
+		"app":    map[string]any{"name": app.Name, "version": app.Spec.Version, "digest": versionDigest(app), "namespace": ns},
 		"cell":   map[string]any{"domain": cfg.Domain, "caConfigMap": caConfigMap},
 		"access": map[string]any{"host": host, "url": "https://" + host},
 	}
@@ -490,6 +490,9 @@ func (r *AppReconciler) ensureDatabase(ctx context.Context, app *cellv1.App, tar
 	}
 	if roles, _, _ := unstructured.NestedSlice(cluster.Object, "spec", "managed", "roles"); len(roles) == 0 {
 		spec["managed"] = map[string]any{"roles": []any{ownerRole(app)}}
+	}
+	if cur, _, _ := unstructured.NestedString(cluster.Object, "spec", "imageName"); PostgresImage != "" && cur != PostgresImage {
+		spec["imageName"] = PostgresImage
 	}
 	if len(spec) > 0 {
 		patch["spec"] = spec

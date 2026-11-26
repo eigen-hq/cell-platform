@@ -30,12 +30,18 @@ type AppSpec struct {
 	Title string `json:"title,omitempty"`
 	// Version of the app; templates see it as {{ .app.version }}.
 	// +kubebuilder:validation:MinLength=1
-	Version string       `json:"version"`
-	Source  Source       `json:"source"`
-	Needs   Needs        `json:"needs,omitempty"`
-	Access  Access       `json:"access"`
-	Health  Health       `json:"health,omitempty"`
-	Backup  BackupPolicy `json:"backup,omitempty"`
+	Version string `json:"version"`
+	// Digests maps a version to the sha256 digest of its multi-arch image
+	// index. Only the entry of the current version is used: an image gets
+	// "@<digest>" appended, templates see it as {{ .app.digest }} (empty
+	// without an entry). A version change without a new entry runs by tag.
+	// +kubebuilder:validation:MaxProperties=16
+	Digests map[string]Digest `json:"digests,omitempty"`
+	Source  Source            `json:"source"`
+	Needs   Needs             `json:"needs,omitempty"`
+	Access  Access            `json:"access"`
+	Health  Health            `json:"health,omitempty"`
+	Backup  BackupPolicy      `json:"backup,omitempty"`
 	// MCP is the app's MCP endpoint, if it has one. The cell's gateway
 	// offers its tools to the accounts that may use the app.
 	MCP *MCP `json:"mcp,omitempty"`
@@ -66,6 +72,10 @@ type Source struct {
 	Helm  *HelmSource  `json:"helm,omitempty"`
 	Image *ImageSource `json:"image,omitempty"`
 }
+
+// Digest is a sha256 digest of an image index.
+// +kubebuilder:validation:Pattern=`^sha256:[0-9a-f]{64}$`
+type Digest string
 
 type HelmSource struct {
 	// Repo is an HTTP chart repository or an OCI registry path (oci://...).

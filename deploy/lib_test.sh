@@ -116,7 +116,7 @@ check "backup_target_manifest writes rclone.conf as the operator does (no final 
 check "no target writes an empty rclone.conf" '  rclone.conf: ""' "$(backup_target_manifest "" root= | grep rclone.conf)"
 check "backup_target_manifest keeps values out of argv" "0" "$(grep -cE 'masterkey|hunter3|s3secret' "$FAKE_LOG" || true)"
 
-BASE_DIR=$tmp
+BASE_DIR=$tmp CELL_IMAGES_LOCK=$here/images.lock
 printf 'host: ${CELL_DOMAIN}\n' >"$tmp/t.yaml"
 export CELL_DOMAIN=example.org; check "render substitutes" "host: example.org" "$(render t.yaml)"
 check "render fails on unset variable" "1" "$( (unset CELL_DOMAIN; render t.yaml >/dev/null 2>&1) && echo 0 || echo 1)"
@@ -233,5 +233,21 @@ check "wait_ready does not trust the status of an older spec" "1" "$rc"
 out=$(: >"$CELL_STEP_FILE"; FAKE_DEPLOYS='1 1 1 1\n' wait_ready x ns 0 a b 2>&1) && rc=0 || rc=$?
 check "wait_ready waits for named deployments not created yet" "1" "$rc"
 unset -f kubectl
+
+# pin_images adds the digest from the lock; strict refuses an unlisted image field.
+sum=sha256:$(printf 'a%.0s' {1..64})
+printf '# comment\nquay.io/x/y:v1@%s\n' "$sum" >"$tmp/images.lock"
+export CELL_IMAGES_LOCK=$tmp/images.lock
+check "pin_images pins a listed image" "image: \"quay.io/x/y:v1@$sum\"" "$(pin_images lax <<<'image: "quay.io/x/y:v1"')"
+check "pin_images pins a flag value" "--img=quay.io/x/y:v1@$sum" "$(pin_images lax <<<'--img=quay.io/x/y:v1')"
+check "pin_images keeps a pinned image" "image: quay.io/x/y:v1@$sum" "$(pin_images lax <<<"image: quay.io/x/y:v1@$sum")"
+check "pin_images leaves another tag alone" "image: quay.io/x/y:v10" "$(pin_images lax <<<'image: quay.io/x/y:v10')"
+out=$(pin_images strict <<<'image: ghcr.io/o/new:v2' 2>&1) && rc=0 || rc=$?
+check "pin_images strict refuses an unlisted image" "1:ghcr.io/o/new:v2" "$rc:$(grep -o 'ghcr.io/o/new:v2' <<<"$out" | head -1)"
+out=$(pin_images strict <<<$'image: quay.io/x/y:v1\nimage: ghcr.io/o/new:v2' 2>/dev/null) || true
+check "pin_images strict prints nothing for rejected input" "" "$out"
+out=$(pin_images strict <<<'image: quay.io/x/y:v1' 2>&1) && rc=0 || rc=$?
+check "pin_images strict accepts a listed image" "0" "$rc"
+unset CELL_IMAGES_LOCK
 
 [ "$fails" -eq 0 ]

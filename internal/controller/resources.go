@@ -20,6 +20,11 @@ import (
 	"github.com/eigen-hq/cell-platform/internal/cell"
 )
 
+// PostgresImage is the operand image of every app database, set once at
+// start from POSTGRES_IMAGE (pinned by digest, E-76). Empty (tests): the
+// database operator picks its own default.
+var PostgresImage string
+
 // Names of objects the operator creates in an app namespace.
 const (
 	caConfigMap   = "cell-ca"
@@ -114,6 +119,9 @@ func database(app *cellv1.App, archive string) *unstructured.Unstructured {
 		}},
 		"managed": map[string]any{"roles": []any{ownerRole(app)}},
 	}
+	if PostgresImage != "" {
+		spec["imageName"] = PostgresImage
+	}
 	if archive != "" {
 		spec["plugins"] = []any{archiverPlugin(archive)}
 	}
@@ -160,6 +168,18 @@ func toAny(m map[string]string) map[string]any {
 	return out
 }
 
+// versionDigest is the digest of the current version, empty without one.
+func versionDigest(app *cellv1.App) string { return string(app.Spec.Digests[app.Spec.Version]) }
+
+// digestSuffix pins the image to the digest of the current version, if there
+// is one. A digest of another version never applies.
+func digestSuffix(app *cellv1.App) string {
+	if d := versionDigest(app); d != "" {
+		return "@" + d
+	}
+	return ""
+}
+
 // imageWorkload is the Deployment, Service, volumes and files of an image app.
 // bridgeImage, if set, adds the loopback bridge of local cells (see bridge.go).
 func imageWorkload(app *cellv1.App, src cellv1.ImageSource, bridgeImage string) []client.Object {
@@ -170,7 +190,7 @@ func imageWorkload(app *cellv1.App, src cellv1.ImageSource, bridgeImage string) 
 	}
 	container := corev1.Container{
 		Name:    "app",
-		Image:   src.Repository + ":" + tag,
+		Image:   src.Repository + ":" + tag + digestSuffix(app),
 		Command: src.Command,
 		Args:    src.Args,
 		Env: append(append([]corev1.EnvVar{}, src.Env...),

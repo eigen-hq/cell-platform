@@ -119,6 +119,9 @@ spec:
             # Checks a backup target an admin sets before the cell uses it.
             - name: RCLONE_IMAGE
               value: rclone/rclone:${RCLONE_VERSION}
+            # Operand of every app database (CloudNativePG would pick its own default).
+            - name: POSTGRES_IMAGE
+              value: ghcr.io/cloudnative-pg/postgresql:${POSTGRES_VERSION}
             - name: AUTHENTIK_TOKEN
               valueFrom:
                 secretKeyRef:

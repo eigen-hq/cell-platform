@@ -6,7 +6,36 @@ source "$(dirname "${BASH_SOURCE[0]}")/ui.sh"
 # render prints deploy/base/<file> with ${VAR} replaced from the environment;
 # an unset variable is an error.
 render() {
-  perl -pe 's/\$\{([A-Z_]+)\}/defined $ENV{$1} ? $ENV{$1} : die "unset variable $1\n"/ge' "$BASE_DIR/$1"
+  perl -pe 's/\$\{([A-Z_]+)\}/defined $ENV{$1} ? $ENV{$1} : die "unset variable $1\n"/ge' "$BASE_DIR/$1" | pin_images lax
+}
+
+# pin_images adds the digest from images.lock to every repository:tag of the
+# manifests on stdin (E-76). The mode is "lax" or "strict". Strict makes an
+# "image:" field without a digest afterwards an error: use it for manifests
+# downloaded from upstream.
+# Images that images.lock does not list pass unchanged (our own image).
+pin_images() {
+  perl -e '
+    my ($lock, $mode) = @ARGV;
+    my $strict = $mode eq "strict";
+    @ARGV = ();
+    open my $l, "<", $lock or die "images.lock: $!\n";
+    my %d;
+    while (<$l>) {
+      next if /^\s*(#|$)/;
+      m{^([^\s@]+)@(sha256:[0-9a-f]{64})\s*$} or die "images.lock: bad line: $_";
+      $d{$1} = $2;
+    }
+    my (@bad, $out);
+    while (<STDIN>) {
+      s{([A-Za-z0-9._/-]+:[A-Za-z0-9._-]+)(?![A-Za-z0-9._@-])}{exists $d{$1} ? "$1\@$d{$1}" : $1}ge;
+      if ($strict && /^\s*-?\s*image:\s+"?([^"\s#]+)/) { my $i = $1; push @bad, $i unless $i =~ /\@sha256:/ }
+      $out .= $_;
+    }
+    # Nothing reaches stdout (and so kubectl) when an image is unpinned.
+    if (@bad) { warn "unpinned images: @bad (add them to images.lock)\n"; exit 1 }
+    print $out;
+  ' "${CELL_IMAGES_LOCK:-$BASE_DIR/../images.lock}" "$1"
 }
 apply() { render "$1" | kubectl apply -f - >/dev/null; }
 

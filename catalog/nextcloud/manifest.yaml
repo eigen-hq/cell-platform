@@ -8,6 +8,10 @@ metadata:
 spec:
   title: Nextcloud
   version: "34.0.6"
+  # Digest of the multi-arch index of the image for this version, verified
+  # 2026-11-26. A new version needs a new entry, or it runs by tag.
+  digests:
+    "34.0.6": sha256:82f16a4729bf5246782960824d9a5a1d48d9aa0ad36beae2f42d3ad7c6843646
   source:
     image:
       repository: nextcloud

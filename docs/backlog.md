@@ -108,7 +108,7 @@ What is wanted and tried out happens in the office UI; the platform builds, oper
 | Feature | Status | Depends on |
 |---|---|---|
 | Own service account in authentik with narrow permissions | open | |
-| Pin third-party images by digest | open | |
+| Pin third-party images by digest | running (`deploy/images.lock`, E-76) | |
 | Short-lived tokens for the tool gateway | open | |
 | Do not count the wait for the login proxy against the deadline of the app | open | |
 | Restart of an app as an API action | open | |
