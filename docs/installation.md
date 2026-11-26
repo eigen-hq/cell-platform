@@ -191,12 +191,12 @@ The installation saves them in `/etc/cell/install.env`; later runs do not need t
 
 ### Backup target through the API
 
-The console uses the same interface as scripts and AI agents. An admin creates a token for their account in the console under *Organization* and gives it to an agent, for example. The token is exchanged for an access token, which is used to set the target:
+The console uses the same interface as scripts and AI agents. Give a script or an agent an account of its own: in the console under *Organization*, create a person, for example `backup-bot`, in the group `cell-admins`, and create a token for it. `akadmin` gets no token: it is an authentik superuser, and a token would sign in to authentik as one. The token is exchanged for an access token, which is used to set the target:
 
 ```bash
 curl -fsS https://auth.cell.example.com/application/o/token/ \
   -d grant_type=client_credentials -d client_id=cell-api -d 'scope=openid profile' \
-  -d username=akadmin -d password=<token>
+  -d username=backup-bot -d password=<token>
 # access_token from the response:
 curl -fsS -X PUT https://api.cell.example.com/v0/backup-target \
   -H 'Authorization: Bearer <access_token>' -H 'Content-Type: application/json' \

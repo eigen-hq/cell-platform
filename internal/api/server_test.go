@@ -73,6 +73,9 @@ func (f *fakeIdentity) CreateUser(_ context.Context, u authentik.User, _ string)
 func (f *fakeIdentity) CreateAppPassword(_ context.Context, username string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if username == "akadmin" { // a superuser in the fake
+		return "", fmt.Errorf("app password for %q: %w", username, authentik.ErrSuperuser)
+	}
 	if _, ok := f.users[username]; !ok {
 		return "", fmt.Errorf("user %q: %w", username, authentik.ErrNotFound)
 	}
@@ -606,6 +609,10 @@ func TestIdentity(t *testing.T) {
 	}
 	if code, _ = h.do("POST", "/v0/users/bob/tokens", "admin", nil); code != 404 {
 		t.Errorf("token for missing user: %d", code)
+	}
+	// Superuser rights stay in authentik.
+	if code, body = h.do("POST", "/v0/users/akadmin/tokens", "admin", nil); code != 403 {
+		t.Errorf("token for a superuser: %d %v", code, body)
 	}
 	if code, _ = h.do("POST", "/v0/users/alice/tokens", "agent", nil); code != 403 {
 		t.Errorf("agent creates token: %d", code)

@@ -25,6 +25,9 @@ func identityError(err error) error {
 	if errors.Is(err, authentik.ErrNotFound) {
 		return errorf(http.StatusNotFound, "%v", err)
 	}
+	if errors.Is(err, authentik.ErrSuperuser) {
+		return errorf(http.StatusForbidden, "%v", err)
+	}
 	return err
 }
 

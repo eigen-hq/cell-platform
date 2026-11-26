@@ -493,3 +493,47 @@ func TestPlatformAccountHidden(t *testing.T) {
 		}
 	}
 }
+
+// Superuser rights stay in authentik: no app password for a superuser, no
+// member change in a group that makes its members superusers, itself or
+// through a parent, and nothing of it reaches authentik.
+func TestSuperuserRightsStayInAuthentik(t *testing.T) {
+	api := newFakeAPI()
+	api.objects["core/users/"] = []map[string]any{{"pk": 1, "username": "root", "is_superuser": true}, {"pk": 9, "username": "alice"}}
+	api.objects["core/groups/"] = []map[string]any{
+		{"pk": "g-admins", "name": "authentik Admins", "is_superuser": true, "parents": []any{}},
+		{"pk": "g-child", "name": "child", "parents": []any{"g-admins"}},
+		{"pk": "g-grand", "name": "grand", "parents": []any{"g-other", "g-child"}},
+		{"pk": "g-other", "name": "other", "parents": []any{}},
+		{"pk": "g-orphan", "name": "orphan", "parents": []any{"g-gone"}},
+	}
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+	c := &Client{BaseURL: srv.URL, Token: "t", HTTP: srv.Client()}
+	ctx := context.Background()
+	if _, err := c.CreateAppPassword(ctx, "root"); !errors.Is(err, ErrSuperuser) {
+		t.Errorf("app password for a superuser: %v", err)
+	}
+	for _, g := range []string{"authentik Admins", "child", "grand", "orphan"} {
+		if _, err := c.ChangeGroupMembers(ctx, g, []string{"alice"}, nil); !errors.Is(err, ErrSuperuser) {
+			t.Errorf("joining %s: %v", g, err)
+		}
+		if _, err := c.SetGroupMembers(ctx, g, []string{"alice"}); !errors.Is(err, ErrSuperuser) {
+			t.Errorf("setting the members of %s: %v", g, err)
+		}
+		if _, err := c.CreateUser(ctx, User{Username: "mallory", Name: "M", Groups: []string{g}}, ""); !errors.Is(err, ErrSuperuser) {
+			t.Errorf("a new user in %s: %v", g, err)
+		}
+	}
+	if _, err := c.ChangeGroupMembers(ctx, "authentik Admins", nil, []string{"root"}); !errors.Is(err, ErrSuperuser) {
+		t.Errorf("leaving authentik Admins: %v", err)
+	}
+	if su, err := c.grantsSuperuser(ctx, api.objects["core/groups/"][3]); su || err != nil {
+		t.Errorf("a group without superuser parents: %v %v", su, err)
+	}
+	for _, call := range api.calls {
+		if !strings.HasPrefix(call, "GET ") {
+			t.Errorf("call reached authentik: %s", call)
+		}
+	}
+}

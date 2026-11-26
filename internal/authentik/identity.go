@@ -16,6 +16,11 @@ import (
 // ErrNotFound is returned when a named user or group does not exist.
 var ErrNotFound = errors.New("not found")
 
+// ErrSuperuser is returned for a change that would give or take authentik
+// superuser rights: those are managed in authentik itself, never through
+// the platform API.
+var ErrSuperuser = errors.New("authentik superuser rights are managed in authentik itself")
+
 // Duplicate reports whether a 400 answer means "already exists" (authentik
 // words it either way, depending on the field).
 func (e *Error) Duplicate() bool {
@@ -127,12 +132,66 @@ func (c *Client) groupObj(ctx context.Context, name string) (map[string]any, err
 	return g, nil
 }
 
+// memberGroup finds a group whose members the API may change: none that
+// makes its members superusers, itself or through a parent group.
+func (c *Client) memberGroup(ctx context.Context, name string) (map[string]any, error) {
+	g, err := c.groupObj(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	su, err := c.grantsSuperuser(ctx, g)
+	if err != nil {
+		return nil, err
+	}
+	if su {
+		return nil, fmt.Errorf("group %q: %w", name, ErrSuperuser)
+	}
+	return g, nil
+}
+
+// grantsSuperuser reports whether the group or one of its ancestors has
+// is_superuser (authentik passes it down to every descendant group). A
+// parent missing from the list counts as granting it.
+func (c *Client) grantsSuperuser(ctx context.Context, g map[string]any) (bool, error) {
+	if g["is_superuser"] == true {
+		return true, nil
+	}
+	if parents, _ := g["parents"].([]any); len(parents) == 0 {
+		return false, nil
+	}
+	all, err := c.list(ctx, "core/groups/", nil)
+	if err != nil {
+		return false, err
+	}
+	byPK := map[string]map[string]any{}
+	for _, o := range all {
+		byPK[fmt.Sprint(o["pk"])] = o
+	}
+	seen := map[string]bool{}
+	todo, _ := g["parents"].([]any)
+	for len(todo) > 0 {
+		pk := fmt.Sprint(todo[0])
+		todo = todo[1:]
+		if seen[pk] {
+			continue
+		}
+		seen[pk] = true
+		p, ok := byPK[pk]
+		if !ok || p["is_superuser"] == true {
+			return true, nil
+		}
+		more, _ := p["parents"].([]any)
+		todo = append(todo, more...)
+	}
+	return false, nil
+}
+
 // CreateUser creates a person (active, in the given groups) and sets an
 // initial password if one is given.
 func (c *Client) CreateUser(ctx context.Context, u User, password string) (User, error) {
 	groups := []any{}
 	for _, g := range u.Groups {
-		obj, err := c.groupObj(ctx, g)
+		obj, err := c.memberGroup(ctx, g)
 		if err != nil {
 			return User{}, err
 		}
@@ -178,11 +237,24 @@ func (c *Client) EnsureServiceAccount(ctx context.Context, username string, grou
 // a caller without superuser rights creates its own, whatever user the
 // request names: the owner is read back, and a token of anyone else is
 // deleted and never handed out.
+//
+// A superuser gets none: an app password logs in to authentik too, so it
+// would be a second, never expiring superuser credential.
 func (c *Client) CreateAppPassword(ctx context.Context, username string) (string, error) {
-	pk, err := c.userPK(ctx, username)
+	if internalUser(username) {
+		return "", fmt.Errorf("user %q: %w", username, ErrNotFound)
+	}
+	u, err := c.find(ctx, "core/users/", url.Values{"username": {username}})
 	if err != nil {
 		return "", err
 	}
+	if u == nil {
+		return "", fmt.Errorf("user %q: %w", username, ErrNotFound)
+	}
+	if u["is_superuser"] == true {
+		return "", fmt.Errorf("app password for %q: %w", username, ErrSuperuser)
+	}
+	pk := u["pk"]
 	b := make([]byte, 6)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
@@ -245,7 +317,7 @@ func (c *Client) CreateGroup(ctx context.Context, name string) (Group, error) {
 
 // SetGroupMembers makes exactly the given users members of the group.
 func (c *Client) SetGroupMembers(ctx context.Context, group string, usernames []string) (Group, error) {
-	g, err := c.groupObj(ctx, group)
+	g, err := c.memberGroup(ctx, group)
 	if err != nil {
 		return Group{}, err
 	}
@@ -266,7 +338,7 @@ func (c *Client) SetGroupMembers(ctx context.Context, group string, usernames []
 // ChangeGroupMembers adds and removes single users, each in one call of its
 // own, and returns the group as it is afterwards.
 func (c *Client) ChangeGroupMembers(ctx context.Context, group string, add, remove []string) (Group, error) {
-	g, err := c.groupObj(ctx, group)
+	g, err := c.memberGroup(ctx, group)
 	if err != nil {
 		return Group{}, err
 	}
