@@ -303,7 +303,7 @@ data:
     {% block sub_content %}
     <tr>
       <td style="padding: 20px; font-size: 12px; color: #212124;" align="center">
-        {% blocktrans with expires=expires|timeuntil %}The link is valid for {{ expires }} and signs in as you: do not pass it on. If you did not expect this mail, ignore it.{% endblocktrans %}
+        {% blocktrans with expires=expires|date:"j F Y, H:i e" %}The link is valid until {{ expires }} and signs in as you: do not pass it on. If you did not expect this mail, ignore it.{% endblocktrans %}
       </td>
     </tr>
     {% endblock %}
@@ -313,5 +313,5 @@ data:
     {% blocktrans with username=user.username %}You have an account at ${CELL_DOMAIN}: {{ username }}. Open the link below to set your password and a second factor.{% endblocktrans %}
     {{ url }}
 
-    {% blocktrans with expires=expires|timeuntil %}The link is valid for {{ expires }} and signs in as you: do not pass it on. If you did not expect this mail, ignore it.{% endblocktrans %}
+    {% blocktrans with expires=expires|date:"j F Y, H:i e" %}The link is valid until {{ expires }} and signs in as you: do not pass it on. If you did not expect this mail, ignore it.{% endblocktrans %}
     {% endautoescape %}
