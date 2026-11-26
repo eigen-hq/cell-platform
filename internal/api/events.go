@@ -102,7 +102,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request, c *Caller) error
 			_, _ = bw.WriteString(": keepalive\n\n")
 		case ev := <-out:
 			data, _ := json.Marshal(ev)
-			fmt.Fprintf(bw, "event: %s\ndata: %s\n\n", strings.ToLower(ev.Kind), data)
+			_, _ = fmt.Fprintf(bw, "event: %s\ndata: %s\n\n", strings.ToLower(ev.Kind), data)
 		}
 		if err := bw.Flush(); err != nil {
 			return nil // client gone

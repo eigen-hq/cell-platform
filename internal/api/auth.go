@@ -71,7 +71,7 @@ func (t *Tokens) Check(ctx context.Context, token string) (*Caller, error) {
 	if err != nil {
 		return nil, fmt.Errorf("identity unreachable: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("the identity does not accept it (HTTP %d)", resp.StatusCode)
 	}

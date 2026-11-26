@@ -297,7 +297,9 @@ func helmRecord(t *testing.T, ns, release string, version int, manifest string) 
 	s := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: fmt.Sprintf("sh.helm.release.v1.%s.v%d", release, version)},
 		Type: "helm.sh/release.v1", Data: map[string][]byte{"release": []byte(base64.StdEncoding.EncodeToString(gz.Bytes()))}}
 	if err := k8s.Create(context.Background(), s); apierrors.IsAlreadyExists(err) {
-		err = k8s.Update(context.Background(), s)
+		if err = k8s.Update(context.Background(), s); err != nil {
+			t.Fatal(err)
+		}
 	} else if err != nil {
 		t.Fatal(err)
 	}

@@ -51,13 +51,17 @@ func serve(ln net.Listener, target string) {
 			return
 		}
 		go func() {
-			defer in.Close()
+			defer func() { _ = in.Close() }()
 			out, err := net.Dial("tcp", target)
 			if err != nil {
 				log.Printf("bridge: dial %s: %v", target, err)
 				return
 			}
-			defer out.Close()
+			defer func() {
+				if err := out.Close(); err != nil {
+					log.Printf("bridge: close %s: %v", target, err)
+				}
+			}()
 			go func() {
 				_, _ = io.Copy(out, in)
 				if c, ok := out.(*net.TCPConn); ok {

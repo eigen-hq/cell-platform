@@ -13,7 +13,7 @@ K3D := $(BIN)/k3d-$(K3D_VERSION)
 KUBECTL := $(BIN)/kubectl-$(KUBECTL_VERSION)
 FLUX := $(BIN)/flux-$(FLUX_VERSION)
 
-.PHONY: help tools cell-up cell-down status test e2e demo lima vm-test generate dr-test console console-browser release
+.PHONY: help tools cell-up cell-down status lint test e2e demo lima vm-test generate dr-test console console-browser release
 
 help:
 	@grep -hE '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
@@ -56,7 +56,10 @@ console: ## Install the console's pinned packages and type-check it
 console-browser: console
 	cd console && npx playwright install chromium
 
-test: console ## Unit and controller tests (envtest), console type check
+lint: ## Static analysis (golangci-lint, default linters)
+	golangci-lint run ./...
+
+test: console lint ## Lint, unit and controller tests (envtest), console type check
 	deploy/lib_test.sh
 	go vet ./...
 # ponytail: the envtest suite runs about 10m serially; run tests in parallel if it grows

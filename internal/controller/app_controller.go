@@ -476,7 +476,7 @@ func (r *AppReconciler) forwardAuth(ctx context.Context, host, clientID string) 
 		if err != nil {
 			return "", err
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if resp.StatusCode != http.StatusFound && resp.StatusCode != http.StatusTemporaryRedirect {
 			return "", fmt.Errorf("outpost does not serve %s yet (HTTP %d)", host, resp.StatusCode)
 		}
@@ -565,7 +565,8 @@ func (r *AppReconciler) ensureLogin(ctx context.Context, app *cellv1.App, cfg ce
 	authURL := "https://" + cfg.Host("auth")
 	issuer := authURL + "/application/o/" + app.Name + "/"
 	mode := app.Spec.Access.Auth.Mode
-	if mode == "oidc" {
+	switch mode {
+	case "oidc":
 		idKey, secretKey, err := secretKeyNames(app)
 		if err != nil {
 			return err
@@ -596,7 +597,7 @@ func (r *AppReconciler) ensureLogin(ctx context.Context, app *cellv1.App, cfg ce
 		}); err != nil {
 			return err
 		}
-	} else if mode == "proxy" {
+	case "proxy":
 		if r.loginCurrent(app) {
 			return nil
 		}
@@ -792,7 +793,7 @@ func (r *AppReconciler) probe(ctx context.Context, url, host string) error {
 	if err != nil {
 		return err
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}

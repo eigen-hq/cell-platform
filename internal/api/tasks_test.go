@@ -99,7 +99,7 @@ func TestAgentsWorkInTasks(t *testing.T) {
 			req.Header.Set(TaskHeader, "notes-diagnose-1")
 			if resp, err := h.srv.Client().Do(req); err == nil {
 				codes[i] = resp.StatusCode
-				resp.Body.Close()
+				_ = resp.Body.Close()
 			}
 		}()
 	}

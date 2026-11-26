@@ -236,7 +236,7 @@ func (r *BackupTargetReconciler) check(ctx context.Context, target, req *corev1.
 		return nil, false, err
 	}
 	switched := string(target.Data["rclone.conf"]) == conf && string(target.Data["root"]) == root
-	if l.switching != uid && !(switched && l.switching == "") {
+	if l.switching != uid && (!switched || l.switching != "") {
 		// Only one request exists: another request's switching is stale.
 		// Taken first, so no new run starts: a steady stream of runs cannot
 		// hold the switch off.

@@ -99,7 +99,7 @@ func (r *RestoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 	if rs.DeletionTimestamp.IsZero() && controllerutil.AddFinalizer(&rs, restoreFinalizer) {
-		return ctrl.Result{Requeue: true}, r.Update(ctx, &rs)
+		return ctrl.Result{RequeueAfter: time.Second}, r.Update(ctx, &rs)
 	}
 	if rs.Status.Phase == cellv1.RunCompleted || rs.Status.Phase == cellv1.RunFailed {
 		return ctrl.Result{}, release()
@@ -524,7 +524,7 @@ func ownsField(obj client.Object, manager string, path ...string) bool {
 			continue
 		}
 		var fields map[string]any
-		if json.Unmarshal(mf.FieldsV1.Raw, &fields) != nil {
+		if json.Unmarshal(mf.FieldsV1.GetRawBytes(), &fields) != nil {
 			continue
 		}
 		for i, p := range path {
@@ -703,11 +703,11 @@ func chartSettings(ctx context.Context, c client.Reader, ns string) (map[string]
 		var secret corev1.Secret
 		key := client.ObjectKey{Namespace: storage, Name: fmt.Sprintf("sh.helm.release.v1.%v.v%v", latest["name"], latest["version"])}
 		if err := c.Get(ctx, key, &secret); err != nil {
-			return nil, fmt.Errorf("Helm release of %s: %w", hr.GetName(), err)
+			return nil, fmt.Errorf("helm release of %s: %w", hr.GetName(), err)
 		}
 		manifest, err := releaseManifest(secret.Data["release"])
 		if err != nil {
-			return nil, fmt.Errorf("Helm release %s: %w", key.Name, err)
+			return nil, fmt.Errorf("helm release %s: %w", key.Name, err)
 		}
 		dec := utilyaml.NewYAMLOrJSONDecoder(strings.NewReader(manifest), 4096)
 		for {
@@ -715,7 +715,7 @@ func chartSettings(ctx context.Context, c client.Reader, ns string) (map[string]
 			if err := dec.Decode(&obj); err == io.EOF {
 				break
 			} else if err != nil {
-				return nil, fmt.Errorf("Helm release %s: %w", key.Name, err)
+				return nil, fmt.Errorf("helm release %s: %w", key.Name, err)
 			}
 			u := unstructured.Unstructured{Object: obj}
 			if obj == nil || (u.GetNamespace() != "" && u.GetNamespace() != ns) {

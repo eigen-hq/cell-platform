@@ -236,7 +236,7 @@ func (h *harness) do(method, path, token string, body any) (int, any) {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	data, _ := io.ReadAll(resp.Body)
 	h.validate(req, raw, resp, data)
 	var out any
@@ -673,7 +673,7 @@ func TestEventStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != "text/event-stream" {
 		t.Fatalf("stream: %d %s", resp.StatusCode, resp.Header.Get("Content-Type"))
 	}
