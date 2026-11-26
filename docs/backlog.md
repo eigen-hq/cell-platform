@@ -137,7 +137,7 @@ What is wanted and tried out happens in the office UI; the platform builds, oper
 | Accounts and groups, members, app password | running | |
 | Access per app through groups | running | |
 | Departments and teams as structure of the identity service | open | |
-| Invite a person: a mail with a link, the person sets password and second factor; no credentials sent by hand | open | System mail |
+| Invite a person: a mail with a link, the person sets password and second factor; no credentials sent by hand | built, not yet verified on a cell | System mail |
 | Person changes with approval, remove a person | open | |
 | Account help: password, second factor, lock, sessions | open | |
 | Login policy | open | |
@@ -171,7 +171,7 @@ A core part of the platform, not an add-on (E-78): agents and apps reach models 
 | Feature | Status | Depends on |
 |---|---|---|
 | Cell and domain | open | |
-| System mail of the cell (send only: invitations, password links, warnings) | open | |
+| System mail of the cell (send only: invitations, password links, warnings) | built (invitations; warnings open), not yet verified on a cell | |
 
 ### Distributed cell
 

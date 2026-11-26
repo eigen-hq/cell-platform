@@ -20,6 +20,10 @@ type Client struct {
 	BaseURL string
 	Token   string
 	HTTP    *http.Client
+	// PublicURL is authentik's address for people, e.g.
+	// https://auth.example.com. Calls that build links for them (invites)
+	// carry its host, because authentik builds links from the request.
+	PublicURL string
 }
 
 // Error is a non-2xx answer of the API.
@@ -34,6 +38,10 @@ func (e *Error) Error() string {
 }
 
 func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
+	return c.send(ctx, method, path, in, out, false)
+}
+
+func (c *Client) send(ctx context.Context, method, path string, in, out any, public bool) error {
 	var body io.Reader
 	if in != nil {
 		b, err := json.Marshal(in)
@@ -48,6 +56,14 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 	}
 	req.Header.Set("Authorization", "Bearer "+c.Token)
 	req.Header.Set("Content-Type", "application/json")
+	if public {
+		u, err := url.Parse(c.PublicURL)
+		if err != nil || u.Host == "" {
+			return fmt.Errorf("authentik: public URL %q is not set", c.PublicURL)
+		}
+		req.Host = u.Host
+		req.Header.Set("X-Forwarded-Proto", u.Scheme)
+	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return fmt.Errorf("authentik %s %s: %w", method, path, err)

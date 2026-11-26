@@ -83,7 +83,7 @@ func run(log *slog.Logger) error {
 	consoleURL := "https://" + cellCfg.Host("console") + "/"
 	authURL := env("AUTHENTIK_URL", "http://authentik-server.cell-system.svc.cluster.local")
 	hc := &http.Client{Timeout: 20 * time.Second}
-	identity := &authentik.Client{BaseURL: authURL, Token: token, HTTP: hc}
+	identity := &authentik.Client{BaseURL: authURL, Token: token, HTTP: hc, PublicURL: authOrigin}
 
 	// The identity side of the API: its login client and the role groups.
 	if err := retry(ctx, log, "identity setup", func() error {

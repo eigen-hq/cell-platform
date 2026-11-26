@@ -278,6 +278,48 @@ paths:
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
+  /v0/users/{name}/invite:
+    parameters: [{$ref: "#/components/parameters/name"}]
+    post:
+      operationId: inviteUser
+      description: |
+        Invites a person: a link with which they set a password and a
+        second factor, valid for 7 days. With mail set (`PUT /v0/mail`)
+        and an address on file the cell mails it; otherwise the answer
+        holds it to hand over. Until it expires the link signs in as that
+        person, also more than once; a new invite replaces it. Superusers
+        and service accounts get none.
+      responses:
+        default: {$ref: "#/components/responses/Error"}
+        "201": {description: Invited., content: {application/json: {schema: {$ref: "#/components/schemas/Invite"}}}}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+  /v0/mail:
+    get:
+      operationId: getMail
+      description: The SMTP server the cell sends its mail through (invites). Never the password.
+      responses:
+        default: {$ref: "#/components/responses/Error"}
+        "200": {description: The mail settings., content: {application/json: {schema: {$ref: "#/components/schemas/Mail"}}}}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+    put:
+      operationId: setMail
+      description: |
+        Sets the SMTP server. The cell first checks it: it connects with
+        TLS, logs in and has the sender accepted, without sending a mail.
+        Only if that works do the settings change.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/MailRequest"}}}
+      responses:
+        default: {$ref: "#/components/responses/Error"}
+        "200": {description: Set., content: {application/json: {schema: {$ref: "#/components/schemas/Mail"}}}}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
   /v0/groups:
     get:
       operationId: listGroups
@@ -919,6 +961,36 @@ components:
         command: {type: string, description: Run as root on the new machine; it holds no key.}
         key: {type: string, pattern: "^[a-z0-9]{6}\\.[a-z0-9]{16}$", description: "The join key: paste it when the command asks. Works for one machine."}
         expiresAt: {type: string, format: date-time}
+    Invite:
+      type: object
+      additionalProperties: false
+      required: [mailed, expires]
+      properties:
+        mailed: {type: boolean, description: The link went to the person's address.}
+        link: {type: string, description: "Only if not mailed: hand it to the person, it is a credential."}
+        expires: {type: string, format: date-time}
+    Mail:
+      type: object
+      additionalProperties: false
+      required: [configured, tls]
+      properties:
+        configured: {type: boolean}
+        host: {type: string}
+        port: {type: integer}
+        username: {type: string}
+        from: {type: string}
+        tls: {type: boolean, description: "TLS from the start (port 465); false: STARTTLS."}
+    MailRequest:
+      type: object
+      additionalProperties: false
+      required: [host, from]
+      properties:
+        host: {type: string}
+        port: {type: integer, minimum: 1, maximum: 65535, description: "Default: 587, with tls 465."}
+        username: {type: string}
+        password: {type: string, description: Stays in the cell; no answer holds it.}
+        from: {type: string, description: "The sender, a plain address."}
+        tls: {type: boolean, description: "TLS from the start (port 465); false: STARTTLS, which the server must offer."}
     BackupTarget:
       type: object
       additionalProperties: false

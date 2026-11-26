@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // fakeAPI keeps objects per list endpoint and serves list (filtered by one
@@ -535,5 +536,92 @@ func TestSuperuserRightsStayInAuthentik(t *testing.T) {
 		if !strings.HasPrefix(call, "GET ") {
 			t.Errorf("call reached authentik: %s", call)
 		}
+	}
+}
+
+// A new invite ends the last one: authentik reissues a recovery token with
+// its old key, so the client deletes it first. A link on the wrong host is
+// refused without the link in the error.
+func TestInviteReplacesTheLastLink(t *testing.T) {
+	api := newFakeAPI()
+	api.objects["core/users/"] = []map[string]any{{"pk": 1, "uid": "u1", "username": "alice", "type": "internal"}}
+	api.objects["flows/instances/"] = append(api.objects["flows/instances/"], map[string]any{"pk": "flow-invite", "slug": InviteFlow})
+	api.objects["core/brands/"] = []map[string]any{{"pk": "b-1", "brand_uuid": "b-1", "default": true}}
+	api.objects["stages/email/"] = []map[string]any{}
+	tokens := map[string]string{} // identifier -> key, like authentik's update_or_create
+	n, host := 0, ""
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if id, ok := strings.CutPrefix(r.URL.Path, "/api/v3/core/tokens/"); ok && r.Method == http.MethodDelete {
+			id = strings.TrimSuffix(id, "/")
+			if _, ok := tokens[id]; !ok {
+				http.Error(w, `{"detail":"Not found."}`, http.StatusNotFound)
+				return
+			}
+			delete(tokens, id)
+			mu.Unlock()
+			time.Sleep(20 * time.Millisecond) // room for a second invite to interleave
+			mu.Lock()
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.URL.Path == "/api/v3/core/users/1/recovery/" && r.Method == http.MethodPost {
+			if _, ok := tokens["u1-password-reset"]; !ok {
+				n++
+				tokens["u1-password-reset"] = fmt.Sprint("key", n)
+			}
+			h := host
+			if h == "" {
+				h = r.Host
+			}
+			_ = json.NewEncoder(w).Encode(map[string]string{"link": "https://" + h + "/if/flow/cell-invite/?flow_token=" + tokens["u1-password-reset"]})
+			return
+		}
+		api.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+	c := &Client{BaseURL: srv.URL, Token: "t", HTTP: srv.Client(), PublicURL: "https://auth.example.test"}
+	first, err := c.InviteUser(context.Background(), "alice", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := c.InviteUser(context.Background(), "alice", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Link == second.Link || len(tokens) != 1 {
+		t.Errorf("links %q and %q, tokens %v: the second invite must replace the first", first.Link, second.Link, tokens)
+	}
+	if api.objects["core/brands/"][0]["flow_recovery"] != "flow-invite" {
+		t.Errorf("brand recovery flow %v", api.objects["core/brands/"][0]["flow_recovery"])
+	}
+	// Two API processes at once (two clients, delete, delete, issue,
+	// issue): the earlier link is dead and both get the one live link.
+	old := tokens["u1-password-reset"]
+	other := &Client{BaseURL: srv.URL, Token: "t", HTTP: srv.Client(), PublicURL: c.PublicURL}
+	var wg sync.WaitGroup
+	links := make([]string, 2)
+	for i, cl := range []*Client{c, other} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			inv, err := cl.InviteUser(context.Background(), "alice", time.Hour)
+			if err != nil {
+				t.Error(err)
+			}
+			links[i] = inv.Link
+		}()
+	}
+	wg.Wait()
+	live := tokens["u1-password-reset"]
+	if len(tokens) != 1 || live == old || !strings.HasSuffix(links[0], "="+live) || !strings.HasSuffix(links[1], "="+live) {
+		t.Errorf("old key %s, tokens %v, links %v: want one new token in both links", old, tokens, links)
+	}
+	host = "elsewhere.example.test"
+	_, err = c.InviteUser(context.Background(), "alice", time.Hour)
+	if err == nil || strings.Contains(err.Error(), "flow_token") || strings.Contains(err.Error(), "key") {
+		t.Errorf("wrong host: %v", err)
 	}
 }

@@ -44,6 +44,7 @@ type fakeIdentity struct {
 	mu     sync.Mutex
 	users  map[string]authentik.User
 	groups map[string][]string
+	mail   *authentik.Mail
 }
 
 func newFakeIdentity() *fakeIdentity {
@@ -114,6 +115,35 @@ func (f *fakeIdentity) ChangeGroupMembers(_ context.Context, group string, add, 
 	members = slices.DeleteFunc(members, func(u string) bool { return slices.Contains(remove, u) })
 	f.groups[group] = members
 	return authentik.Group{Name: group, Members: slices.Clone(members)}, nil
+}
+
+func (f *fakeIdentity) GetMail(context.Context) (*authentik.Mail, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.mail, nil
+}
+
+func (f *fakeIdentity) SetMail(_ context.Context, m authentik.Mail) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.mail = &m
+	return nil
+}
+
+func (f *fakeIdentity) InviteUser(_ context.Context, username string, valid time.Duration) (authentik.Invite, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	u, ok := f.users[username]
+	if !ok {
+		return authentik.Invite{}, fmt.Errorf("user %q: %w", username, authentik.ErrNotFound)
+	}
+	inv := authentik.Invite{Expires: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Add(valid)}
+	if f.mail != nil && u.Email != "" {
+		inv.Mailed = true
+	} else {
+		inv.Link = "https://auth.example.test/if/flow/cell-invite/?flow_token=x"
+	}
+	return inv, nil
 }
 
 const manifest = `apiVersion: cell.internal/v1alpha1

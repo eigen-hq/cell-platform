@@ -70,6 +70,9 @@ type Identity interface {
 	ListGroups(ctx context.Context) ([]authentik.Group, error)
 	CreateGroup(ctx context.Context, name string) (authentik.Group, error)
 	ChangeGroupMembers(ctx context.Context, group string, add, remove []string) (authentik.Group, error)
+	GetMail(ctx context.Context) (*authentik.Mail, error)
+	SetMail(ctx context.Context, m authentik.Mail) error
+	InviteUser(ctx context.Context, username string, valid time.Duration) (authentik.Invite, error)
 }
 
 type Server struct {
@@ -88,8 +91,11 @@ type Server struct {
 	Console *Console
 	// Join, if set, lets more machines join the cell; a local cell has none.
 	Join *Join
-	Now  func() time.Time
-	Log  *slog.Logger
+	// CheckMail checks a mail server before it is taken; nil means a real
+	// SMTP check.
+	CheckMail func(ctx context.Context, m authentik.Mail) error
+	Now       func() time.Time
+	Log       *slog.Logger
 }
 
 // route is one operation of the API; the tests check the table against
@@ -125,6 +131,9 @@ func (s *Server) routes() []route {
 		{"GET", "/v0/users", RoleAgent, s.listUsers},
 		{"POST", "/v0/users", RoleAdmin, s.createUser},
 		{"POST", "/v0/users/{name}/tokens", RoleAdmin, s.createUserToken},
+		{"POST", "/v0/users/{name}/invite", RoleAdmin, s.inviteUser},
+		{"GET", "/v0/mail", RoleAdmin, s.getMail},
+		{"PUT", "/v0/mail", RoleAdmin, s.setMail},
 		{"GET", "/v0/groups", RoleAgent, s.listGroups},
 		{"POST", "/v0/groups", RoleAdmin, s.createGroup},
 		{"PATCH", "/v0/groups/{name}/members", RoleAdmin, s.changeGroupMembers},

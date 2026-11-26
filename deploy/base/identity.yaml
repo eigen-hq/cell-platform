@@ -32,6 +32,15 @@ spec:
     global:
       image:
         digest: ${AUTHENTIK_DIGEST}
+      # The invite mail (E-79): authentik checks a stage's template against
+      # the files of the process that saves it, so server and worker both.
+      volumes:
+        - name: mail-templates
+          configMap:
+            name: identity-mail-templates
+      volumeMounts:
+        - name: mail-templates
+          mountPath: /templates
     authentik:
       existingSecret:
         secretName: identity
@@ -119,3 +128,190 @@ data:
           expiring: false
           key: !Context token
           description: cell platform (operator and API)
+  # Invites (E-79): the API makes a recovery link of the person on this
+  # flow (it sets it as the brand's recovery flow). The link brings the
+  # person along; without one the flow does not open. The person sets a
+  # password and a second factor, then is signed in.
+  invite.yaml: |
+    version: 1
+    metadata:
+      name: cell invite
+    entries:
+      - model: authentik_flows.flow
+        id: flow
+        identifiers:
+          slug: cell-invite
+        attrs:
+          name: Invite
+          title: Set up your account
+          designation: recovery
+          authentication: require_unauthenticated
+      - model: authentik_policies_expression.expressionpolicy
+        id: with-link
+        identifiers:
+          name: cell-invite-only-with-link
+        attrs:
+          expression: |
+            return bool(request.context.get("pending_user"))
+      - model: authentik_policies.policybinding
+        identifiers:
+          policy: !KeyOf with-link
+          target: !KeyOf flow
+          order: 0
+        attrs:
+          enabled: true
+          negate: false
+          timeout: 30
+      - model: authentik_stages_prompt.prompt
+        id: password
+        identifiers:
+          name: cell-invite-password
+        attrs:
+          field_key: password
+          label: Password
+          type: password
+          required: true
+          placeholder: Password
+          order: 0
+          placeholder_expression: false
+      - model: authentik_stages_prompt.prompt
+        id: password-repeat
+        identifiers:
+          name: cell-invite-password-repeat
+        attrs:
+          field_key: password_repeat
+          label: Password (repeat)
+          type: password
+          required: true
+          placeholder: Password (repeat)
+          order: 1
+          placeholder_expression: false
+      - model: authentik_stages_prompt.promptstage
+        id: set-password
+        identifiers:
+          name: cell-invite-set-password
+        attrs:
+          fields:
+            - !KeyOf password
+            - !KeyOf password-repeat
+          validation_policies: []
+      - model: authentik_stages_user_write.userwritestage
+        id: write
+        identifiers:
+          name: cell-invite-write
+        attrs:
+          user_creation_mode: never_create
+      - model: authentik_stages_authenticator_totp.authenticatortotpstage
+        id: totp
+        identifiers:
+          name: cell-invite-totp
+        attrs:
+          digits: 6
+      - model: authentik_stages_authenticator_webauthn.authenticatorwebauthnstage
+        id: webauthn
+        identifiers:
+          name: cell-invite-webauthn
+      - model: authentik_stages_authenticator_validate.authenticatorvalidatestage
+        id: second-factor
+        identifiers:
+          name: cell-invite-second-factor
+        attrs:
+          device_classes: [totp, webauthn]
+          not_configured_action: configure
+          configuration_stages:
+            - !KeyOf totp
+            - !KeyOf webauthn
+      - model: authentik_stages_user_login.userloginstage
+        id: login
+        identifiers:
+          name: cell-invite-login
+      - model: authentik_flows.flowstagebinding
+        identifiers:
+          target: !KeyOf flow
+          stage: !KeyOf set-password
+          order: 10
+        attrs:
+          evaluate_on_plan: true
+          re_evaluate_policies: false
+          policy_engine_mode: any
+          invalid_response_action: retry
+      - model: authentik_flows.flowstagebinding
+        identifiers:
+          target: !KeyOf flow
+          stage: !KeyOf write
+          order: 20
+        attrs:
+          evaluate_on_plan: true
+          re_evaluate_policies: false
+          policy_engine_mode: any
+          invalid_response_action: retry
+      - model: authentik_flows.flowstagebinding
+        identifiers:
+          target: !KeyOf flow
+          stage: !KeyOf second-factor
+          order: 30
+        attrs:
+          evaluate_on_plan: true
+          re_evaluate_policies: false
+          policy_engine_mode: any
+          invalid_response_action: retry
+      - model: authentik_flows.flowstagebinding
+        identifiers:
+          target: !KeyOf flow
+          stage: !KeyOf login
+          order: 40
+        attrs:
+          evaluate_on_plan: true
+          re_evaluate_policies: false
+          policy_engine_mode: any
+          invalid_response_action: retry
+---
+# The invite mail (E-79), in authentik's mail layout.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: identity-mail-templates
+  namespace: cell-system
+data:
+  cell-invite.html: |
+    {% extends "email/base.html" %}
+    {% load i18n %}
+    {% load humanize %}
+    {% block content %}
+    <tr>
+      <td align="center">
+        <h1>{% blocktrans with name=user.name %}Hi {{ name }},{% endblocktrans %}</h1>
+      </td>
+    </tr>
+    <tr>
+      <td align="center">
+        <table border="0">
+          <tr>
+            <td align="center" style="max-width: 300px; padding: 20px 0; color: #212124;">
+              {% blocktrans with username=user.username %}You have an account at ${CELL_DOMAIN}: {{ username }}. Use the button below to set your password and a second factor.{% endblocktrans %}
+            </td>
+          </tr>
+          <tr>
+            <td align="center" class="btn btn-primary">
+              <a id="confirm" href="{{ url }}" rel="noopener noreferrer" target="_blank">{% trans 'Set up your account' %}</a>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+    {% endblock %}
+    {% block sub_content %}
+    <tr>
+      <td style="padding: 20px; font-size: 12px; color: #212124;" align="center">
+        {% blocktrans with expires=expires|timeuntil %}The link is valid for {{ expires }} and signs in as you: do not pass it on. If you did not expect this mail, ignore it.{% endblocktrans %}
+      </td>
+    </tr>
+    {% endblock %}
+  cell-invite.txt: |
+    {% load i18n %}{% load humanize %}{% autoescape off %}{% blocktrans with name=user.name %}Hi {{ name }},{% endblocktrans %}
+
+    {% blocktrans with username=user.username %}You have an account at ${CELL_DOMAIN}: {{ username }}. Open the link below to set your password and a second factor.{% endblocktrans %}
+    {{ url }}
+
+    {% blocktrans with expires=expires|timeuntil %}The link is valid for {{ expires }} and signs in as you: do not pass it on. If you did not expect this mail, ignore it.{% endblocktrans %}
+    {% endautoescape %}

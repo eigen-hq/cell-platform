@@ -19,6 +19,7 @@
   type User = components["schemas"]["User"];
   type Group = components["schemas"]["Group"];
   type App = components["schemas"]["App"];
+  type Mail = components["schemas"]["Mail"];
 
   const ADMINS = "cell-admins";
   const AGENTS = "cell-agents";
@@ -28,6 +29,7 @@
   let groups = $state<Group[]>([]);
   let apps = $state<App[]>([]);
   let failed = $state("");
+  let mail = $state<Mail | null>(null);
 
   // A poll that started before a save may answer after the reload: drop it.
   const guard = newest();
@@ -45,8 +47,20 @@
     }
   }
 
+  // Mail settings are for admins only; a failure stays in their panel.
+  let mailFailed = $state("");
+  async function loadMail() {
+    try {
+      mail = must(await api.GET("/v0/mail"));
+      mailFailed = "";
+    } catch (e) {
+      mailFailed = e instanceof Error ? e.message : String(e);
+    }
+  }
+
   $effect(() => {
     load();
+    loadMail();
     const t = setInterval(load, 15000);
     return () => clearInterval(t);
   });
@@ -57,23 +71,30 @@
   let personNote = $state<{ text: string; bad?: boolean } | null>(null);
   let newGroup = $state("");
   let groupNote = $state<{ text: string; bad?: boolean } | null>(null);
-  let token = $state<{ user: string; value: string } | null>(null);
+  // A credential on screen: an app password or an invite link, shown once.
+  let token = $state<{ title: string; text: string; value: string } | null>(null);
   let tokenError = $state("");
 
   const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
   async function addPerson(e: SubmitEvent) {
     e.preventDefault();
+    if (minting) return;
+    minting = true;
     personNote = null;
     try {
       const body = { username: person.username.trim(), name: person.name.trim(), email: person.email.trim() || undefined, password: person.password || undefined, groups: person.groups };
-      must(await api.POST("/v0/users", { body }));
-      personNote = { text: `${body.name || body.username} can sign in now.` };
+      const u = must(await api.POST("/v0/users", { body }));
       person = { username: "", name: "", email: "", password: "", groups: [] };
       adding = false;
+      // Without a first password the person sets one through an invite.
+      if (body.password) personNote = { text: `${u.name || u.username} can sign in now.` };
+      else await issueInvite(u);
       await load();
     } catch (err) {
       personNote = { text: msg(err), bad: true };
+    } finally {
+      minting = false;
     }
   }
 
@@ -90,8 +111,9 @@
     }
   }
 
-  // One app password at a time: each request makes a credential, and only
-  // the one on screen can be copied.
+  // One credential at a time (app password, invite, a new person's invite):
+  // each request makes one, and only the one on screen can be copied. Every
+  // button that asks for one is off while another is on its way.
   let minting = $state(false);
   async function appPassword(u: User) {
     if (minting) return;
@@ -99,11 +121,64 @@
     token = null;
     tokenError = "";
     try {
-      token = { user: u.username, value: must(await api.POST("/v0/users/{name}/tokens", { params: { path: { name: u.username } } })).token };
+      token = { title: `App password for ${u.username}`, text: "shown only now. It signs in to the API in that person's name.", value: must(await api.POST("/v0/users/{name}/tokens", { params: { path: { name: u.username } } })).token };
     } catch (err) {
       tokenError = `${u.username}: ${msg(err)}`;
     } finally {
       minting = false;
+    }
+  }
+
+  async function invite(u: User) {
+    if (minting) return;
+    minting = true;
+    try {
+      await issueInvite(u);
+    } finally {
+      minting = false;
+    }
+  }
+  async function issueInvite(u: User) {
+    token = null;
+    tokenError = "";
+    personNote = null;
+    try {
+      const inv = must(await api.POST("/v0/users/{name}/invite", { params: { path: { name: u.username } } }));
+      const until = new Date(inv.expires).toLocaleDateString();
+      if (inv.mailed) personNote = { text: `Invite mailed to ${u.email}. The link works until ${until}.` };
+      else if (inv.link) token = { title: `Invite link for ${u.name || u.username}`, text: `valid until ${until}. Hand it over yourself: it signs in as that person, so send it only to them.`, value: inv.link };
+      else throw new Error("the invite came back without a link");
+    } catch (err) {
+      tokenError = `${u.username}: ${msg(err)}`;
+    }
+  }
+
+  // System mail: invites and later warnings go out through this server.
+  let editingMail = $state(false);
+  let mailForm = $state({ host: "", port: "", username: "", password: "", from: "", tls: false });
+  let mailNote = $state<{ text: string; bad?: boolean } | null>(null);
+  let savingMail = $state(false);
+  function editMail() {
+    const m = mail;
+    mailForm = { host: m?.host ?? "", port: m?.port ? String(m.port) : "", username: m?.username ?? "", password: "", from: m?.from ?? "", tls: m?.tls ?? false };
+    mailNote = null;
+    editingMail = true;
+  }
+  async function saveMail(e: SubmitEvent) {
+    e.preventDefault();
+    if (savingMail) return;
+    savingMail = true;
+    mailNote = null;
+    try {
+      const f = mailForm;
+      const body = { host: f.host.trim(), port: f.port ? Number(f.port) : undefined, username: f.username.trim() || undefined, password: f.password || undefined, from: f.from.trim(), tls: f.tls };
+      mail = must(await api.PUT("/v0/mail", { body }));
+      editingMail = false;
+      mailNote = { text: `The server took the login. Invites go out by mail now.` };
+    } catch (err) {
+      mailNote = { text: msg(err), bad: true };
+    } finally {
+      savingMail = false;
     }
   }
 
@@ -196,19 +271,19 @@
         <label>Username<input bind:value={person.username} required pattern="[a-z0-9][a-z0-9._\-]{'{1,62}'}" autocomplete="off" /></label>
         <label>Name<input bind:value={person.name} required autocomplete="off" /></label>
         <label>Email<input type="email" bind:value={person.email} autocomplete="off" /></label>
-        <label>First password<input type="password" bind:value={person.password} autocomplete="new-password" /></label>
+        <label>First password<input type="password" bind:value={person.password} autocomplete="new-password" placeholder="empty: send an invite" /></label>
         <fieldset>
           <legend>Groups</legend>
           {#each teams as g (g.name)}
             <label class="pick"><input type="checkbox" bind:group={person.groups} value={g.name} />{g.name}</label>
           {/each}
         </fieldset>
-        <div class="row"><Button type="submit">Add</Button><Button kind="quiet" type="button" onclick={() => (adding = false)}>Cancel</Button></div>
+        <div class="row"><Button type="submit" disabled={minting}>Add</Button><Button kind="quiet" type="button" onclick={() => (adding = false)}>Cancel</Button></div>
       </form>
     {/if}
     {#if token}
       <div class="token" role="status">
-        <p><strong>App password for {token.user}</strong>, shown only now. It signs in to the API in that person's name.</p>
+        <p><strong>{token.title}</strong>, {token.text}</p>
         <CommandBox command={token.value} />
         <Button kind="quiet" onclick={() => (token = null)}>Done</Button>
       </div>
@@ -220,10 +295,40 @@
           <Avatar name={u.name || u.username} size={30} />
           <span class="who"><strong>{u.name || u.username}</strong><small>{u.username}{u.email ? ` · ${u.email}` : ""}</small></span>
           <span class="in">{#each [...new Set(u.groups)] as g (g)}<span class="chip">{g}</span>{/each}</span>
-          <Button kind="quiet" disabled={minting} onclick={() => appPassword(u)}>App password</Button>
+          <span class="acts">
+            <Button kind="quiet" disabled={minting} onclick={() => invite(u)}>Invite</Button>
+            <Button kind="quiet" disabled={minting} onclick={() => appPassword(u)}>App password</Button>
+          </span>
         </li>
       {/each}
     </ul>
+  </section>
+
+  <section class="mail">
+    <div class="head">
+      <h2 class="sec-title">System mail</h2>
+      {#if !editingMail}<Button kind="quiet" onclick={editMail}>{mail?.configured ? "Change" : "Set up"}</Button>{/if}
+    </div>
+    {#if mailNote}<p class="note" class:fail={mailNote.bad} role="status">{mailNote.text}</p>{/if}
+    {#if mailFailed}<p class="note fail" role="alert">{mailFailed}</p>{/if}
+    {#if editingMail}
+      <form class="add" onsubmit={saveMail}>
+        <label>Server<input bind:value={mailForm.host} required placeholder="smtp.example.com" autocomplete="off" /></label>
+        <label>Port<input type="number" min="1" max="65535" bind:value={mailForm.port} placeholder={mailForm.tls ? "465" : "587"} /></label>
+        <label>Sender<input type="email" bind:value={mailForm.from} required placeholder="cell@example.com" autocomplete="off" /></label>
+        <label>Login<input bind:value={mailForm.username} autocomplete="off" /></label>
+        <label>Password<input type="password" bind:value={mailForm.password} autocomplete="new-password" placeholder={mail?.configured ? "enter again to change" : ""} /></label>
+        <label class="pick"><input type="checkbox" bind:checked={mailForm.tls} />TLS from the start (port 465)</label>
+        <div class="row">
+          <Button type="submit" disabled={savingMail}>{savingMail ? "Checking the server" : "Check and save"}</Button>
+          <Button kind="quiet" type="button" onclick={() => (editingMail = false)}>Cancel</Button>
+        </div>
+      </form>
+    {:else if mail?.configured}
+      <p class="mail-line"><span class="chip">{mail.from}</span><small>through {mail.host}:{mail.port}{mail.username ? ` as ${mail.username}` : ""}, {mail.tls ? "TLS" : "STARTTLS"}</small></p>
+    {:else}
+      <p class="mail-line"><small>No mail server yet. Invites come back as links to hand over.</small></p>
+    {/if}
   </section>
 
   {#if current}
@@ -351,6 +456,18 @@
     border-radius: var(--radius-panel);
     background: var(--color-panel);
   }
+  .acts {
+    display: flex;
+    gap: 6px;
+  }
+  .mail-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+  }
+  .mail,
   .people {
     display: grid;
     gap: 12px;
