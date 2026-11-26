@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -139,6 +141,9 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		if sn == "" {
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil // the App reconciler is enabling archiving
 		}
+		if res, err := r.encryptArchive(ctx, &b, cluster, sn); err != nil || !res.IsZero() {
+			return res, err
+		}
 		// The backup is bound to the cluster and WAL archive it was asked
 		// of; a restore may replace the cluster before CloudNativePG runs it.
 		pg := &unstructured.Unstructured{Object: map[string]any{
@@ -158,10 +163,16 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		case "completed":
 			id, _, _ := unstructured.NestedString(pg.Object, "status", "backupId")
 			from, _, _ := unstructured.NestedString(pg.Object, "status", "pluginMetadata", "clusterUID")
-			if a := pg.GetAnnotations(); from == "" || from != a[annotationCluster] || a[annotationServer] == "" {
+			a := pg.GetAnnotations()
+			if from == "" || from != a[annotationCluster] || a[annotationServer] == "" {
 				return fail("database backup " + id + " is not of the database it was asked of (replaced during the backup?)")
 			}
-			b.Status.Database = &cellv1.DatabaseBackup{ServerName: pg.GetAnnotations()[annotationServer], BackupID: id}
+			if ok, err := r.inArchive(ctx, pg, a[annotationServer]); err != nil {
+				return ctrl.Result{}, err
+			} else if !ok {
+				return fail("database backup " + id + " is not in archive " + a[annotationServer] + " (the database still archived elsewhere); the next backup takes a new one")
+			}
+			b.Status.Database = &cellv1.DatabaseBackup{ServerName: a[annotationServer], BackupID: id}
 			b.Status.Message = "volumes"
 			return ctrl.Result{RequeueAfter: time.Second}, r.Status().Update(ctx, &b)
 		case "failed":
@@ -207,6 +218,90 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	b.Status.VolumesSnapshot, b.Status.Claims = snap.ID, snap.tags("claim")
 	b.Status.ClaimsRecorded = snap.tag("claims") == "recorded"
 	return end(cellv1.RunCompleted, fmt.Sprintf("%d volumes", len(b.Status.Claims)))
+}
+
+// switchingArchive is the message of a backup moving its database from a
+// plain archive to an encrypted one (E-67).
+const switchingArchive = "database: switching to an encrypted archive"
+
+// archiveSettle is the time between the switch and the first base backup
+// into the new archive.
+// ponytail: a fixed wait, as CloudNativePG shows no sign of when its
+// instance manager archives into the new archive. A base backup taken
+// before it did fails in inArchive; the next backup takes a new one.
+const archiveSettle = 30 * time.Second
+
+// encryptArchive moves a database archived plain (from before E-67) to a
+// new encrypted archive, under this backup's hold and before its base
+// backup, so that the base backup and its WAL land in the same archive. A
+// zero result means the backup goes on.
+func (r *BackupReconciler) encryptArchive(ctx context.Context, b *cellv1.Backup, cluster *unstructured.Unstructured, sn string) (ctrl.Result, error) {
+	ns := cluster.GetNamespace()
+	if strings.HasPrefix(sn, cryptArchive) {
+		if b.Status.Message != switchingArchive {
+			return ctrl.Result{}, nil
+		}
+		at, err := time.Parse("20060102t150405", strings.TrimPrefix(sn, cryptArchive))
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("archive %s: %w", sn, err)
+		}
+		if wait := at.Add(archiveSettle).Sub(r.now()); wait > 0 {
+			return ctrl.Result{RequeueAfter: wait}, nil
+		}
+		return ctrl.Result{}, nil
+	}
+	// A base backup asked of the plain archive already runs there.
+	pg := &unstructured.Unstructured{}
+	pg.SetGroupVersionKind(gvkCNPGBackup)
+	if err := r.Get(ctx, client.ObjectKey{Namespace: ns, Name: b.Name}, pg); !apierrors.IsNotFound(err) {
+		return ctrl.Result{}, err
+	}
+	store := &unstructured.Unstructured{}
+	store.SetGroupVersionKind(gvkObjectStore)
+	if err := r.Get(ctx, client.ObjectKey{Namespace: ns, Name: cryptStore}, store); apierrors.IsNotFound(err) {
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil // the App reconciler creates it
+	} else if err != nil {
+		return ctrl.Result{}, err
+	}
+	if b.Status.Message != switchingArchive {
+		b.Status.Message = switchingArchive
+		return ctrl.Result{RequeueAfter: time.Second}, r.Status().Update(ctx, b)
+	}
+	raw, err := json.Marshal(map[string]any{"spec": map[string]any{"plugins": []any{archiverPlugin(newServerName(r.now()))}}})
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{RequeueAfter: archiveSettle}, r.Patch(ctx, cluster, client.RawPatch(types.MergePatchType, raw))
+}
+
+// inArchive reports whether a completed CloudNativePG backup lies in the
+// archive sn. The instance takes a base backup with its own view of the
+// cluster, which may still name the archive before a switch (E-67). The
+// barman-cloud plugin records each archive's last base backup in its
+// ObjectStore before it reports the backup done, so that time is at least
+// the backup's end only in the archive the backup went to.
+func (r *BackupReconciler) inArchive(ctx context.Context, pg *unstructured.Unstructured, sn string) (bool, error) {
+	stopped, _, _ := unstructured.NestedString(pg.Object, "status", "stoppedAt")
+	end, err := time.Parse(time.RFC3339, stopped)
+	if err != nil {
+		return false, fmt.Errorf("database backup %s: end time %q: %w", pg.GetName(), stopped, err)
+	}
+	store := &unstructured.Unstructured{}
+	store.SetGroupVersionKind(gvkObjectStore)
+	// Past the cache: the plugin wrote the store just before the backup.
+	key := client.ObjectKey{Namespace: pg.GetNamespace(), Name: archiveStore(sn)}
+	if err := apiReader(r.Reader, r).Get(ctx, key, store); err != nil {
+		return false, err
+	}
+	last, _, _ := unstructured.NestedString(store.Object, "status", "serverRecoveryWindow", sn, "lastSuccessfulBackupTime")
+	if last == "" {
+		return false, nil
+	}
+	at, err := time.Parse(time.RFC3339, last)
+	if err != nil {
+		return false, fmt.Errorf("object store %s: last backup time %q: %w", key.Name, last, err)
+	}
+	return !at.Before(end), nil
 }
 
 // backupFinalizer keeps a running backup until it ended.

@@ -265,6 +265,10 @@ func (r *AppReconciler) scheduleBackup(ctx context.Context, app *cellv1.App, tar
 	}
 	now := r.now()
 	var newest, lastDone *cellv1.Backup
+	// A database still archived plain (before E-67) is backed up at once:
+	// that backup moves it to an encrypted archive. Only while every backup
+	// is a completed plain one, so once: the backup it starts is none.
+	plain := false
 	for i := range backups.Items {
 		b := &backups.Items[i]
 		if b.Spec.App != app.Name {
@@ -276,6 +280,9 @@ func (r *AppReconciler) scheduleBackup(ctx context.Context, app *cellv1.App, tar
 			}
 			continue
 		}
+		inPlain := b.Status.Phase == cellv1.RunCompleted && b.Status.Database != nil &&
+			!strings.HasPrefix(b.Status.Database.ServerName, cryptArchive)
+		plain = inPlain && (newest == nil || plain)
 		if newest == nil || b.CreationTimestamp.After(newest.CreationTimestamp.Time) {
 			newest = b
 		}
@@ -290,7 +297,7 @@ func (r *AppReconciler) scheduleBackup(ctx context.Context, app *cellv1.App, tar
 	if target == nil || !hasData(app) || interval == 0 {
 		return nil
 	}
-	if newest != nil && now.Sub(newest.CreationTimestamp.Time) < interval {
+	if newest != nil && now.Sub(newest.CreationTimestamp.Time) < interval && !plain {
 		return nil
 	}
 	return createOnce(ctx, r, &cellv1.Backup{

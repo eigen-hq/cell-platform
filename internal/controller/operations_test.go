@@ -89,9 +89,27 @@ func completeDatabaseBackup(t *testing.T, ns, name, id string) {
 	_ = unstructured.SetNestedField(pg.Object, "completed", "status", "phase")
 	_ = unstructured.SetNestedField(pg.Object, id, "status", "backupId")
 	_ = unstructured.SetNestedField(pg.Object, pg.GetAnnotations()[annotationCluster], "status", "pluginMetadata", "clusterUID")
+	end := time.Now().UTC().Format(time.RFC3339)
+	_ = unstructured.SetNestedField(pg.Object, end, "status", "stoppedAt")
+	// The plugin records the backup in the store of the archive it went to.
+	archived(t, ns, pg.GetAnnotations()[annotationServer], end)
 	if err := k8s.Status().Update(context.Background(), pg); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// archived plays the barman-cloud plugin recording a base backup in
+// archive sn.
+func archived(t *testing.T, ns, sn, at string) {
+	t.Helper()
+	eventually(t, func() error {
+		store, err := get(context.Background(), gvkObjectStore, ns, archiveStore(sn))
+		if err != nil {
+			return err
+		}
+		_ = unstructured.SetNestedField(store.Object, at, "status", "serverRecoveryWindow", sn, "lastSuccessfulBackupTime")
+		return k8s.Status().Update(context.Background(), store)
+	})
 }
 
 // completeBackup plays everything a Backup waits for and returns it. The
@@ -169,11 +187,11 @@ func readyDataApp(t *testing.T, name string) *cellv1.App {
 	}
 	var cluster *unstructured.Unstructured
 	eventually(t, func() (err error) { cluster, err = get(ctx, gvkCluster, ns, "db"); return err })
-	if sn := serverName(cluster); !strings.HasPrefix(sn, "db-") {
-		t.Fatalf("database without WAL archive: %v", cluster.Object["spec"])
+	if sn := serverName(cluster); !strings.HasPrefix(sn, cryptArchive) {
+		t.Fatalf("database without encrypted WAL archive: %v", cluster.Object["spec"])
 	}
-	if _, err := get(ctx, gvkObjectStore, ns, objectStore); err != nil {
-		t.Fatalf("no object store: %v", err)
+	for _, store := range []string{objectStore, cryptStore} {
+		eventually(t, func() error { _, err := get(ctx, gvkObjectStore, ns, store); return err })
 	}
 	setReady(t, cluster)
 	kubelet(t, ns, name)
@@ -225,7 +243,7 @@ func TestScheduledBackup(t *testing.T) {
 		env[e.Name] = e.Value
 	}
 	if env["RESTIC_REPOSITORY"] != "s3:http://backup-gateway.cell-system.svc:8080/volumes" ||
-		env["DB_BACKUP"] != "20261119T030000" || !strings.HasPrefix(env["DB_SERVER"], "db-") {
+		env["DB_BACKUP"] != "20261119T030000" || !strings.HasPrefix(env["DB_SERVER"], cryptArchive) {
 		t.Errorf("backup job env %v", env)
 	}
 	mounted := false
@@ -2070,4 +2088,135 @@ func TestRemovalCancelsChangeBackup(t *testing.T) {
 		t.Errorf("change failed with %q", c.Status.Message)
 	}
 	gone(t, app)
+}
+
+// A database archived plain from before E-67 moves to an encrypted archive
+// with its next backup: under the backup's hold, before the base backup,
+// which then waits until the instance archives into the new one.
+func TestPlainArchiveIsEncryptedByTheNextBackup(t *testing.T) {
+	ctx := context.Background()
+	app := readyDataApp(t, "coffer")
+	defer removeApp(t, app)
+	cluster, err := get(ctx, gvkCluster, "app-coffer", "db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(map[string]any{"spec": map[string]any{"plugins": []any{archiverPlugin("db-20261101t000000")}}})
+	if err := k8s.Patch(ctx, cluster, client.RawPatch(types.MergePatchType, raw)); err != nil {
+		t.Fatal(err)
+	}
+	if err := k8s.Create(ctx, &cellv1.Backup{ObjectMeta: metav1.ObjectMeta{Name: "coffer-b"}, Spec: cellv1.BackupSpec{App: "coffer"}}); err != nil {
+		t.Fatal(err)
+	}
+	var sn string
+	eventually(t, func() error {
+		c, err := get(ctx, gvkCluster, "app-coffer", "db")
+		if err != nil {
+			return err
+		}
+		if sn = serverName(c); !strings.HasPrefix(sn, cryptArchive) {
+			return fmt.Errorf("still archived into %s", sn)
+		}
+		return nil
+	})
+	var b cellv1.Backup
+	if err := k8s.Get(ctx, client.ObjectKey{Name: "coffer-b"}, &b); err != nil || b.Status.Message != switchingArchive {
+		t.Fatalf("backup says %q (%v)", b.Status.Message, err)
+	}
+	time.Sleep(time.Second)
+	if _, err := get(ctx, gvkCNPGBackup, "app-coffer", "coffer-b"); !apierrors.IsNotFound(err) {
+		t.Fatalf("base backup before the archive settled: %v", err)
+	}
+	skew.Store(int64(archiveSettle))
+	defer skew.Store(0)
+	b.Annotations = map[string]string{"test/touch": "1"} // wake the reconciler
+	if err := k8s.Update(ctx, &b); err != nil {
+		t.Fatal(err)
+	}
+	done := completeBackup(t, "app-coffer", "coffer-b", "20261126T030000", "snap-v")
+	if done.Status.Database == nil || done.Status.Database.ServerName != sn {
+		t.Errorf("backup recorded %+v, want archive %s", done.Status.Database, sn)
+	}
+
+	// An instance that took the base backup with its old view of the
+	// cluster put it into the plain archive: the backup fails instead of
+	// recording the encrypted one.
+	if err := k8s.Create(ctx, &cellv1.Backup{ObjectMeta: metav1.ObjectMeta{Name: "coffer-c"}, Spec: cellv1.BackupSpec{App: "coffer"}}); err != nil {
+		t.Fatal(err)
+	}
+	var pg *unstructured.Unstructured
+	eventually(t, func() (err error) { pg, err = get(ctx, gvkCNPGBackup, "app-coffer", "coffer-c"); return err })
+	end := time.Now().Add(time.Hour).UTC().Format(time.RFC3339) // after coffer-b's record
+	archived(t, "app-coffer", "db-20261101t000000", end)
+	_ = unstructured.SetNestedField(pg.Object, "completed", "status", "phase")
+	_ = unstructured.SetNestedField(pg.Object, "stale-1", "status", "backupId")
+	_ = unstructured.SetNestedField(pg.Object, end, "status", "stoppedAt")
+	_ = unstructured.SetNestedField(pg.Object, pg.GetAnnotations()[annotationCluster], "status", "pluginMetadata", "clusterUID")
+	if err := k8s.Status().Update(ctx, pg); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, func() error {
+		if err := k8s.Get(ctx, client.ObjectKey{Name: "coffer-c"}, &b); err != nil {
+			return err
+		}
+		if b.Status.Phase != cellv1.RunFailed || !strings.Contains(b.Status.Message, "is not in archive "+sn) {
+			return fmt.Errorf("backup %s: %s", b.Status.Phase, b.Status.Message)
+		}
+		return nil
+	})
+	if b.Status.Database != nil {
+		t.Errorf("failed backup recorded %+v", b.Status.Database)
+	}
+}
+
+// The first scheduled backup after the upgrade does not wait for the
+// interval while the newest backup lies in a plain archive; once only.
+func TestPlainArchiveIsBackedUpAtOnce(t *testing.T) {
+	ctx := context.Background()
+	app := readyDataApp(t, "inkwell")
+	defer removeApp(t, app)
+	old := &cellv1.Backup{ObjectMeta: metav1.ObjectMeta{Name: "inkwell-old"}, Spec: cellv1.BackupSpec{App: "inkwell"}}
+	if err := k8s.Create(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, func() error {
+		if err := k8s.Get(ctx, client.ObjectKeyFromObject(old), old); err != nil {
+			return err
+		}
+		old.Status = cellv1.BackupStatus{Phase: cellv1.RunCompleted, CompletedAt: ptr(metav1.Now()),
+			Database: &cellv1.DatabaseBackup{ServerName: "db-20261101t000000", BackupID: "id-old"}}
+		return k8s.Status().Update(ctx, old)
+	})
+	eventually(t, func() error {
+		if err := k8s.Get(ctx, client.ObjectKeyFromObject(app), app); err != nil {
+			return err
+		}
+		app.Spec.Backup.Schedule = "daily"
+		return k8s.Update(ctx, app)
+	})
+	scheduled := func() []string {
+		var list cellv1.BackupList
+		if err := k8s.List(ctx, &list); err != nil {
+			t.Fatal(err)
+		}
+		var names []string
+		for _, x := range list.Items {
+			if x.Spec.App == "inkwell" && x.Spec.Reason == "scheduled" {
+				names = append(names, x.Name)
+			}
+		}
+		return names
+	}
+	eventually(t, func() error {
+		if len(scheduled()) == 0 {
+			return fmt.Errorf("no backup out of the plain archive")
+		}
+		return nil
+	})
+	first := scheduled()[0]
+	completeBackup(t, "app-inkwell", first, "20261126T040000", "snap-q1")
+	time.Sleep(2 * time.Second)
+	if got := scheduled(); len(got) != 1 {
+		t.Errorf("scheduled backups %v, want only %s", got, first)
+	}
 }

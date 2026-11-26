@@ -3,6 +3,8 @@
 # turns that key into a backend rooted at <root>/apps/<app> of the target,
 # so an app sees and writes only its own backups. The target is any rclone
 # remote, named "target" in the rclone.conf of Secret backup-target.
+# An app's database archive is encrypted here, before it leaves the cell
+# (E-67); restic encrypts the volumes itself.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -10,14 +12,29 @@ metadata:
   namespace: cell-system
 data:
   # Input: {"user": "<access key id>", ...}. The key id is the app's name,
-  # its secret sha256("<gateway key>:<app>") (see internal/controller).
+  # or "<app>.db" for its database archive; its secret is
+  # sha256("<gateway key>:<key id>") (see internal/controller). The archive
+  # is an rclone crypt remote at <root>/apps/<app>/crypt, keyed by the
+  # backup password and the app alone: a fresh cell with the same backup
+  # key reads it.
   proxy: |
     #!/bin/sh
     set -eu
     user=$(tr -d '\n' | sed -n 's/.*"user" *: *"\([^"]*\)".*/\1/p')
-    case "$user" in '' | *[!a-z0-9-]* | -* | *-) echo "bad access key id" >&2; exit 1 ;; esac
-    secret=$(printf '%s:%s' "$(cat /target/gatewayKey)" "$user" | sha256sum | cut -c1-64)
-    printf '{"type":"alias","remote":"target:%s/apps/%s","_root":"","_secret_access_key":"%s"}\n' "$(cat /target/root)" "$user" "$secret"
+    app=${user%.db}
+    case "$app" in '' | *[!a-z0-9-]* | -* | *-) echo "bad access key id" >&2; exit 1 ;; esac
+    key=$(cat /target/gatewayKey)
+    root=$(cat /target/root)
+    secret=$(printf '%s:%s' "$key" "$user" | sha256sum | cut -c1-64)
+    if [ "$user" = "$app" ]; then
+      printf '{"type":"alias","remote":"target:%s/apps/%s","_root":"","_secret_access_key":"%s"}\n' "$root" "$app" "$secret"
+      exit
+    fi
+    password=$(cat /target/password)
+    [ -n "$password" ] || { echo "no backup password" >&2; exit 1; }
+    pass=$(printf 'crypt:%s:%s' "$app" "$password" | sha256sum | cut -c1-64)
+    salt=$(printf 'crypt-salt:%s:%s' "$app" "$password" | sha256sum | cut -c1-64)
+    printf '{"type":"crypt","remote":"target:%s/apps/%s/crypt","password":"%s","password2":"%s","_obscure":"password,password2","_root":"","_secret_access_key":"%s"}\n' "$root" "$app" "$pass" "$salt" "$secret"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -65,6 +82,7 @@ spec:
               - {key: rclone.conf, path: rclone.conf}
               - {key: root, path: root}
               - {key: gatewayKey, path: gatewayKey}
+              - {key: password, path: password}
         - name: proxy
           configMap: {name: backup-gateway, defaultMode: 0555}
         - name: local

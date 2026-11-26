@@ -113,7 +113,7 @@ What is wanted and tried out happens in the office UI; the platform builds, oper
 | Do not count the wait for the login proxy against the deadline of the app | open | |
 | Restart of an app as an API action | open | |
 | Console: hide actions for viewers | open | |
-| Encrypt database backups and their WAL in the cell before they leave it (today only volume backups are encrypted with the backup key) | open | |
+| Encrypt database backups and their WAL in the cell before they leave it (today only volume backups are encrypted with the backup key) | built (E-67), waiting for the daily run | |
 | Backup targets over HTTPS only, plain HTTP only for a private network on purpose | built (E-68), waiting for the daily run | |
 | A target set again by the installer goes through the operator's checked switch under the gateway lock | built (E-69), waiting for the daily run | |
 | Join keys: the joining machine reads the key without the command line, the key expires on join, the policy bounds its lifetime | open | |
