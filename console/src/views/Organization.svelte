@@ -14,6 +14,7 @@
   import Button from "../lib/ui/Button.svelte";
   import CommandBox from "../lib/ui/CommandBox.svelte";
   import StatStrip, { type Stat } from "../lib/ui/StatStrip.svelte";
+  import { resultRow } from "../lib/row";
   import GroupDrawer from "./GroupDrawer.svelte";
 
   type User = components["schemas"]["User"];
@@ -105,6 +106,10 @@
   // A credential on screen: an app password or an invite link, shown once.
   let token = $state<{ title: string; text: string; value: string } | null>(null);
   let tokenError = $state("");
+  // The person the note, credential or error above is about: it shows in
+  // that person's row, where the button was, so nothing moves under the
+  // pointer. null shows it above the list (resultRow).
+  let about = $state<string | null>(null);
 
   const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -119,10 +124,14 @@
       person = { username: "", name: "", email: "", password: "", groups: [] };
       adding = false;
       // Without a first password the person sets one through an invite.
-      if (body.password) personNote = { text: `${u.name || u.username} can sign in now.` };
+      if (body.password) {
+        about = null;
+        personNote = { text: `${u.name || u.username} can sign in now.` };
+      }
       else await issueInvite(u);
       await load();
     } catch (err) {
+      about = null;
       personNote = { text: msg(err), bad: true };
     } finally {
       minting = false;
@@ -151,6 +160,8 @@
     minting = true;
     token = null;
     tokenError = "";
+    personNote = null;
+    about = u.username;
     try {
       token = { title: `App password for ${u.username}`, text: "shown only now. It signs in to the API in that person's name.", value: must(await api.POST("/v0/users/{name}/tokens", { params: { path: { name: u.username } } })).token };
     } catch (err) {
@@ -173,6 +184,7 @@
     token = null;
     tokenError = "";
     personNote = null;
+    about = u.username;
     try {
       const inv = must(await api.POST("/v0/users/{name}/invite", { params: { path: { name: u.username } } }));
       const until = new Date(inv.expires).toLocaleDateString();
@@ -245,6 +257,7 @@
 
   const isAgent = (u: User) => u.groups.includes(AGENTS);
   let people = $derived((users ?? []).filter((u) => !isAgent(u)));
+  let row = $derived(resultRow(about, people));
   let agentAccounts = $derived((users ?? []).filter(isAgent));
   let teams = $derived(groups.filter((g) => g.name !== AGENTS));
   // Apps by the group they are attached to; "" holds the apps for everyone.
@@ -326,7 +339,7 @@
       <h2 class="sec-title">People <small>{people.length}</small></h2>
       {#if !adding}<Button kind="quiet" onclick={() => { adding = true; personNote = null; }}>Add a person</Button>{/if}
     </div>
-    {#if personNote}<p class="note" class:fail={personNote.bad} role="status">{personNote.text}</p>{/if}
+    {#if row === null}{@render results()}{/if}
     {#if adding}
       <form class="add" onsubmit={addPerson}>
         <label>Username<input bind:value={person.username} required pattern="[a-z0-9][a-z0-9._\-]{'{1,62}'}" autocomplete="off" /></label>
@@ -342,14 +355,17 @@
         <div class="row"><Button type="submit" disabled={minting}>Add</Button><Button kind="quiet" type="button" onclick={() => (adding = false)}>Cancel</Button></div>
       </form>
     {/if}
-    {#if token}
-      <div class="token" role="status">
-        <p><strong>{token.title}</strong>, {token.text}</p>
-        <CommandBox command={token.value} />
-        <Button kind="quiet" onclick={() => (token = null)}>Done</Button>
-      </div>
-    {/if}
-    {#if tokenError}<p class="note fail" role="alert">{tokenError}</p>{/if}
+    {#snippet results()}
+      {#if personNote}<p class="note" class:fail={personNote.bad} role="status">{personNote.text}</p>{/if}
+      {#if token}
+        <div class="token" role="status">
+          <p><strong>{token.title}</strong>, {token.text}</p>
+          <CommandBox command={token.value} />
+          <Button kind="quiet" onclick={() => (token = null)}>Done</Button>
+        </div>
+      {/if}
+      {#if tokenError}<p class="note fail" role="alert">{tokenError}</p>{/if}
+    {/snippet}
     <ul class="list">
       {#each people as u (u.username)}
         <li>
@@ -360,6 +376,7 @@
             <Button kind="quiet" disabled={minting} onclick={() => invite(u)}>Invite</Button>
             <Button kind="quiet" disabled={minting} onclick={() => appPassword(u)}>App password</Button>
           </span>
+          {#if row === u.username}<div class="result">{@render results()}</div>{/if}
         </li>
       {/each}
     </ul>
@@ -378,11 +395,11 @@
         <label>Port<input type="number" min="1" max="65535" bind:value={mailForm.port} placeholder={mailForm.tls ? "465" : "587"} /></label>
         <label>Sender<input type="email" bind:value={mailForm.from} required placeholder="cell@example.com" autocomplete="off" /></label>
         <label>Login<input bind:value={mailForm.username} autocomplete="off" /></label>
-        <label>Password<input type="password" bind:value={mailForm.password} autocomplete="new-password" placeholder={mail?.configured ? "enter again to change" : ""} /></label>
+        <label>Password<input type="password" bind:value={mailForm.password} autocomplete="new-password" placeholder={mail?.configured && mailForm.username.trim() && mailForm.username.trim() === mail.username && mailForm.host.trim() === mail.host ? "empty keeps the password" : ""} /></label>
         <label class="pick"><input type="checkbox" bind:checked={mailForm.tls} />TLS from the start (port 465)</label>
         <div class="row">
           <Button type="submit" disabled={savingMail}>{savingMail ? "Checking the server" : "Check and save"}</Button>
-          <Button kind="quiet" type="button" onclick={() => (editingMail = false)}>Cancel</Button>
+          <Button kind="quiet" type="button" onclick={() => { editingMail = false; mailNote = null; }}>Cancel</Button>
         </div>
       </form>
     {:else if mail?.configured}
@@ -408,7 +425,7 @@
         <label>Key<input type="password" bind:value={modelsForm.apiKey} autocomplete="new-password" placeholder={models?.configured && models.provider === modelsForm.provider && (models.baseUrl ?? "") === modelsForm.baseUrl.trim().replace(/\/$/, "") ? "empty keeps the key" : ""} /></label>
         <div class="row">
           <Button type="submit" disabled={savingModels}>{savingModels ? "Checking the key" : "Check and save"}</Button>
-          <Button kind="quiet" type="button" onclick={() => (editingModels = false)}>Cancel</Button>
+          <Button kind="quiet" type="button" onclick={() => { editingModels = false; modelsNote = null; }}>Cancel</Button>
         </div>
       </form>
     {:else if models?.configured}
@@ -583,7 +600,8 @@
   .head .sec-title {
     margin: 0;
   }
-  input {
+  input,
+  select {
     width: 100%;
     padding: 9px 12px;
     border: 2px solid var(--color-line);
@@ -605,6 +623,7 @@
   }
   .add label {
     display: grid;
+    align-content: start;
     gap: 6px;
     font-size: 13.5px;
     font-weight: 600;
@@ -664,6 +683,11 @@
     gap: 14px;
     padding: 10px 12px;
     border-radius: var(--radius-part);
+  }
+  .list .result {
+    display: grid;
+    gap: 6px;
+    grid-column: 1 / -1;
   }
   .list li:hover {
     background: var(--color-panel);
