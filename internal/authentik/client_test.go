@@ -67,7 +67,7 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				// Pages of two, like a long list on a real server.
 				page := 1
-				fmt.Sscan(r.URL.Query().Get("page"), &page)
+				_, _ = fmt.Sscan(r.URL.Query().Get("page"), &page)
 				start, next := (page-1)*2, 0
 				if start > len(out) {
 					start = len(out)

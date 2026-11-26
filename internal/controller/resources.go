@@ -250,7 +250,7 @@ func imageWorkload(app *cellv1.App, src cellv1.ImageSource, bridgeImage string) 
 			}
 			items = append(items, corev1.KeyToPath{Key: key, Path: key, Mode: &mode})
 			container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{Name: filesConfig, MountPath: f.Path, SubPath: key, ReadOnly: true})
-			fmt.Fprintf(hash, "%s\x00%s\x00%v\x00", f.Path, f.Content, f.Executable)
+			_, _ = fmt.Fprintf(hash, "%s\x00%s\x00%v\x00", f.Path, f.Content, f.Executable)
 		}
 		objs = append(objs, cm)
 		volumes = append(volumes, corev1.Volume{Name: filesConfig, VolumeSource: corev1.VolumeSource{

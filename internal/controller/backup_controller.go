@@ -73,7 +73,7 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, nil
 	}
 	if b.DeletionTimestamp.IsZero() && controllerutil.AddFinalizer(&b, backupFinalizer) {
-		return ctrl.Result{Requeue: true}, r.Update(ctx, &b)
+		return ctrl.Result{RequeueAfter: time.Second}, r.Update(ctx, &b)
 	}
 	if b.Status.Phase == cellv1.RunCompleted || b.Status.Phase == cellv1.RunFailed {
 		return ctrl.Result{}, release()

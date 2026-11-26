@@ -66,7 +66,7 @@ func (h *Hetzner) Set(ctx context.Context, cell, name, typ string, values []stri
 	}
 	code, err := h.call(ctx, http.MethodPost, h.rrset(name, typ)+"/actions/set_records", map[string]any{"records": records}, &out)
 	if code == http.StatusNotFound {
-		code, err = h.call(ctx, http.MethodPost, "/zones/"+url.PathEscape(h.Zone)+"/rrsets",
+		_, err = h.call(ctx, http.MethodPost, "/zones/"+url.PathEscape(h.Zone)+"/rrsets",
 			map[string]any{"name": name, "type": typ, "ttl": ttl, "records": records, "labels": map[string]string{"cell": cell}}, &out)
 	}
 	if err != nil {
@@ -169,7 +169,7 @@ func (h *Hetzner) call(ctx context.Context, method, path string, body, out any) 
 	if err != nil {
 		return 0, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return resp.StatusCode, err

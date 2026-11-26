@@ -152,7 +152,7 @@ func (s *Server) appLogs(w http.ResponseWriter, r *http.Request, _ *Caller) erro
 	if err != nil {
 		return errorf(http.StatusBadRequest, "logs of %s/%s: %v", pod.Name, container, err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("X-Cell-Pod", pod.Name)
 	_, err = io.Copy(w, stream)

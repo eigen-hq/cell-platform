@@ -105,7 +105,7 @@ func (r *ChangeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, nil
 	}
 	if cr.DeletionTimestamp.IsZero() && controllerutil.AddFinalizer(&cr, changeFinalizer) {
-		return ctrl.Result{Requeue: true}, r.Update(ctx, &cr)
+		return ctrl.Result{RequeueAfter: time.Second}, r.Update(ctx, &cr)
 	}
 	if finished(cr.Status.Phase) {
 		return ctrl.Result{}, release()

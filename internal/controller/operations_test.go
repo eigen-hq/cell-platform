@@ -2010,7 +2010,9 @@ func TestResticGetsStopSignal(t *testing.T) {
 	case err = <-ended:
 	case <-time.After(5 * time.Second):
 		_ = cmd.Process.Kill()
-		<-ended
+		if e := <-ended; e != nil {
+			t.Logf("killed script: %v", e)
+		}
 		_ = exec.Command("pkill", "-f", dir).Run() // the stub left behind
 		t.Fatal("script still runs 5s after the stop request")
 	}

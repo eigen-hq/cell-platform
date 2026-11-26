@@ -231,5 +231,5 @@ type AppList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&App{}, &AppList{})
+	register(&App{}, &AppList{})
 }

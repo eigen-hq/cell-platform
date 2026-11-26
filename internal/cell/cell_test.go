@@ -55,7 +55,7 @@ func TestHTTPClientScopesCellCA(t *testing.T) {
 	if err != nil {
 		t.Fatalf("host in cell domain: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if _, err := hc.Get("https://evil.localhost:" + port + "/"); err == nil {
 		t.Fatal("cell CA was trusted for a host outside the cell domain")
 	}

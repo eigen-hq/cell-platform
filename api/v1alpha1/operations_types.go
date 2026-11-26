@@ -251,5 +251,5 @@ type ChangeRequestList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&Backup{}, &BackupList{}, &Restore{}, &RestoreList{}, &ChangeRequest{}, &ChangeRequestList{})
+	register(&Backup{}, &BackupList{}, &Restore{}, &RestoreList{}, &ChangeRequest{}, &ChangeRequestList{})
 }

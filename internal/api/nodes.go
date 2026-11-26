@@ -251,7 +251,7 @@ func (s *Server) joinScript(w http.ResponseWriter, _ *http.Request, _ *Caller) e
 	cmd := joinCommand(s.Join.APIHost)
 	w.Header().Set("Content-Type", "text/x-shellscript")
 	w.Header().Set("Cache-Control", "no-store")
-	fmt.Fprintf(w, `#!/usr/bin/env bash
+	if _, err := fmt.Fprintf(w, `#!/usr/bin/env bash
 # Joins this machine to the cell (E-44):
 #
 #   %s
@@ -280,7 +280,9 @@ key=${key//[[:space:]]/}
 CELL_JOIN_SERVER=%s
 CELL_JOIN_TOKEN=K10%s::$key
 unset CELL_JOIN_KEY key
-`, cmd, cmd, s.Join.Server, s.Join.CAHash)
+`, cmd, cmd, s.Join.Server, s.Join.CAHash); err != nil {
+		return err
+	}
 	if _, err := w.Write(s.Join.Script); err != nil {
 		return err
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"text/tabwriter"
 
@@ -37,7 +38,7 @@ type result struct {
 func status(ctx context.Context, c client.Client, w io.Writer) int {
 	cfg, err := cell.LoadConfig(ctx, c)
 	if err != nil {
-		fmt.Fprintln(w, "cell not bootstrapped:", err)
+		_, _ = fmt.Fprintln(w, "cell not bootstrapped:", err)
 		return 1
 	}
 	results := []result{checkNodes(ctx, c)}
@@ -58,15 +59,19 @@ func status(ctx context.Context, c client.Client, w io.Writer) int {
 	)
 
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	fmt.Fprintf(tw, "CELL\t%s\t(tls %s, storage %s)\n", cfg.Domain, cfg.TLS, cfg.Storage)
+	// Writes to the tabwriter are buffered; their errors surface in Flush.
+	_, _ = fmt.Fprintf(tw, "CELL\t%s\t(tls %s, storage %s)\n", cfg.Domain, cfg.TLS, cfg.Storage)
 	code := 0
 	for _, r := range results {
-		fmt.Fprintf(tw, "%s\t%s\t%s\n", r.check, r.state, r.detail)
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n", r.check, r.state, r.detail)
 		if r.state == fail {
 			code = 1
 		}
 	}
-	tw.Flush()
+	if err := tw.Flush(); err != nil {
+		fmt.Fprintln(os.Stderr, "write status:", err)
+		return 1
+	}
 	return code
 }
 
@@ -193,7 +198,7 @@ func checkLogin(ctx context.Context, c client.Client, cfg cell.Config) result {
 	if err != nil {
 		return result{"login", fail, err.Error()}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return result{"login", fail, fmt.Sprintf("%s: HTTP %d", url, resp.StatusCode)}
 	}

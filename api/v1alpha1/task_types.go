@@ -74,5 +74,5 @@ type TaskList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&Task{}, &TaskList{})
+	register(&Task{}, &TaskList{})
 }

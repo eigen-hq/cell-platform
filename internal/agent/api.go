@@ -48,7 +48,7 @@ func (c *API) bearer(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("login: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("login: %w", err)
@@ -98,7 +98,7 @@ func (c *API) Do(ctx context.Context, method, path, task string, in any) (int, [
 		// The platform's own API bounds what it answers (logs, events); the
 		// tools cap what reaches the model. A cap here would break lists.
 		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if err != nil {
 			return 0, nil, err
 		}
