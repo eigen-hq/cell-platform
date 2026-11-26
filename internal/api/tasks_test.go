@@ -236,6 +236,9 @@ func TestDiagnosisReads(t *testing.T) {
 	if code, body := h.do("GET", "/v0/apps/notes/logs?tail=10&previous=true", "agent", nil); code != 200 || body != "fake logs" {
 		t.Errorf("logs: %d %v", code, body)
 	}
+	if code, _ := h.do("GET", "/v0/apps/notes/logs", "viewer", nil); code != 403 {
+		t.Errorf("viewer reads logs: %d", code)
+	}
 	for path, want := range map[string]int{
 		"/v0/apps/notes/logs?pod=nope": 404, "/v0/apps/notes/logs?tail=0": 400,
 		"/v0/apps/notes/logs?previous=maybe": 400,

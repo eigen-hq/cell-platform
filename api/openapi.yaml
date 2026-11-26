@@ -18,7 +18,8 @@ info:
 
     Roles come from identity groups: members of `cell-admins` may do
     everything, members of `cell-agents` read everything and propose
-    changes, members of `cell-viewers` read everything. Every other account
+    changes, members of `cell-viewers` read everything except app logs,
+    which can hold anything an app prints. Every other account
     of the identity (people who only use apps) has the role `none`: it may
     ask `GET /v0/whoami` and gets 403 everywhere else.
 
@@ -304,7 +305,7 @@ paths:
     parameters: [{$ref: "#/components/parameters/name"}]
     get:
       operationId: appLogs
-      description: The end of a container's log, at most 512 KiB.
+      description: The end of a container's log, at most 512 KiB. For admins and agents only (403 for viewers).
       parameters:
         - {name: pod, in: query, description: "Default: the app's newest pod.", schema: {type: string}}
         - {name: container, in: query, description: "Default: the pod's first container.", schema: {type: string}}

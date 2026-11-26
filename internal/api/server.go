@@ -130,7 +130,7 @@ func (s *Server) routes() []route {
 		{"POST", "/v0/changes/{name}/reject", RoleAdmin, s.rejectChange},
 		{"GET", "/v0/events", RoleViewer, s.events},
 		{"GET", "/v0/apps/{name}/pods", RoleViewer, s.listPods},
-		{"GET", "/v0/apps/{name}/logs", RoleViewer, s.appLogs},
+		{"GET", "/v0/apps/{name}/logs", RoleAgent, s.appLogs}, // logs hold anything an app prints (E-62)
 		{"GET", "/v0/apps/{name}/events", RoleViewer, s.appEvents},
 		{"GET", "/v0/tasks", RoleViewer, s.listTasks},
 		{"POST", "/v0/tasks", RoleAdmin, s.createTask},

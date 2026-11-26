@@ -119,7 +119,6 @@ What is wanted and tried out happens in the office UI; the platform builds, oper
 | Join keys: the joining machine reads the key without the command line, the key expires on join, the policy bounds its lifetime | open | |
 | Namespaced permissions for operator and API instead of cluster-wide ones | open | |
 | Signed releases: the installer checks the release and its downloads against a signature | open | |
-| Decide whether viewers keep reading app logs (E-46): logs can hold anything an app prints | open | O-28 |
 
 ### Identity
 

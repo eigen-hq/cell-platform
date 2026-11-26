@@ -20,7 +20,7 @@
   type Change = components["schemas"]["ChangeRequest"];
   type Group = components["schemas"]["Group"];
 
-  let { app, onclose, onchange }: { app: App; onclose: () => void; onchange: () => void } = $props();
+  let { app, admin, onclose, onchange }: { app: App; admin: boolean; onclose: () => void; onchange: () => void } = $props();
   let backups = $state<Backup[]>([]);
   let events = $state<AppEvent[]>([]);
   let pending = $state<Change[]>([]);
@@ -223,7 +223,7 @@
 
   <section>
     <h3>What runs <small>pods and their containers</small></h3>
-    {#key app.name}<AppPods app={app.name} />{/key}
+    {#key app.name}<AppPods app={app.name} {admin} />{/key}
   </section>
 
   <section>

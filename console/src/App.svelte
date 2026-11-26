@@ -103,12 +103,12 @@
       {/snippet}
     </TopBar>
     {#if me.role === "viewer"}
-      <p class="readonly" role="status">You can look at everything here. Changes need an admin (cell-admins).</p>
+      <p class="readonly" role="status">You can look at everything here except app logs. Changes need an admin (cell-admins).</p>
     {/if}
     {#if section === "/approvals"}
       <Approvals />
     {:else if section === "/apps"}
-      <Apps open={rest} onnavigate={navigate} />
+      <Apps open={rest} onnavigate={navigate} admin={me.role === "admin"} />
     {:else if section === "/history"}
       <History open={rest} onnavigate={navigate} />
     {:else if section === "/organization"}

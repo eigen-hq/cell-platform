@@ -16,7 +16,7 @@
   type Entry = components["schemas"]["CatalogEntry"];
   type Change = components["schemas"]["ChangeRequest"];
 
-  let { open, onnavigate }: { open?: string; onnavigate: (href: string) => void } = $props();
+  let { open, onnavigate, admin }: { open?: string; onnavigate: (href: string) => void; admin: boolean } = $props();
   let apps = $state<App[] | null>(null);
   let catalog = $state<Entry[]>([]);
   let changes = $state<Change[]>([]);
@@ -143,7 +143,7 @@
   </section>
 
   {#if current}
-    <AppDrawer app={current} onclose={() => onnavigate("/apps")} onchange={load} />
+    <AppDrawer app={current} {admin} onclose={() => onnavigate("/apps")} onchange={load} />
   {/if}
 {/if}
 
