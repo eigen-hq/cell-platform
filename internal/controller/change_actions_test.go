@@ -436,6 +436,15 @@ func TestRestoreChangeEndsWhenUnhealthy(t *testing.T) {
 		if err := k8s.Get(ctx, client.ObjectKey{Name: "restore-sick-restore"}, &rs); err != nil {
 			return err
 		}
+		// The restore has taken the app down; before that, the app's last
+		// health check still reads ready.
+		var a cellv1.App
+		if err := k8s.Get(ctx, client.ObjectKey{Name: "sick"}, &a); err != nil {
+			return err
+		}
+		if rs.Status.Phase != cellv1.RunRunning || !apimeta.IsStatusConditionFalse(a.Status.Conditions, "Ready") {
+			return fmt.Errorf("restore %s, app ready %v", rs.Status.Phase, apimeta.FindStatusCondition(a.Status.Conditions, "Ready"))
+		}
 		rs.Status.Phase, rs.Status.CompletedAt = cellv1.RunCompleted, ptr(metav1.Now())
 		return k8s.Status().Update(ctx, &rs)
 	})
