@@ -1,8 +1,7 @@
 <script lang="ts">
   // What runs inside an app: its pods as rows of containers (a dot per
   // container: ready, waiting or stopped), restarts and the last exit, and
-  // the end of a container's log one click away. Logs only for admins: they
-  // can hold anything an app prints (E-62).
+  // the end of a container's log one click away. Only admins see it (E-63).
   import { api, must } from "../lib/api/client";
   import type { components } from "../lib/api/schema";
   import { newest, STALE } from "../lib/newest";
@@ -12,7 +11,7 @@
 
   type Pod = components["schemas"]["Pod"];
 
-  let { app, admin }: { app: string; admin: boolean } = $props();
+  let { app }: { app: string } = $props();
   let pods = $state<Pod[] | null>(null);
   let failed = $state("");
   let log = $state<{ pod: string; container: string; previous: boolean; text: string } | null>(null);
@@ -74,10 +73,10 @@
                   {#if c.lastExit}<small class="exit">last exit {ago(c.lastExit.at)}: {c.lastExit.reason}, code {c.lastExit.exitCode}</small>{/if}
                   {#if c.message}<small class="exit">{c.message}</small>{/if}
                 </span>
-                {#if admin}<span class="read">
+                <span class="read">
                   <Button kind="quiet" disabled={reading} onclick={() => readLog(p.name, c.name, false)}>Log</Button>
                   {#if c.restarts}<Button kind="quiet" disabled={reading} onclick={() => readLog(p.name, c.name, true)}>Before the restart</Button>{/if}
-                </span>{/if}
+                </span>
               </li>
             {/each}
           </ul>
@@ -87,7 +86,6 @@
   {:else}
     <p class="hint">Nothing runs right now.</p>
   {/if}
-  {#if !admin}<p class="hint">Logs are for admins only: they can hold anything an app prints.</p>{/if}
 {/if}
 {#if logFailed}<p class="fail" role="alert">{logFailed}</p>{/if}
 {#if log}

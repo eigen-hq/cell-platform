@@ -16,7 +16,7 @@
   type Task = components["schemas"]["Task"];
   type Backup = components["schemas"]["Backup"];
 
-  let { open, onnavigate }: { open?: string; onnavigate: (href: string) => void } = $props();
+  let { open, onnavigate, admin }: { open?: string; onnavigate: (href: string) => void; admin: boolean } = $props();
   let changes = $state<Change[] | null>(null);
   let tasks = $state<Task[]>([]);
   let backups = $state<Backup[]>([]);
@@ -26,11 +26,12 @@
 
   async function load() {
     try {
-      const [c, t, a, k] = await Promise.all([api.GET("/v0/changes"), api.GET("/v0/tasks"), api.GET("/v0/apps"), api.GET("/v0/catalog")]);
+      // Tasks can quote logs: only admins read them (E-63).
+      const [c, t, a, k] = await Promise.all([api.GET("/v0/changes"), admin ? api.GET("/v0/tasks") : null, api.GET("/v0/apps"), api.GET("/v0/catalog")]);
       const apps = must(a);
       const b = await Promise.all(apps.map((x) => api.GET("/v0/apps/{name}/backups", { params: { path: { name: x.name } } })));
       changes = must(c);
-      tasks = must(t);
+      tasks = t ? must(t) : [];
       backups = b.flatMap((r) => must(r));
       titles = new Map([...must(k).map((e) => [e.name, e.title] as const), ...apps.map((x) => [x.name, x.title || x.name] as const)]);
       failed = "";
@@ -88,7 +89,7 @@
   }
   let strip = $derived([
     { label: "Changes", days: row((changes ?? []).map((c) => ({ at: c.createdAt, tone: ended(c).tone }))) },
-    { label: "Agent tasks", days: row(tasks.map((t) => ({ at: t.createdAt, tone: t.phase === "Failed" ? "bad" : "info" }))) },
+    ...(admin ? [{ label: "Agent tasks", days: row(tasks.map((t) => ({ at: t.createdAt, tone: t.phase === "Failed" ? "bad" : "info" }))) }] : []),
     { label: "Backups", days: row(backups.map((b) => ({ at: b.createdAt, tone: b.phase === "Failed" ? "bad" : b.phase === "Completed" ? "ok" : "wait" }))) },
   ]);
 

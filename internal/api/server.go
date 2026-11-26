@@ -100,6 +100,9 @@ type route struct {
 	handle       func(w http.ResponseWriter, r *http.Request, c *Caller) error
 }
 
+// Viewers read the state of the cell only (E-63): apps, changes, backups,
+// machines and the backup target. People, tasks, pods, events and logs are
+// for agents and admins; viewerRoutes in the tests pins that list.
 func (s *Server) routes() []route {
 	return []route{
 		{"GET", "/healthz", "", s.healthz},
@@ -118,10 +121,10 @@ func (s *Server) routes() []route {
 		{"POST", "/v0/apps/{name}/restore", RoleAgent, s.restoreApp},
 		{"GET", "/v0/apps/{name}/access", RoleViewer, s.getAccess},
 		{"PUT", "/v0/apps/{name}/access", RoleAgent, s.setAccess},
-		{"GET", "/v0/users", RoleViewer, s.listUsers},
+		{"GET", "/v0/users", RoleAgent, s.listUsers},
 		{"POST", "/v0/users", RoleAdmin, s.createUser},
 		{"POST", "/v0/users/{name}/tokens", RoleAdmin, s.createUserToken},
-		{"GET", "/v0/groups", RoleViewer, s.listGroups},
+		{"GET", "/v0/groups", RoleAgent, s.listGroups},
 		{"POST", "/v0/groups", RoleAdmin, s.createGroup},
 		{"PATCH", "/v0/groups/{name}/members", RoleAdmin, s.changeGroupMembers},
 		{"GET", "/v0/changes", RoleViewer, s.listChanges},
@@ -129,12 +132,12 @@ func (s *Server) routes() []route {
 		{"POST", "/v0/changes/{name}/approve", RoleAdmin, s.approveChange},
 		{"POST", "/v0/changes/{name}/reject", RoleAdmin, s.rejectChange},
 		{"GET", "/v0/events", RoleViewer, s.events},
-		{"GET", "/v0/apps/{name}/pods", RoleViewer, s.listPods},
-		{"GET", "/v0/apps/{name}/logs", RoleAgent, s.appLogs}, // logs hold anything an app prints (E-62)
-		{"GET", "/v0/apps/{name}/events", RoleViewer, s.appEvents},
-		{"GET", "/v0/tasks", RoleViewer, s.listTasks},
+		{"GET", "/v0/apps/{name}/pods", RoleAgent, s.listPods},
+		{"GET", "/v0/apps/{name}/logs", RoleAgent, s.appLogs},
+		{"GET", "/v0/apps/{name}/events", RoleAgent, s.appEvents},
+		{"GET", "/v0/tasks", RoleAgent, s.listTasks},
 		{"POST", "/v0/tasks", RoleAdmin, s.createTask},
-		{"GET", "/v0/tasks/{name}", RoleViewer, s.getTask},
+		{"GET", "/v0/tasks/{name}", RoleAgent, s.getTask},
 		{"POST", "/v0/tasks/{name}/claim", RoleAgent, s.claimTask},
 		{"POST", "/v0/tasks/{name}/finish", RoleAgent, s.finishTask},
 		{"GET", "/v0/nodes", RoleViewer, s.listNodes},

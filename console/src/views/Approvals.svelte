@@ -15,15 +15,17 @@
 
   let changes = $state<Change[] | null>(null);
   let titles = $state<Map<string, string>>(new Map());
+  let { admin }: { admin: boolean } = $props();
   let admins = $state<string[]>([]);
   let failed = $state("");
 
   async function load() {
     try {
-      const [c, a, k, g] = await Promise.all([api.GET("/v0/changes"), api.GET("/v0/apps"), api.GET("/v0/catalog"), api.GET("/v0/groups")]);
+      // Viewers read no groups (E-63): who the admins are stays with them.
+      const [c, a, k, g] = await Promise.all([api.GET("/v0/changes"), api.GET("/v0/apps"), api.GET("/v0/catalog"), admin ? api.GET("/v0/groups") : null]);
       changes = must(c);
       titles = new Map([...must(k).map((e) => [e.name, e.title] as const), ...must(a).map((x) => [x.name, x.title || x.name] as const)]);
-      admins = [...new Set(must(g).find((x: Group) => x.name === "cell-admins")?.members ?? [])];
+      admins = g ? [...new Set(must(g).find((x: Group) => x.name === "cell-admins")?.members ?? [])] : [];
       failed = "";
     } catch (e) {
       failed = e instanceof Error ? e.message : String(e);

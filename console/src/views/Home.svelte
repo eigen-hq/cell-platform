@@ -24,6 +24,8 @@
   type Backup = components["schemas"]["Backup"];
 
   const AGENTS = "cell-agents";
+  // Viewers read the state of the cell only (E-63): no people, no tasks.
+  let { admin }: { admin: boolean } = $props();
   let apps = $state<App[] | null>(null);
   let changes = $state<Change[]>([]);
   let tasks = $state<Task[]>([]);
@@ -40,12 +42,15 @@
       const answer = await guard(
         (async () => {
           const [a, c, t, u, g, k, bt] = await Promise.all([
-            api.GET("/v0/apps"), api.GET("/v0/changes"), api.GET("/v0/tasks"), api.GET("/v0/users"), api.GET("/v0/groups"), api.GET("/v0/catalog"),
+            api.GET("/v0/apps"), api.GET("/v0/changes"), admin ? api.GET("/v0/tasks") : null, admin ? api.GET("/v0/users") : null,
+            admin ? api.GET("/v0/groups") : null, api.GET("/v0/catalog"),
             api.GET("/v0/backup-target"),
           ]);
           const list = must(a);
           const b = await Promise.all(list.map((x) => api.GET("/v0/apps/{name}/backups", { params: { path: { name: x.name } } })));
-          return { list, c: must(c), t: must(t), u: must(u), g: must(g), k: must(k), bt: must(bt), b: b.flatMap((r) => must(r)) };
+          return {
+            list, c: must(c), t: t ? must(t) : [], u: u ? must(u) : [], g: g ? must(g) : [], k: must(k), bt: must(bt), b: b.flatMap((r) => must(r)),
+          };
         })(),
       );
       if (answer === STALE) return;
@@ -118,7 +123,7 @@
       { label: "Apps up", value: `${running} / ${apps.length}`, tone: apps.some(isDown) ? "bad" : running < apps.length ? "wait" : "ok" },
       { label: "Waiting for you", value: String(waiting.length), tone: waiting.length ? "wait" : "ok" },
       { label: "Last backup", value: backup ? `${clock(backup.at)} ${backup.ok ? "ok" : "failed"}` : "none yet", tone: !backup ? "none" : backup.ok ? "ok" : "bad" },
-      { label: "Agents", value: busyTasks.length ? `${busyTasks.length} at work` : "idle", tone: busyTasks.length ? "wait" : "none" },
+      ...(admin ? [{ label: "Agents", value: busyTasks.length ? `${busyTasks.length} at work` : "idle", tone: busyTasks.length ? "wait" : "none" } as Stat] : []),
     ];
   });
   const shades = ["sun", "rose", "lilac"] as const;
@@ -132,20 +137,20 @@
     <div class="words">
       <h1>{top.lines[0]}<br /><span>{top.lines[1]}</span></h1>
       <p>
-        {running} of {apps.length} {apps.length === 1 ? "app is" : "apps are"} running for {people.length} {people.length === 1 ? "person" : "people"}.
+        {running} of {apps.length} {apps.length === 1 ? "app is" : "apps are"} running{#if admin}{" "}for {people.length} {people.length === 1 ? "person" : "people"}{/if}.
         Last backup {backupText(backup)}{backup && !backup.ok ? ", and it failed" : ""}.
       </p>
       <p class="live" class:up={live.up} title={live.why}>{live.up ? "Live" : live.tried ? "Reconnecting to the cell" : "Connecting"}</p>
     </div>
     {#if apps.length}
       <figure class="shelf">
-        <ul aria-label="Apps by how many people can open them">
+        <ul aria-label={admin ? "Apps by how many people can open them" : "Apps"}>
           {#each apps as a, i (a.name)}
             {@const s = appState(a)}
             {@const n = reaches.get(a.name) ?? 0}
             {@const down = isDown(a)}
             <li class:down>
-              <a href={itemPath("/apps", a.name)} aria-label="{title(a.name)}: {s.label}, {n} of {people.length} people can open it">
+              <a href={itemPath("/apps", a.name)} aria-label="{title(a.name)}: {s.label}{admin ? `, ${n} of ${people.length} people can open it` : ''}">
                 <span
                   class="pill {down ? 'lying' : s.tone === 'wait' ? 'busy' : shades[i % 3]}"
                   style:--h={down ? "34px" : `${Math.round(44 + 96 * (n / most))}px`}
@@ -156,7 +161,7 @@
             </li>
           {/each}
         </ul>
-        <figcaption>One shape per app. Taller means more people can open it. <a href="/apps">All apps</a></figcaption>
+        <figcaption>One shape per app.{admin ? " Taller means more people can open it." : ""} <a href="/apps">All apps</a></figcaption>
       </figure>
     {/if}
   </section>
@@ -216,10 +221,12 @@
               <Avatar name={title(a.name)} tile size={30} />
               <span><strong>{title(a.name)}</strong><small>{a.version ? `${a.name} ${a.version}` : a.name}</small></span>
               <Status tone={s.tone} label={s.label} />
-              <span class="reach" title="{n} of {people.length} people can open it">
-                <span class="bar"><span style:width="{people.length ? (100 * n) / people.length : 0}%"></span></span>
-                <small>{n}/{people.length}</small>
-              </span>
+              {#if admin}
+                <span class="reach" title="{n} of {people.length} people can open it">
+                  <span class="bar"><span style:width="{people.length ? (100 * n) / people.length : 0}%"></span></span>
+                  <small>{n}/{people.length}</small>
+                </span>
+              {/if}
             </a>
           </li>
         {/each}
@@ -256,6 +263,7 @@
       {/if}
     </section>
 
+    {#if admin}
     <section aria-labelledby="operators">
       <header>
         <h2 id="operators" class="sec-title">Who works here <small>{Object.keys(agents).length} agents, the rules, {people.length} people</small></h2>
@@ -290,6 +298,7 @@
         </li>
       </ul>
     </section>
+    {/if}
   </div>
 {/if}
 

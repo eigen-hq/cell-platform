@@ -335,7 +335,7 @@ func TestAuthentication(t *testing.T) {
 	if code, _ := h.do("POST", "/v0/apps", "viewer", map[string]any{"catalog": "notes"}); code != 403 {
 		t.Errorf("viewer installs: %d", code)
 	}
-	if code, _ := h.do("GET", "/v0/users", "viewer", nil); code != 200 {
+	if code, _ := h.do("GET", "/v0/users", "viewer", nil); code != 403 {
 		t.Errorf("viewer lists users: %d", code)
 	}
 	// An account in no role group logs in, learns why it sees nothing.
@@ -672,7 +672,8 @@ func TestEventStream(t *testing.T) {
 			if err := schema.VisitJSON(e); err != nil {
 				t.Errorf("event does not match openapi.yaml: %v", err)
 			}
-			if e["kind"] != "App" || e["name"] != "notes" || !slices.Contains([]any{"ADDED", "MODIFIED"}, e["type"]) {
+			// The app's Ready message ("ok") is for admins and agents (E-63).
+			if e["kind"] != "App" || e["name"] != "notes" || !slices.Contains([]any{"ADDED", "MODIFIED"}, e["type"]) || e["message"] != nil {
 				t.Errorf("event %v", e)
 			}
 			return

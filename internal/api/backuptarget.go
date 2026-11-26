@@ -76,10 +76,17 @@ func (q *backupTargetRequest) check() error {
 	return nil
 }
 
-func (s *Server) getBackupTarget(w http.ResponseWriter, r *http.Request, _ *Caller) error {
+func (s *Server) getBackupTarget(w http.ResponseWriter, r *http.Request, c *Caller) error {
 	t, err := s.backupTarget(r.Context())
 	if err != nil {
 		return err
+	}
+	// Viewers see where backups go and whether the check passed (E-63).
+	if forViewer(c) {
+		t.AccessKey = ""
+		if t.Check != nil {
+			t.Check.Message = ""
+		}
 	}
 	writeJSON(w, http.StatusOK, t)
 	return nil

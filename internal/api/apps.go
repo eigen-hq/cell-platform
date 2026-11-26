@@ -172,14 +172,44 @@ func (s *Server) app(ctx context.Context, name string) (*cellv1.App, error) {
 	return &a, nil
 }
 
-func (s *Server) listApps(w http.ResponseWriter, r *http.Request, _ *Caller) error {
+// Viewers see the state of the cell, not what it holds (E-63): a spec and a
+// patch can carry configuration values, an agent's reason quotes logs as its
+// evidence, and status messages can quote either or a container's output.
+// Of the spec they keep how the app is reached; phases and reasons stay.
+func forViewer(c *Caller) bool { return c.Role == RoleViewer }
+
+func viewAppFor(c *Caller, a *cellv1.App) (appView, error) {
+	v, err := viewApp(a)
+	if err != nil || !forViewer(c) {
+		return v, err
+	}
+	for i := range v.Conditions {
+		v.Conditions[i].Message = ""
+	}
+	v.Spec, err = json.Marshal(map[string]any{"access": a.Spec.Access})
+	return v, err
+}
+
+func viewChangeFor(c *Caller, cr *cellv1.ChangeRequest) (changeView, error) {
+	v, err := viewChange(cr)
+	if err != nil || !forViewer(c) {
+		return v, err
+	}
+	v.Patch, v.Message = json.RawMessage("null"), ""
+	if v.Requester.Kind == "Agent" {
+		v.Reason = ""
+	}
+	return v, nil
+}
+
+func (s *Server) listApps(w http.ResponseWriter, r *http.Request, c *Caller) error {
 	var list cellv1.AppList
 	if err := s.Kube.List(r.Context(), &list); err != nil {
 		return err
 	}
 	out := []appView{}
 	for i := range list.Items {
-		v, err := viewApp(&list.Items[i])
+		v, err := viewAppFor(c, &list.Items[i])
 		if err != nil {
 			return err
 		}
@@ -190,12 +220,12 @@ func (s *Server) listApps(w http.ResponseWriter, r *http.Request, _ *Caller) err
 	return nil
 }
 
-func (s *Server) getApp(w http.ResponseWriter, r *http.Request, _ *Caller) error {
+func (s *Server) getApp(w http.ResponseWriter, r *http.Request, c *Caller) error {
 	a, err := s.app(r.Context(), r.PathValue("name"))
 	if err != nil {
 		return err
 	}
-	v, err := viewApp(a)
+	v, err := viewAppFor(c, a)
 	if err != nil {
 		return err
 	}
@@ -558,7 +588,7 @@ func (s *Server) backupsOf(ctx context.Context, app string) ([]backupView, error
 	return out, nil
 }
 
-func (s *Server) listBackups(w http.ResponseWriter, r *http.Request, _ *Caller) error {
+func (s *Server) listBackups(w http.ResponseWriter, r *http.Request, c *Caller) error {
 	app, err := s.app(r.Context(), r.PathValue("name"))
 	if err != nil {
 		return err
@@ -566,6 +596,11 @@ func (s *Server) listBackups(w http.ResponseWriter, r *http.Request, _ *Caller) 
 	out, err := s.backupsOf(r.Context(), app.Name)
 	if err != nil {
 		return err
+	}
+	if forViewer(c) {
+		for i := range out {
+			out[i].Message = ""
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
 	return nil
@@ -657,7 +692,7 @@ func viewChange(cr *cellv1.ChangeRequest) (changeView, error) {
 	return v, nil
 }
 
-func (s *Server) listChanges(w http.ResponseWriter, r *http.Request, _ *Caller) error {
+func (s *Server) listChanges(w http.ResponseWriter, r *http.Request, c *Caller) error {
 	var list cellv1.ChangeRequestList
 	if err := s.Kube.List(r.Context(), &list); err != nil {
 		return err
@@ -668,7 +703,7 @@ func (s *Server) listChanges(w http.ResponseWriter, r *http.Request, _ *Caller) 
 		if app != "" && list.Items[i].Spec.App != app {
 			continue
 		}
-		v, err := viewChange(&list.Items[i])
+		v, err := viewChangeFor(c, &list.Items[i])
 		if err != nil {
 			return err
 		}
@@ -690,12 +725,12 @@ func (s *Server) change(ctx context.Context, name string) (*cellv1.ChangeRequest
 	return &cr, nil
 }
 
-func (s *Server) getChange(w http.ResponseWriter, r *http.Request, _ *Caller) error {
+func (s *Server) getChange(w http.ResponseWriter, r *http.Request, c *Caller) error {
 	cr, err := s.change(r.Context(), r.PathValue("name"))
 	if err != nil {
 		return err
 	}
-	v, err := viewChange(cr)
+	v, err := viewChangeFor(c, cr)
 	if err != nil {
 		return err
 	}

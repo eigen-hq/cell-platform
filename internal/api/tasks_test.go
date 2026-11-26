@@ -108,14 +108,12 @@ func TestAgentsWorkInTasks(t *testing.T) {
 		t.Errorf("parallel calls: %v, %d steps", codes, n)
 	}
 
-	// Tasks hold what agents read (logs in results): for viewers, not for
-	// accounts without a role.
+	// Tasks hold what agents read (logs in results): for admins and agents only.
 	for _, path := range []string{"/v0/tasks", "/v0/tasks/notes-diagnose-1"} {
-		if code, _ := h.do("GET", path, "none", nil); code != 403 {
-			t.Errorf("no role reads %s: %d", path, code)
-		}
-		if code, _ := h.do("GET", path, "viewer", nil); code != 200 {
-			t.Errorf("viewer reads %s: %d", path, code)
+		for _, role := range []string{"none", "viewer"} {
+			if code, _ := h.do("GET", path, role, nil); code != 403 {
+				t.Errorf("%s reads %s: %d", role, path, code)
+			}
 		}
 	}
 	_, body = h.do("GET", "/v0/tasks/notes-diagnose-1", "admin", nil)
@@ -235,9 +233,6 @@ func TestDiagnosisReads(t *testing.T) {
 	// The fake clientset answers every log request with "fake logs".
 	if code, body := h.do("GET", "/v0/apps/notes/logs?tail=10&previous=true", "agent", nil); code != 200 || body != "fake logs" {
 		t.Errorf("logs: %d %v", code, body)
-	}
-	if code, _ := h.do("GET", "/v0/apps/notes/logs", "viewer", nil); code != 403 {
-		t.Errorf("viewer reads logs: %d", code)
 	}
 	for path, want := range map[string]int{
 		"/v0/apps/notes/logs?pod=nope": 404, "/v0/apps/notes/logs?tail=0": 400,

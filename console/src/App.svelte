@@ -30,6 +30,8 @@
     { href: "/agents", label: "Agents" },
     { href: "/history", label: "History" },
   ];
+  // Viewers read the state of the cell only (E-63): no people, no agents.
+  const viewerViews = views.filter((v) => v.href !== "/organization" && v.href !== "/agents");
 
   let screen = $state<{ kind: "loading" } | { kind: "error"; message: string } | { kind: "refused"; me: Caller } | { kind: "ready"; me: Caller }>({ kind: "loading" });
   let path = $state(location.pathname);
@@ -87,8 +89,9 @@
   </Notice>
 {:else}
   {@const me = screen.me}
+  {@const admin = me.role === "admin"}
   <div class="page">
-    <TopBar title="Console" subtitle={cell} items={views} current={section} onnavigate={navigate}>
+    <TopBar title="Console" subtitle={cell} items={admin ? views : viewerViews} current={section} onnavigate={navigate}>
       {#snippet tools()}
         <IconButton label={tone.current === "night" ? "Paper tone" : "Night tone"} onclick={() => tone.toggle()}>
           {#if tone.current === "night"}
@@ -102,25 +105,25 @@
         </button>
       {/snippet}
     </TopBar>
-    {#if me.role === "viewer"}
-      <p class="readonly" role="status">You can look at everything here except app logs. Changes need an admin (cell-admins).</p>
+    {#if !admin}
+      <p class="readonly" role="status">You see the state of the cell: apps, changes, backups and machines. People, agents and what runs inside the apps are for admins (cell-admins), as are all changes.</p>
     {/if}
     {#if section === "/approvals"}
-      <Approvals />
+      <Approvals {admin} />
     {:else if section === "/apps"}
-      <Apps open={rest} onnavigate={navigate} admin={me.role === "admin"} />
+      <Apps open={rest} onnavigate={navigate} {admin} />
     {:else if section === "/history"}
-      <History open={rest} onnavigate={navigate} />
-    {:else if section === "/organization"}
+      <History open={rest} onnavigate={navigate} {admin} />
+    {:else if section === "/organization" && admin}
       <Organization open={rest} onnavigate={navigate} />
-    {:else if section === "/agents"}
+    {:else if section === "/agents" && admin}
       <Agents open={rest} onnavigate={navigate} />
     {:else if section === "/machines"}
       <Machines {cell} />
     {:else if section === "/backups"}
-      <Backups admin={me.role === "admin"} />
+      <Backups {admin} />
     {:else}
-      <Home />
+      <Home {admin} />
     {/if}
   </div>
 {/if}

@@ -49,7 +49,7 @@ func toEvent(e watch.Event) (event, bool) {
 
 // events streams changes of apps, changes, backups and restores as
 // server-sent events until the client goes away.
-func (s *Server) events(w http.ResponseWriter, r *http.Request, _ *Caller) error {
+func (s *Server) events(w http.ResponseWriter, r *http.Request, c *Caller) error {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		return fmt.Errorf("streaming not supported")
@@ -74,6 +74,9 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request, _ *Caller) error
 						return
 					}
 					if ev, ok := toEvent(e); ok {
+						if forViewer(c) {
+							ev.Message = "" // see forViewer
+						}
 						select {
 						case out <- ev:
 						case <-ctx.Done():

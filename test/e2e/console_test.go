@@ -28,6 +28,7 @@ func TestConsoleLogin(t *testing.T) {
 	const password = "console-e2e-Pa55word"
 	admin.account(t, "e2e-console-admin", password, "cell-admins")
 	admin.account(t, "e2e-console-member", password)
+	admin.account(t, "e2e-console-viewer", password, "cell-viewers")
 
 	// The page and its policy.
 	resp, err := tc.akHTTP.Get(origin + "/")
@@ -118,7 +119,8 @@ func TestConsoleLogin(t *testing.T) {
 		}
 		cmd := exec.Command("npx", "playwright", "test")
 		cmd.Dir = filepath.Join(repoRoot(), "console")
-		cmd.Env = append(os.Environ(), "CONSOLE_URL="+origin, "CONSOLE_ADMIN_USER=e2e-console-admin", "CONSOLE_ADMIN_PASSWORD="+password)
+		cmd.Env = append(os.Environ(), "CONSOLE_URL="+origin, "CONSOLE_ADMIN_USER=e2e-console-admin", "CONSOLE_ADMIN_PASSWORD="+password,
+			"CONSOLE_VIEWER_USER=e2e-console-viewer")
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("playwright: %v\n%s", err, out)

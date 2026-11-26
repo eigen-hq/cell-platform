@@ -34,13 +34,14 @@
   async function load(name: string) {
     const answer = await guard(Promise.all([
       api.GET("/v0/apps/{name}/backups", { params: { path: { name } } }),
-      api.GET("/v0/apps/{name}/events", { params: { path: { name } } }),
+      // Events and pods show what runs inside: for admins only (E-63).
+      admin ? api.GET("/v0/apps/{name}/events", { params: { path: { name } } }) : null,
       api.GET("/v0/changes", { params: { query: { app: name } } }),
     ]));
     if (answer === STALE) return;
     const [b, e, c] = answer;
     backups = must(b);
-    events = must(e);
+    events = e ? must(e) : [];
     pending = must(c).filter(open);
   }
 
@@ -221,9 +222,10 @@
     <div class="row"><Button kind="quiet" onclick={backupNow}>Back up now</Button></div>
   </section>
 
+  {#if admin}
   <section>
     <h3>What runs <small>pods and their containers</small></h3>
-    {#key app.name}<AppPods app={app.name} {admin} />{/key}
+    {#key app.name}<AppPods app={app.name} />{/key}
   </section>
 
   <section>
@@ -238,6 +240,11 @@
       <p class="hint">Nothing happened lately.</p>
     {/if}
   </section>
+  {:else}
+  <section>
+    <p class="hint">Pods, events and logs are for admins: they can hold anything the app prints.</p>
+  </section>
+  {/if}
 
   <section class="actions">
     {#if !trouble.length}<Button kind="quiet" onclick={diagnose}>Let Ops diagnose it</Button>{/if}
