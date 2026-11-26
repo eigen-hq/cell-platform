@@ -563,6 +563,11 @@ spec:
                 - NeedsAttention
                 - Removing
                 type: string
+              restartChecked:
+                description: |-
+                  RestartChecked is the UID of the running restart change whose new
+                  pods passed a health check after they rolled out.
+                type: string
               url:
                 type: string
               version:

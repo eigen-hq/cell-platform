@@ -111,8 +111,8 @@ What is wanted and tried out happens in the office UI; the platform builds, oper
 | Pin third-party images by digest | running (`deploy/images.lock`, E-76) | |
 | Short-lived tokens for the tool gateway | built (E-74) | |
 | Do not count the wait for the login proxy against the deadline of the app | built (E-75) | |
-| Restart of an app as an API action | open | |
-| Console: hide actions for viewers | open | |
+| Restart of an app as an API action | running | E-73 |
+| Console: hide actions for viewers | running | E-72 |
 | Encrypt database backups and their WAL in the cell before they leave it (today only volume backups are encrypted with the backup key) | open | |
 | Backup targets over HTTPS only, plain HTTP only for a private network on purpose | open | |
 | A target set again by the installer goes through the operator's checked switch under the gateway lock | open | |

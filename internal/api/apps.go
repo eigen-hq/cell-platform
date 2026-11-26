@@ -507,6 +507,25 @@ func (s *Server) restoreApp(w http.ResponseWriter, r *http.Request, c *Caller) e
 	return s.record(r.Context(), c, w, cellv1.ChangeRequestSpec{App: app.Name, Action: "restore", Reason: req.Reason, Risk: "high", Backup: req.Backup})
 }
 
+// restartApp rolls out new pods of the app as a change: spec and data stay,
+// so the change takes no backup and has nothing to roll back.
+func (s *Server) restartApp(w http.ResponseWriter, r *http.Request, c *Caller) error {
+	app, err := s.app(r.Context(), r.PathValue("name"))
+	if err != nil {
+		return err
+	}
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		return err
+	}
+	if req.Reason == "" {
+		req.Reason = "restart " + app.Name
+	}
+	return s.record(r.Context(), c, w, cellv1.ChangeRequestSpec{App: app.Name, Action: "restart", Reason: req.Reason, Risk: "low"})
+}
+
 type accessView struct {
 	Groups []string `json:"groups"`
 	Reason string   `json:"reason,omitempty"`

@@ -70,7 +70,7 @@
     <section class="waiting">
       <h2 class="sec-title">Waiting <small>newest first</small></h2>
       {#each waiting as c (c.name)}
-        <Slip change={c} title={title(c.app)} ondecided={load} />
+        <Slip change={c} title={title(c.app)} {admin} ondecided={load} />
       {:else}
         <div class="calm">
           <svg viewBox="0 0 120 80" aria-hidden="true">
@@ -93,6 +93,7 @@
 
       <h2 class="sec-title">What needs a yes</h2>
       <ul class="rules">
+        <li><strong>Restarting an app</strong><span class="l1"><Risk level="low" /></span><span class="who">Admin</span></li>
         <li><strong>Who can open an app</strong><span class="l1"><Risk level="low" /></span><span class="who">Admin</span></li>
         <li><strong>A new version</strong><span class="l2"><Risk level="medium" /></span><span class="who">Admin</span></li>
         <li><strong>Installing, restoring, removing, other settings</strong><span class="l3"><Risk level="high" /></span><span class="who">Admin</span></li>

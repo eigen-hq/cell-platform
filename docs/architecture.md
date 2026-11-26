@@ -143,6 +143,7 @@ REST with an OpenAPI description (`api/openapi.yaml`), login through tokens of t
 |---|---|
 | `/catalog` | Available apps |
 | `/apps` | Install, status, update, remove |
+| `/apps/{name}/restart` | New pods, spec and data unchanged (E-73) |
 | `/apps/{name}/backups`, `/apps/{name}/restore` | Backups |
 | `/backup-target` | Backup target of the cell: read, set after a probe (E-60) |
 | `/apps/{name}/access` | Who may use the app |

@@ -583,6 +583,8 @@ func TestChangeActionValidation(t *testing.T) {
 		"restore-latest":         {Action: "restore", Backup: "latest"},
 		"update-with-backup":     {Patch: rawJSON(t, map[string]string{"version": "2"}), Backup: "b"},
 		"install-deletes-data":   {Action: "install", Patch: rawJSON(t, plainSpec("x")), DeleteData: true},
+		"restart-with-patch":     {Action: "restart", Patch: rawJSON(t, map[string]string{"version": "2"})},
+		"restart-with-backup":    {Action: "restart", Backup: "b"},
 	} {
 		spec.App, spec.Requester = "x", cellv1.Requester{Kind: "Human", Name: "alice"}
 		err := k8s.Create(ctx, &cellv1.ChangeRequest{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: spec})
@@ -609,4 +611,140 @@ func TestChangeActionValidation(t *testing.T) {
 	if !apierrors.IsInvalid(err) {
 		t.Errorf("action changed: %v", err)
 	}
+}
+
+// A restart is a change without backup or rollback: every Deployment and
+// StatefulSet of the app gets a new restartedAt in its pod template, and
+// the change ends once all of them rolled out and the app is healthy. One
+// that does not roll out in time fails the change.
+func TestRestartChange(t *testing.T) {
+	ctx := context.Background()
+	app := readyDataApp(t, "spin")
+	defer removeApp(t, app)
+	labels := map[string]string{"app": "spin-cache"}
+	sts := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "app-spin", Name: "spin-cache"},
+		Spec: appsv1.StatefulSetSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: labels},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "cache", Image: "example/cache"}}},
+			},
+		},
+	}
+	if err := k8s.Create(ctx, sts); err != nil {
+		t.Fatal(err)
+	}
+	// Plays the StatefulSet controller: every pod on the newest template.
+	rollStatefulSet := func() {
+		t.Helper()
+		eventually(t, func() error {
+			if err := k8s.Get(ctx, client.ObjectKeyFromObject(sts), sts); err != nil {
+				return err
+			}
+			rev := fmt.Sprint("r", sts.Generation)
+			sts.Status = appsv1.StatefulSetStatus{ObservedGeneration: sts.Generation, Replicas: 1, ReadyReplicas: 1, UpdatedReplicas: 1,
+				AvailableReplicas: 1, CurrentRevision: rev, UpdateRevision: rev}
+			return k8s.Status().Update(ctx, sts)
+		})
+	}
+	rollStatefulSet()
+	mark := func(obj client.Object, template *corev1.PodTemplateSpec, not string) string {
+		t.Helper()
+		var at string
+		eventually(t, func() error {
+			if err := k8s.Get(ctx, client.ObjectKeyFromObject(obj), obj); err != nil {
+				return err
+			}
+			if at = template.Annotations[restartedAt]; at == "" || at == not {
+				return fmt.Errorf("%s not restarted", obj.GetName())
+			}
+			return nil
+		})
+		return at
+	}
+
+	approvedChange(t, "restart-spin", cellv1.ChangeRequestSpec{App: "spin", Action: "restart", Reason: "hangs", Risk: "low"})
+	d := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: "app-spin", Name: "spin"}}
+	first := mark(d, &d.Spec.Template, "")
+	gen := d.Generation
+	if mark(sts, &sts.Spec.Template, "") != first {
+		t.Errorf("workloads restarted with different marks")
+	}
+	// The new pods are not there yet: the change waits for them.
+	running := changePhase(t, "restart-spin", cellv1.RunRunning)
+	if running.Status.Backup != "none" || running.Status.AppliedAt == nil {
+		t.Errorf("restart record %+v", running.Status)
+	}
+	time.Sleep(2 * time.Second)
+	changePhase(t, "restart-spin", cellv1.RunRunning)
+	kubelet(t, "app-spin", "spin")
+	rollStatefulSet()
+	done := changePhase(t, "restart-spin", cellv1.RunSucceeded)
+	if !strings.Contains(done.Status.Message, "restarted") || done.Status.AppliedGeneration != 0 || done.Status.PreviousSpec != nil {
+		t.Errorf("change log %+v", done.Status)
+	}
+	if err := k8s.Get(ctx, client.ObjectKey{Name: "restart-spin-pre"}, &cellv1.Backup{}); !apierrors.IsNotFound(err) {
+		t.Errorf("restart backed up: %v", err)
+	}
+	// The operator applied the app again to see it healthy; the mark
+	// stayed, so the template never changed once more.
+	if got := mark(d, &d.Spec.Template, ""); got != first || d.Generation != gen {
+		t.Errorf("restartedAt %q at generation %d, want %q at %d", got, d.Generation, first, gen)
+	}
+	eventually(t, func() error {
+		var a cellv1.App
+		_ = k8s.Get(ctx, client.ObjectKey{Name: "spin"}, &a)
+		if h := a.Annotations[lockKey]; h != "" {
+			return fmt.Errorf("still held by %s", h)
+		}
+		return nil
+	})
+
+	// A second restart: the Deployment's new pods come up and pass the health
+	// check, then the app breaks before the StatefulSet's pods are there. The
+	// Ready condition from before they rolled out does not count, so the
+	// change fails, with nothing to undo.
+	ready := func(want metav1.ConditionStatus) {
+		t.Helper()
+		eventually(t, func() error {
+			var a cellv1.App
+			if err := k8s.Get(ctx, client.ObjectKey{Name: "spin"}, &a); err != nil {
+				return err
+			}
+			if c := apimeta.FindStatusCondition(a.Status.Conditions, condReady); c == nil || c.Status != want {
+				return fmt.Errorf("ready %+v, want %s", c, want)
+			}
+			return nil
+		})
+	}
+	approvedChange(t, "restart-spin-again", cellv1.ChangeRequestSpec{App: "spin", Action: "restart"})
+	mark(d, &d.Spec.Template, first)
+	mark(sts, &sts.Spec.Template, first)
+	ready(metav1.ConditionFalse) // the Deployment rolls out
+	kubelet(t, "app-spin", "spin")
+	ready(metav1.ConditionTrue)
+	healthy.Store("spin", false)
+	defer healthy.Store("spin", true)
+	rollStatefulSet()
+	eventually(t, func() error {
+		var cr cellv1.ChangeRequest
+		if err := k8s.Get(ctx, client.ObjectKey{Name: "restart-spin-again"}, &cr); err != nil {
+			return err
+		}
+		if cr.Status.RolledOutAt == nil {
+			return fmt.Errorf("not rolled out: %+v", cr.Status)
+		}
+		return nil
+	})
+	ready(metav1.ConditionFalse)
+	time.Sleep(2 * time.Second)
+	changePhase(t, "restart-spin-again", cellv1.RunRunning)
+	skew.Store(int64(2 * time.Minute)) // past the app's health timeout
+	defer skew.Store(0)
+	failed := changePhase(t, "restart-spin-again", cellv1.RunFailed)
+	if !strings.Contains(failed.Status.Message, "health check") || !strings.Contains(failed.Status.Message, "nothing to roll back") {
+		t.Errorf("change log %q", failed.Status.Message)
+	}
+	skew.Store(0)
 }

@@ -4,10 +4,12 @@ info:
   version: 0.1.0
   description: |
     The only door into a cell for the UI, the CLI and agents. Everything
-    that changes an app (install, update, access, restore, remove) becomes
-    a change request; the list of them is the change log. A change waits
-    until an admin approves it in a call of its own, then runs as backup,
-    change, health check and, if the app does not become healthy, rollback.
+    that changes an app (install, update, access, restore, restart, remove)
+    becomes a change request; the list of them is the change log. A change
+    waits until an admin approves it in a call of its own, then runs as
+    backup, change, health check and, if the app does not become healthy,
+    rollback. A restart keeps spec and data, so it has no backup and no
+    rollback.
 
     Authentication: a bearer token from the cell's identity. Get one at
     `https://auth.<cell domain>/application/o/token/` with
@@ -196,6 +198,24 @@ paths:
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: "#/components/schemas/RestoreRequest"}}}
+      responses:
+        default: {$ref: "#/components/responses/Error"}
+        "202": {$ref: "#/components/responses/Change"}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+  /v0/apps/{name}/restart:
+    parameters: [{$ref: "#/components/parameters/name"}]
+    post:
+      operationId: restartApp
+      description: >-
+        Proposes to roll out new pods of every workload of the app. Spec and
+        data stay as they are, so the change takes no backup and has nothing
+        to roll back; pods that do not become healthy in time fail it.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/RestartRequest"}}}
       responses:
         default: {$ref: "#/components/responses/Error"}
         "202": {$ref: "#/components/responses/Change"}
@@ -654,6 +674,11 @@ components:
       properties:
         backup: {type: string, description: "Backup name; default: the newest completed backup of the app in this cell."}
         reason: {type: string}
+    RestartRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason: {type: string}
     Access:
       type: object
       additionalProperties: false
@@ -668,7 +693,7 @@ components:
       properties:
         name: {type: string}
         app: {type: string}
-        action: {type: string, enum: [install, update, remove, restore]}
+        action: {type: string, enum: [install, update, remove, restore, restart]}
         requester:
           type: object
           additionalProperties: false

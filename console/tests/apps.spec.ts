@@ -27,7 +27,10 @@ test("the admin sees the apps, the catalog and one app in the drawer", async ({ 
     await expect(drawer.getByLabel("New version")).toHaveCount(0);
     await drawer.getByRole("button", { name: "Log", exact: true }).first().click();
     await expect(drawer.getByText(/the last 300 lines/)).toBeVisible();
-    // Removing asks first.
+    // Restarting and removing ask first.
+    await drawer.getByRole("button", { name: "Restart", exact: true }).click();
+    await expect(drawer.getByRole("button", { name: "Yes, restart" })).toBeVisible();
+    await drawer.getByRole("button", { name: "Cancel" }).click();
     await drawer.getByRole("button", { name: "Remove and delete the data" }).click();
     await expect(drawer.getByRole("button", { name: "Yes, remove and delete the data" })).toBeVisible();
     await drawer.getByRole("button", { name: "Cancel" }).click();
