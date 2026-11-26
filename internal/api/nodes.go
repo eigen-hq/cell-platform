@@ -189,8 +189,8 @@ func number(v any) int64 {
 	return 0
 }
 
-// createJoin makes a join key, valid for an hour, and the command that joins
-// a machine with it.
+// createJoin makes a join key, valid for an hour (policy cell-api-join-keys
+// allows no longer), and the command that joins a machine with it.
 func (s *Server) createJoin(w http.ResponseWriter, r *http.Request, c *Caller) error {
 	if s.Join == nil {
 		return errorf(http.StatusConflict, "this cell takes no more machines (it runs on one machine only)")
@@ -210,8 +210,10 @@ func (s *Server) createJoin(w http.ResponseWriter, r *http.Request, c *Caller) e
 		return err
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
-		// The key goes to the shell, not into the URL: URLs end up in logs.
-		"command":   fmt.Sprintf("curl -fsSL https://%s/v0/nodes/join.sh | sudo CELL_JOIN_KEY=%s.%s bash", s.Join.APIHost, id, secret),
+		// The key is pasted when the script asks for it: it stays out of
+		// URLs (logs) and off the command line (shell history, ps), E-64.
+		"command":   fmt.Sprintf("curl -fsSL https://%s/v0/nodes/join.sh | sudo bash", s.Join.APIHost),
+		"key":       id + "." + secret,
 		"expiresAt": expires,
 	})
 	return nil
@@ -219,8 +221,10 @@ func (s *Server) createJoin(w http.ResponseWriter, r *http.Request, c *Caller) e
 
 // joinScript is the script the join command runs on the new machine. It
 // needs no login and holds nothing secret (the server's address and the CA's
-// hash); the join key comes with the command (CELL_JOIN_KEY), and k3s on the
-// server checks it when the machine joins.
+// hash). It asks for the join key on the terminal (or takes CELL_JOIN_KEY,
+// for a run without one), and k3s on the server checks the key when the
+// machine joins. node.sh labels the machine with the key's id; the operator
+// then deletes the key (E-64).
 func (s *Server) joinScript(w http.ResponseWriter, _ *http.Request, _ *Caller) error {
 	if s.Join == nil {
 		return errorf(http.StatusConflict, "this cell takes no more machines (it runs on one machine only)")
@@ -228,11 +232,24 @@ func (s *Server) joinScript(w http.ResponseWriter, _ *http.Request, _ *Caller) e
 	w.Header().Set("Content-Type", "text/x-shellscript")
 	w.Header().Set("Cache-Control", "no-store")
 	fmt.Fprintf(w, `#!/usr/bin/env bash
-# Joins this machine to the cell (E-44). The join key comes from the command.
-[[ ${CELL_JOIN_KEY:-} =~ ^[a-z0-9]{6}\.[a-z0-9]{16}$ ]] || { echo "error: run the command from the console (CELL_JOIN_KEY)" >&2; exit 1; }
+# Joins this machine to the cell (E-44). It asks for the join key from the
+# console on the terminal: the key stays off the command line (E-64).
+key=${CELL_JOIN_KEY:-}
+if [ -z "$key" ]; then
+  if ! { exec 3<>/dev/tty; } 2>/dev/null; then
+    echo "error: no terminal to ask for the join key on: run the command in a terminal (or set CELL_JOIN_KEY)" >&2
+    exit 1
+  fi
+  printf 'Join key (from the console): ' >&3
+  IFS= read -rs key <&3 || { echo "error: no join key" >&2; exit 1; }
+  printf '\n' >&3
+  exec 3>&-
+fi
+key=${key//[[:space:]]/}
+[[ $key =~ ^[a-z0-9]{6}\.[a-z0-9]{16}$ ]] || { echo "error: that is not a join key from the console" >&2; exit 1; }
 CELL_JOIN_SERVER=%s
-CELL_JOIN_TOKEN=K10%s::$CELL_JOIN_KEY
-export CELL_JOIN_SERVER CELL_JOIN_TOKEN
+CELL_JOIN_TOKEN=K10%s::$key
+unset CELL_JOIN_KEY key
 `, s.Join.Server, s.Join.CAHash)
 	_, err := w.Write(s.Join.Script)
 	return err

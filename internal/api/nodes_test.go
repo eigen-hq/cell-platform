@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"regexp"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -72,8 +74,9 @@ func TestJoin(t *testing.T) {
 	}
 
 	code, body := h.do("POST", "/v0/nodes/joins", "admin", nil)
-	m := regexp.MustCompile(`^curl -fsSL https://api\.x/v0/nodes/join\.sh \| sudo CELL_JOIN_KEY=([a-z0-9]{6})\.([a-z0-9]{16}) bash$`).FindStringSubmatch(field(body, "command").(string))
-	if code != 201 || m == nil || field(body, "expiresAt") != "2026-11-19T13:00:00Z" {
+	m := regexp.MustCompile(`^([a-z0-9]{6})\.([a-z0-9]{16})$`).FindStringSubmatch(field(body, "key").(string))
+	if code != 201 || m == nil || field(body, "command") != "curl -fsSL https://api.x/v0/nodes/join.sh | sudo bash" ||
+		field(body, "expiresAt") != "2026-11-19T13:00:00Z" {
 		t.Fatalf("join: %d %v", code, body)
 	}
 	var s corev1.Secret
@@ -92,8 +95,36 @@ func TestJoin(t *testing.T) {
 	code, body = h.do("GET", "/v0/nodes/join.sh", "", nil)
 	script, _ := body.(string)
 	if code != 200 || !strings.HasPrefix(script, "#!/usr/bin/env bash\n") || !strings.Contains(script, "\nCELL_JOIN_SERVER=203.0.113.1\n") ||
-		!strings.Contains(script, "\nCELL_JOIN_TOKEN=K10ab12::$CELL_JOIN_KEY\n") || !strings.HasSuffix(script, "K3S_VERSION=v1\nsay hi\n") ||
+		!strings.Contains(script, "\nCELL_JOIN_TOKEN=K10ab12::$key\n") || !strings.HasSuffix(script, "K3S_VERSION=v1\nsay hi\n") ||
 		strings.Contains(script, m[2]) {
 		t.Errorf("script: %d %q", code, script)
+	}
+}
+
+// The join script takes the key from the terminal, or from CELL_JOIN_KEY
+// for a run without one, and fails loud with neither (E-64).
+func TestJoinScriptKey(t *testing.T) {
+	h := newHarness(t)
+	h.server.Join = &Join{Server: "203.0.113.1", APIHost: "api.x", CAHash: "ab12",
+		Script: []byte(`printf '%s|%s|%s' "$CELL_JOIN_SERVER" "$CELL_JOIN_TOKEN" "${CELL_JOIN_KEY-unset}"` + "\n")}
+	_, body := h.do("GET", "/v0/nodes/join.sh", "", nil)
+	script, _ := body.(string)
+	run := func(env ...string) (string, error) {
+		cmd := exec.Command("bash", "-c", script)
+		cmd.Env = env
+		// Without a controlling terminal: /dev/tty cannot be opened.
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+	out, err := run("CELL_JOIN_KEY= abc123.xxxxxxxxxxxxxxxx\r\n")
+	if err != nil || out != "203.0.113.1|K10ab12::abc123.xxxxxxxxxxxxxxxx|unset" {
+		t.Errorf("key from the environment: %v %q", err, out)
+	}
+	if out, err := run(); err == nil || !strings.Contains(out, "no terminal to ask for the join key") {
+		t.Errorf("no terminal and no key: %v %q", err, out)
+	}
+	if out, err := run("CELL_JOIN_KEY=abc123.xxxxxxxxxxxxxxxX"); err == nil || !strings.Contains(out, "not a join key") {
+		t.Errorf("malformed key: %v %q", err, out)
 	}
 }

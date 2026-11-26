@@ -116,7 +116,7 @@ What is wanted and tried out happens in the office UI; the platform builds, oper
 | Encrypt database backups and their WAL in the cell before they leave it (today only volume backups are encrypted with the backup key) | open | |
 | Backup targets over HTTPS only, plain HTTP only for a private network on purpose | open | |
 | A target set again by the installer goes through the operator's checked switch under the gateway lock | open | |
-| Join keys: the joining machine reads the key without the command line, the key expires on join, the policy bounds its lifetime | open | |
+| Join keys: the joining machine reads the key without the command line, the key expires on join, the policy bounds its lifetime | running, not yet verified on a real cell (E-64) | |
 | Namespaced permissions for operator and API instead of cluster-wide ones | open | |
 | Signed releases: the installer checks the release and its downloads against a signature | open | |
 

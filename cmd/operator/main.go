@@ -104,6 +104,9 @@ func run() error {
 	if err := (&controller.GatewayReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
 		return err
 	}
+	if err := (&controller.JoinKeyReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader()}).SetupWithManager(mgr); err != nil {
+		return err
+	}
 	rclone := os.Getenv("RCLONE_IMAGE")
 	if rclone == "" {
 		return fmt.Errorf("RCLONE_IMAGE is not set")

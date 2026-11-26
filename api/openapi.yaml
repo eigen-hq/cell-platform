@@ -476,8 +476,10 @@ paths:
       description: |
         A join key for one more machine, valid for an hour, and the command
         that joins a machine with it. Run the command as root on the new
-        machine (Ubuntu LTS); it loads everything from the cell, and the
-        machine shows up in `GET /v0/nodes`. The machine must reach the
+        machine (Ubuntu LTS) and paste the key when it asks; it loads
+        everything from the cell, and the machine shows up in
+        `GET /v0/nodes`. The key works for one machine: the cell deletes it
+        once that machine has joined. The machine must reach the
         cell's server, and the server it. 409: the cell takes no more
         machines (a local cell).
       responses:
@@ -492,8 +494,9 @@ paths:
       security: []
       description: |
         The script the join command runs on the new machine. No login: it
-        holds nothing secret. The join key comes with the command
-        (`CELL_JOIN_KEY`), never in a URL, and the cell checks it when the
+        holds nothing secret. It asks for the join key on the terminal
+        (`CELL_JOIN_KEY` instead, for a run without one), so the key is never
+        in a URL or on the command line, and the cell checks it when the
         machine joins.
       responses:
         default: {$ref: "#/components/responses/Error"}
@@ -885,9 +888,10 @@ components:
     Join:
       type: object
       additionalProperties: false
-      required: [command, expiresAt]
+      required: [command, key, expiresAt]
       properties:
-        command: {type: string, description: Run as root on the new machine.}
+        command: {type: string, description: Run as root on the new machine; it holds no key.}
+        key: {type: string, pattern: "^[a-z0-9]{6}\\.[a-z0-9]{16}$", description: "The join key: paste it when the command asks. Works for one machine."}
         expiresAt: {type: string, format: date-time}
     BackupTarget:
       type: object

@@ -179,8 +179,10 @@
       </div>
       {#if join}
         <h3>Add a machine</h3>
-        <p>Run this as root on an Ubuntu machine that can reach {short(server.name)}. It joins, links up and shows up above. Works until {until(join.expiresAt)}.</p>
+        <p>Run this as root on an Ubuntu machine that can reach {short(server.name)}. It joins, links up and shows up above.</p>
         <CommandBox command={join.command} />
+        <p>Paste this join key when the command asks for it. It works for this one machine, until {until(join.expiresAt)}.</p>
+        <CommandBox command={join.key} label="the join key" />
         <Button kind="quiet" onclick={() => (join = null)}>Done</Button>
       {:else}
         <strong class="big">+1</strong>

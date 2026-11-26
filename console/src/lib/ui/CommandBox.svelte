@@ -1,18 +1,23 @@
 <script lang="ts">
-  // A shell command to copy. Knows nothing about the API.
-  let { command }: { command: string } = $props();
-  let copied = $state(false);
+  // A shell command (or another value, named by label) to copy. Knows
+  // nothing about the API.
+  let { command, label = "the command" }: { command: string; label?: string } = $props();
+  let copied = $state("");
 
   async function copy() {
-    await navigator.clipboard.writeText(command);
-    copied = true;
-    setTimeout(() => (copied = false), 1600);
+    try {
+      await navigator.clipboard.writeText(command);
+      copied = "Copied";
+    } catch {
+      copied = "Copy failed";
+    }
+    setTimeout(() => (copied = ""), 1600);
   }
 </script>
 
 <div class="box">
   <code>{command}</code>
-  <button onclick={copy} aria-label="Copy the command">{copied ? "Copied" : "Copy"}</button>
+  <button onclick={copy} aria-label={`Copy ${label}`}>{copied || "Copy"}</button>
 </div>
 
 <style>

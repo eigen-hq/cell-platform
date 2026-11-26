@@ -91,16 +91,19 @@ on "$vm1" sudo bash -c "$api_session" _ "$domain" "$ip1"
 api() { on "$vm1" sudo bash -c 'curl -fsS --cacert /tmp/cell-ca.crt --resolve "api.$1:443:$2" -H "Authorization: Bearer $(cat /tmp/api-token)" "${@:4}" "https://api.$1$3"' _ "$domain" "$ip1" "$@"; }
 
 log "$vm2 joins through the API"
-cmd=$(api /v0/nodes/joins -X POST | python3 -c 'import json,sys; print(json.load(sys.stdin)["command"])')
+{ read -r cmd; read -r key; } < <(api /v0/nodes/joins -X POST | python3 -c 'import json,sys; j = json.load(sys.stdin); print(j["command"]); print(j["key"])')
 echo "$cmd"
-[[ $cmd == "curl -fsSL https://api.$domain/v0/nodes/join.sh | sudo CELL_JOIN_KEY="*" bash" ]] || fail "unexpected join command"
+[[ $cmd == "curl -fsSL https://api.$domain/v0/nodes/join.sh | sudo bash" ]] || fail "unexpected join command"
+[[ $key =~ ^([a-z0-9]{6})\.[a-z0-9]{16}$ ]] || fail "unexpected join key"
+key_id=${BASH_REMATCH[1]}
 # The test cell has no public DNS and a self-signed CA: the second VM gets
-# both by hand, then runs the command as the console shows it.
+# both by hand, then runs the command as the console shows it. There is no
+# terminal to paste the key at: it comes as CELL_JOIN_KEY.
 on "$vm1" sudo cat /tmp/cell-ca.crt | on "$vm2" sudo tee /usr/local/share/ca-certificates/cell-ca.crt >/dev/null
 on "$vm2" sudo update-ca-certificates >/dev/null
 on "$vm2" sudo sh -c "echo '$ip1 api.$domain' >>/etc/hosts"
 joined=$(date +%s)
-on "$vm2" bash -c "$cmd"
+on "$vm2" bash -c "${cmd/sudo bash/sudo CELL_JOIN_KEY=$key bash}"
 check_nodes() { python3 -c '
 import json, sys
 n = json.load(sys.stdin)
@@ -114,6 +117,15 @@ until nodes=$(api /v0/nodes) && echo "$nodes" | check_nodes 2>/dev/null; do
 done
 echo "$nodes" | check_nodes
 echo "joined in $(($(date +%s) - joined))s"
+# The operator deletes the key once the machine is in (E-64). Only an empty
+# answer counts as gone; a failing kubectl fails the test.
+n=0
+while :; do
+  left=$(kc -n kube-system get secret "bootstrap-token-$key_id" --ignore-not-found -o name) || fail "cannot look up the join key"
+  [ -n "$left" ] || break
+  n=$((n + 1)); [ "$n" -lt 24 ] || fail "the join key is still there after the machine joined"; sleep 5
+done
+echo "ok: join key deleted"
 node2=$(echo "$nodes" | python3 -c 'import json,sys; print(json.load(sys.stdin)[1]["name"])')
 
 log "WireGuard between the machines"

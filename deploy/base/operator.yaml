@@ -88,6 +88,88 @@ subjects:
     name: cell-operator
     namespace: cell-system
 ---
+# Join keys: once a machine has joined, the operator deletes every join key
+# made before it (E-64). It lists the k3s join tokens in kube-system and
+# deletes nothing else there (policy cell-operator-join-keys).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cell-operator-nodes
+rules:
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cell-operator-nodes
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cell-operator-nodes
+subjects:
+  - kind: ServiceAccount
+    name: cell-operator
+    namespace: cell-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cell-operator-join-keys
+  namespace: kube-system
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [list, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cell-operator-join-keys
+  namespace: kube-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cell-operator-join-keys
+subjects:
+  - kind: ServiceAccount
+    name: cell-operator
+    namespace: cell-system
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: cell-operator-join-keys
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels: {kubernetes.io/metadata.name: kube-system}
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["*"]
+        operations: [DELETE]
+        resources: [secrets]
+  matchConditions:
+    - name: operator
+      expression: "request.userInfo.username == 'system:serviceaccount:cell-system:cell-operator'"
+  # The group, base64: system:bootstrappers:k3s:default-node-token.
+  validations:
+    - expression: >-
+        oldObject.type == 'bootstrap.kubernetes.io/token' &&
+        has(oldObject.data) && 'auth-extra-groups' in oldObject.data &&
+        oldObject.data['auth-extra-groups'] == 'c3lzdGVtOmJvb3RzdHJhcHBlcnM6azNzOmRlZmF1bHQtbm9kZS10b2tlbg=='
+      message: "the operator deletes only join keys in kube-system"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: cell-operator-join-keys
+spec:
+  policyName: cell-operator-join-keys
+  validationActions: [Deny]
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:

@@ -16,13 +16,17 @@ test("the admin sees the machines and gets a join command", async ({ page, baseU
   await page.getByRole("button", { name: "Add machine" }).click();
   await expect(page.getByText("this cell takes no more machines")).toBeVisible();
 
-  const command = "curl -fsSL https://api.cell.example/v0/nodes/join.sh | sudo CELL_JOIN_KEY=abcdef.0123456789abcdef bash";
+  // The key comes apart from the command, to paste when it asks (E-64).
+  const command = "curl -fsSL https://api.cell.example/v0/nodes/join.sh | sudo bash";
+  const key = `abcdef.${"x".repeat(16)}`;
   await page.route("**/v0/nodes/joins", (route) =>
-    route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ command, expiresAt: "2030-01-01T12:00:00Z" }) }),
+    route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ command, key, expiresAt: "2030-01-01T12:00:00Z" }) }),
   );
   await page.getByRole("button", { name: "Add machine" }).click();
   await expect(page.getByRole("heading", { name: "Add a machine" })).toBeVisible();
   await expect(page.getByText(command)).toBeVisible();
+  await expect(page.getByText(key, { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Copy the join key" })).toBeVisible();
   await page.getByRole("button", { name: "Done" }).click();
   await expect(page.getByRole("button", { name: "Add machine" })).toBeVisible();
 
