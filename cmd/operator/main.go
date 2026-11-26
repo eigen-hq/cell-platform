@@ -73,7 +73,7 @@ func run() error {
 		for {
 			err := controller.EnsureAgentAccount(ctx, mgr.GetClient(), identity)
 			if err == nil {
-				err = identity.EnsureAPIClient(ctx, controller.GatewayClient, "MCP gateway")
+				err = identity.EnsureAPIClient(ctx, controller.GatewayClient, "MCP gateway", controller.GatewayTokenValidity)
 			}
 			if err == nil {
 				return nil

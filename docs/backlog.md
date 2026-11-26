@@ -109,7 +109,7 @@ What is wanted and tried out happens in the office UI; the platform builds, oper
 |---|---|---|
 | Own service account in authentik with narrow permissions | open | |
 | Pin third-party images by digest | open | |
-| Short-lived tokens for the tool gateway | open | |
+| Short-lived tokens for the tool gateway | built (E-74) | |
 | Do not count the wait for the login proxy against the deadline of the app | open | |
 | Restart of an app as an API action | open | |
 | Console: hide actions for viewers | open | |

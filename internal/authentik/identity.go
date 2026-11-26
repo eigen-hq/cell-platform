@@ -304,7 +304,9 @@ func (c *Client) EnsureGroup(ctx context.Context, name string, members ...string
 // EnsureAPIClient registers the platform API as an OAuth2 client that
 // issues JWTs to users who log in with username and app password
 // (client credentials grant). Its issuer is <authentik>/application/o/<slug>/.
-func (c *Client) EnsureAPIClient(ctx context.Context, slug, title string) error {
+// A tokenValidity (authentik's format, e.g. "minutes=5") sets how long its
+// access tokens last; empty keeps authentik's default.
+func (c *Client) EnsureAPIClient(ctx context.Context, slug, title, tokenValidity string) error {
 	authz, invalidation, err := c.flows(ctx)
 	if err != nil {
 		return err
@@ -321,7 +323,7 @@ func (c *Client) EnsureAPIClient(ctx context.Context, slug, title string) error 
 		}
 		mappings = append(mappings, pk)
 	}
-	providerPK, err := c.ensure(ctx, "providers/oauth2/", "pk", url.Values{"name": {slug}}, map[string]any{
+	provider := map[string]any{
 		"name":               slug,
 		"authorization_flow": authz,
 		"invalidation_flow":  invalidation,
@@ -331,7 +333,11 @@ func (c *Client) EnsureAPIClient(ctx context.Context, slug, title string) error 
 		"property_mappings":  mappings,
 		"redirect_uris":      []map[string]string{},
 		"grant_types":        []string{"client_credentials"},
-	})
+	}
+	if tokenValidity != "" {
+		provider["access_token_validity"] = tokenValidity
+	}
+	providerPK, err := c.ensure(ctx, "providers/oauth2/", "pk", url.Values{"name": {slug}}, provider)
 	if err != nil {
 		return err
 	}

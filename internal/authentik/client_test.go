@@ -369,3 +369,29 @@ func TestChangeGroupMembers(t *testing.T) {
 		t.Errorf("missing group: %v", err)
 	}
 }
+
+// The gateway's client gets short-lived tokens; a provider made before
+// that (a live cell after an installer rerun) is changed to match, and the
+// API's client keeps authentik's default.
+func TestEnsureAPIClientTokenValidity(t *testing.T) {
+	api := newFakeAPI()
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+	c := &Client{BaseURL: srv.URL, Token: "t", HTTP: srv.Client()}
+	ctx := context.Background()
+	if err := c.EnsureAPIClient(ctx, "cell-api", "Platform API", ""); err != nil {
+		t.Fatal(err)
+	}
+	api.objects["providers/oauth2/"] = append(api.objects["providers/oauth2/"], map[string]any{
+		"pk": 1, "name": "cell-mcp", "access_token_validity": "hours=1"})
+	if err := c.EnsureAPIClient(ctx, "cell-mcp", "MCP gateway", "minutes=5"); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]any{}
+	for _, p := range api.objects["providers/oauth2/"] {
+		got[fmt.Sprint(p["name"])] = p["access_token_validity"]
+	}
+	if got["cell-mcp"] != "minutes=5" || got["cell-api"] != nil || len(got) != 2 {
+		t.Errorf("token validity per provider: %v", got)
+	}
+}

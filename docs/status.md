@@ -131,6 +131,7 @@ Status 2026-11-20: agentgateway as MCP gateway, configured by the operator from 
 | No access, no tools | same check: an account outside the group sees only `notes_*`, its call to a `journal_*` tool is rejected; without a token or with a token of the API the gateway answers 401, a token of the gateway is not valid at the API | passed |
 | Access rules | `make test`, `TestGatewayConfig`: the rules evaluated with cel-go, also with group names that contain CEL themselves; apps without `mcp`, apps never healthy and deleted apps are missing | passed |
 | Memory | gateway idle, local cell | 11 MiB |
+| Short-lived tokens (E-74) | `go test ./internal/authentik`, `TestEnsureAPIClientTokenValidity`: the provider `cell-mcp` gets `minutes=5`, one made before with `hours=1` is changed to it, `cell-api` keeps the default (fails without the change); `TestMCPGateway` checks `exp - iat` of a gateway token is at most 5 min | unit test passed; open: token lifetime and the change of an existing provider by the installer rerun, in the daily run |
 
 ### Console
 

@@ -155,7 +155,7 @@ REST with an OpenAPI description (`api/openapi.yaml`), login through tokens of t
 
 The console of the cell (`https://console.<domain>`, E-39) is a client of this API like any other: its own login client in the identity service (`cell-console`, PKCE, E-40), no logic of its own on the server. `GET /v0/login` tells custom clients where and how to log in.
 
-In addition there is the one MCP endpoint of the gateway for the agents in the UI: `https://mcp.<domain>/mcp`, with tokens of the identity service for the client `cell-mcp` (E-36).
+In addition there is the one MCP endpoint of the gateway for the agents in the UI: `https://mcp.<domain>/mcp`, with tokens of the identity service for the client `cell-mcp` (E-36) that last five minutes, because the gateway checks them without asking the identity (E-74).
 
 ## Security
 

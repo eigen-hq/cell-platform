@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -27,6 +28,10 @@ func TestMCPGateway(t *testing.T) {
 		"groups": []string{"e2e-mcp-team"}}, 10*time.Minute)
 
 	memberToken, outsiderToken := member.login(t, "cell-mcp"), outsider.login(t, "cell-mcp")
+	// Tokens for the gateway are short-lived (E-74).
+	if d := lifetime(t, memberToken); d <= 0 || d > 5*time.Minute {
+		t.Errorf("a token for the gateway lasts %s, want at most 5m", d)
+	}
 	const list, call = "notes_memo_list_memos", "journal_memo_list_memos"
 	// The operator writes the gateway's configuration; the kubelet takes
 	// about a minute to hand it to the gateway.
@@ -37,6 +42,8 @@ func TestMCPGateway(t *testing.T) {
 		}
 		return nil
 	})
+	// The wait may have used up most of the tokens' lifetime.
+	memberToken, outsiderToken = member.login(t, "cell-mcp"), outsider.login(t, "cell-mcp")
 	_, msg := tc.mcp(t, memberToken, "tools/list", nil)
 	t.Logf("through https://%s/mcp a member of e2e-mcp-team sees %d tools of notes and journal, e.g. %s", tc.cfg.Host("mcp"), len(toolNames(msg)), call)
 	code, msg := tc.mcp(t, outsiderToken, "tools/list", nil)
@@ -115,6 +122,24 @@ func (tc *testCell) mcp(t *testing.T, token, method string, params any) (int, ma
 		msg = nil
 	}
 	return resp.StatusCode, msg
+}
+
+// lifetime is how long a JWT is valid from its issue (exp - iat).
+func lifetime(t *testing.T, token string) time.Duration {
+	t.Helper()
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		t.Fatalf("not a JWT: %.20q", token)
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	var claims struct{ Exp, Iat int64 }
+	if err == nil {
+		err = json.Unmarshal(payload, &claims)
+	}
+	if err != nil {
+		t.Fatalf("claims of the token: %v", err)
+	}
+	return time.Duration(claims.Exp-claims.Iat) * time.Second
 }
 
 func toolNames(msg map[string]any) []string {
