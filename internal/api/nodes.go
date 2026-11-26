@@ -223,8 +223,8 @@ func (s *Server) createJoin(w http.ResponseWriter, r *http.Request, c *Caller) e
 // needs no login and holds nothing secret (the server's address and the CA's
 // hash). It asks for the join key on the terminal (or takes CELL_JOIN_KEY,
 // for a run without one), and k3s on the server checks the key when the
-// machine joins. node.sh labels the machine with the key's id; the operator
-// then deletes the key (E-64).
+// machine joins. Once the machine is in, the operator deletes the key
+// (E-64).
 func (s *Server) joinScript(w http.ResponseWriter, _ *http.Request, _ *Caller) error {
 	if s.Join == nil {
 		return errorf(http.StatusConflict, "this cell takes no more machines (it runs on one machine only)")

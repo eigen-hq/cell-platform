@@ -478,9 +478,10 @@ paths:
         that joins a machine with it. Run the command as root on the new
         machine (Ubuntu LTS) and paste the key when it asks; it loads
         everything from the cell, and the machine shows up in
-        `GET /v0/nodes`. The key works for one machine: the cell deletes it
-        once that machine has joined. The machine must reach the
-        cell's server, and the server it. 409: the cell takes no more
+        `GET /v0/nodes`. The key works for one machine: once a machine has joined,
+        the cell deletes every key made before, so add machines one
+        after another. The machine must reach the cell's server, and the
+        server it. 409: the cell takes no more
         machines (a local cell).
       responses:
         default: {$ref: "#/components/responses/Error"}
