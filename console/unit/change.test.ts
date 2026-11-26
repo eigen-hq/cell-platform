@@ -1,7 +1,7 @@
 // Unit checks of plain helpers, run by node (npm run check).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { backupOf, ended, groupsOf, headline, open, people, trail } from "../src/lib/change.ts";
+import { backupOf, ended, groupsOf, headline, open, people, safety, trail } from "../src/lib/change.ts";
 
 const base = { name: "c", app: "forgejo", requester: { kind: "Human", name: "a" }, reason: "", risk: "medium", approval: { required: true, at: null }, phase: "WaitingForApproval", createdAt: "", startedAt: null, finishedAt: null } as const;
 
@@ -34,6 +34,13 @@ test("people and trail tell how a change went", () => {
   // No backup taken (nothing to back up): the step says so, it is not "done".
   assert.equal(trail({ ...base, action: "remove", patch: null, phase: "Succeeded", backup: "none" })[0]!.state, "skipped");
   assert.equal(trail({ ...rolled, backup: "none" })[0]!.state, "skipped");
+});
+
+test("a restart promises neither backup nor rollback", () => {
+  const restart = { ...base, action: "restart", patch: null, risk: "low", phase: "Succeeded", backup: "none" } as const;
+  assert.equal(headline(restart, "Code"), "Restart Code");
+  assert.deepEqual(trail(restart).map((s) => `${s.step}:${s.state}`), ["Start new pods:done", "Health check:done", "Done:done"]);
+  assert.doesNotMatch(safety(restart), /backup|roll(s)? back by itself/i);
 });
 
 test("a change is open from the moment the API accepts it until it ends", () => {

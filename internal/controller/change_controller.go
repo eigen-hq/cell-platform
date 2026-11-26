@@ -7,12 +7,14 @@ import (
 	"time"
 
 	jsonpatch "github.com/evanphx/json-patch/v5"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -161,11 +163,14 @@ func (r *ChangeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		if action == actionInstall {
 			return r.install(ctx, &cr, gone, &app, holder, set, end)
 		}
-		if why, err := acquireGateway(ctx, r, apiReader(r.Reader, r), lockUser); err != nil || why != "" {
-			if err != nil {
-				return ctrl.Result{}, err
+		// A restart neither backs up nor restores: it needs no target.
+		if action != actionRestart {
+			if why, err := acquireGateway(ctx, r, apiReader(r.Reader, r), lockUser); err != nil || why != "" {
+				if err != nil {
+					return ctrl.Result{}, err
+				}
+				return set(cellv1.RunPending, why, wait)
 			}
-			return set(cellv1.RunPending, why, wait)
 		}
 		ok, current, err := acquireApp(ctx, r, &app, holder)
 		if err != nil {
@@ -175,6 +180,9 @@ func (r *ChangeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			return set(cellv1.RunPending, "waiting for "+current, wait)
 		}
 		cr.Status.StartedAt, cr.Status.AppUID = ptr(metav1.NewTime(r.now())), string(app.UID)
+		if action == actionRestart {
+			return set(cellv1.RunRunning, "restarting the app", time.Second)
+		}
 		return set(cellv1.RunRunning, "backing up", time.Second)
 	}
 	if gone && action == actionInstall {
@@ -206,6 +214,9 @@ func (r *ChangeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 	if action == actionInstall {
 		return r.installed(&cr, &app, set, end)
+	}
+	if action == actionRestart {
+		return r.restart(ctx, &cr, &app, set, end)
 	}
 
 	// 1. Rollback point.
@@ -394,6 +405,7 @@ const (
 	actionInstall = "install"
 	actionRemove  = "remove"
 	actionRestore = "restore"
+	actionRestart = "restart"
 )
 
 type (
@@ -544,4 +556,91 @@ func (r *ChangeReconciler) restore(ctx context.Context, cr *cellv1.ChangeRequest
 		return end(cellv1.RunFailed, fmt.Sprintf("backup %s restored, but the app is not healthy after %s (%s); backup %s holds the state before the restore", cr.Spec.Backup, timeout, reason, cr.Status.Backup))
 	}
 	return set(cellv1.RunRunning, "backup restored, waiting for the health check", 5*time.Second)
+}
+
+// restartedAt is the pod template annotation `kubectl rollout restart`
+// sets: a new value makes Deployments and StatefulSets roll out new pods.
+// Neither the operator nor a chart applies it, so it stays.
+const restartedAt = "kubectl.kubernetes.io/restartedAt"
+
+// restartFieldManager owns the annotation a restart sets.
+const restartFieldManager = "cell-restart"
+
+// restart rolls out new pods of every workload in the app's namespace, then
+// waits until they all run the new template and the app is healthy. Spec
+// and data stay as they are, so there is neither backup nor rollback.
+func (r *ChangeReconciler) restart(ctx context.Context, cr *cellv1.ChangeRequest, app *cellv1.App, set setFunc, end endFunc) (ctrl.Result, error) {
+	if cr.Status.AppliedAt == nil {
+		cr.Status.Backup, cr.Status.AppliedAt = "none", ptr(metav1.NewTime(r.now()))
+		return ctrl.Result{RequeueAfter: time.Second}, r.Status().Update(ctx, cr)
+	}
+	// The recorded time and the change's name mark the restart: a pass after
+	// an operator restart patches nothing twice and finds its own rollout,
+	// and two restarts in the same second still differ.
+	stamp := cr.Status.AppliedAt.UTC().Format(time.RFC3339) + " " + cr.Name
+	ns := Namespace(app.Name)
+	// Past the cache: a workload read before the patch must not count as
+	// rolled out.
+	rd := apiReader(r.Reader, r)
+	var deploys appsv1.DeploymentList
+	if err := rd.List(ctx, &deploys, client.InNamespace(ns)); err != nil {
+		return ctrl.Result{}, err
+	}
+	var sets appsv1.StatefulSetList
+	if err := rd.List(ctx, &sets, client.InNamespace(ns)); err != nil {
+		return ctrl.Result{}, err
+	}
+	if len(deploys.Items)+len(sets.Items) == 0 {
+		return end(cellv1.RunFailed, "app "+app.Name+" has no workloads to restart")
+	}
+	patch := client.RawPatch(types.MergePatchType, fmt.Appendf(nil, `{"spec":{"template":{"metadata":{"annotations":{%q:%q}}}}}`, restartedAt, stamp))
+	done := true
+	bump := func(obj client.Object, template map[string]string, rolledOut bool) error {
+		if template[restartedAt] != stamp {
+			done = false
+			return client.IgnoreNotFound(r.Patch(ctx, obj, patch, client.FieldOwner(restartFieldManager)))
+		}
+		done = done && rolledOut
+		return nil
+	}
+	for i := range deploys.Items {
+		d := &deploys.Items[i]
+		want, st := replicas(d.Spec.Replicas), d.Status
+		if err := bump(d, d.Spec.Template.Annotations, st.ObservedGeneration >= d.Generation &&
+			st.Replicas == want && st.UpdatedReplicas == want && st.AvailableReplicas == want); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+	for i := range sets.Items {
+		s := &sets.Items[i]
+		want, st := replicas(s.Spec.Replicas), s.Status
+		if err := bump(s, s.Spec.Template.Annotations, st.ObservedGeneration >= s.Generation &&
+			st.UpdatedReplicas == want && st.ReadyReplicas == want && st.CurrentRevision == st.UpdateRevision); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+	// A Ready condition from before the rollout says nothing about the new
+	// pods: the app has to pass a health check that started after it.
+	if done && cr.Status.RolledOutAt == nil {
+		cr.Status.RolledOutAt = ptr(metav1.NewTime(r.now()))
+		return ctrl.Result{RequeueAfter: time.Second}, r.Status().Update(ctx, cr)
+	}
+	if done && app.Status.RestartChecked == string(cr.UID) && appReadyAt(app, app.Generation) {
+		return end(cellv1.RunSucceeded, "app restarted and healthy")
+	}
+	timeout := time.Duration(app.Spec.Health.TimeoutSeconds) * time.Second
+	if timeout == 0 {
+		timeout = 300 * time.Second
+	}
+	if r.now().Sub(cr.Status.AppliedAt.Time) < timeout {
+		return set(cellv1.RunRunning, "waiting for the new pods and the health check", 5*time.Second)
+	}
+	reason := "new pods not ready"
+	if done {
+		reason = "no health check passed after the rollout"
+		if c := apimeta.FindStatusCondition(app.Status.Conditions, condReady); c != nil && c.Status == metav1.ConditionFalse {
+			reason = c.Message
+		}
+	}
+	return end(cellv1.RunFailed, fmt.Sprintf("unhealthy %s after the restart (%s); spec and data are unchanged, nothing to roll back", timeout, reason))
 }

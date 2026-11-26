@@ -27,6 +27,8 @@ export function headline(c: Change, title: string): string {
       return c.deleteData ? `Remove ${title} and delete its data` : `Remove ${title}, keep its data`;
     case "restore":
       return `Bring back ${title} from a backup`;
+    case "restart":
+      return `Restart ${title}`;
     case "update": {
       const keys = Object.keys(p);
       if (keys.length === 1 && typeof p.version === "string") return `Update ${title} to ${p.version}`;
@@ -42,6 +44,7 @@ export const steps = (c: Change): string[] =>
     install: ["Check the manifest", "Install", "Health check", "Done"],
     update: ["Backup", "Apply the change", "Health check", "Done"],
     restore: ["Back up the current state", "Bring the backup back", "Health check", "Done"],
+    restart: ["Start new pods", "Health check", "Done"],
     remove: ["Backup", "Remove", "Done"],
   })[c.action];
 
@@ -51,6 +54,7 @@ export const safety = (c: Change): string =>
     install: "Counts as running only once its health check passes",
     update: "Backup first, rolls back by itself if the health check fails",
     restore: "The current state is backed up first",
+    restart: "Settings and data stay as they are; nothing to roll back",
     remove: c.deleteData ? "Backup first; the backups stay in the bucket" : "Backup first; the data stays in the cell for a reinstall",
   })[c.action];
 
@@ -90,7 +94,7 @@ export function trail(c: Change): { step: string; state: "done" | "failed" | "op
   const all = steps(c);
   const last = all.length - 1;
   // The controller writes backup "none" when there was nothing to back up.
-  const ran = (step: string, i: number) => ({ step, state: i === 0 && c.backup === "none" && c.action !== "install" ? ("skipped" as const) : ("done" as const) });
+  const ran = (step: string, i: number) => ({ step, state: i === 0 && c.backup === "none" && c.action !== "install" && c.action !== "restart" ? ("skipped" as const) : ("done" as const) });
   switch (c.phase) {
     case "Succeeded":
       return all.map(ran);

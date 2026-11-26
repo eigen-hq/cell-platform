@@ -119,6 +119,7 @@ func (s *Server) routes() []route {
 		{"GET", "/v0/apps/{name}/backups", RoleViewer, s.listBackups},
 		{"POST", "/v0/apps/{name}/backups", RoleAdmin, s.createBackup},
 		{"POST", "/v0/apps/{name}/restore", RoleAgent, s.restoreApp},
+		{"POST", "/v0/apps/{name}/restart", RoleAgent, s.restartApp},
 		{"GET", "/v0/apps/{name}/access", RoleViewer, s.getAccess},
 		{"PUT", "/v0/apps/{name}/access", RoleAgent, s.setAccess},
 		{"GET", "/v0/users", RoleAgent, s.listUsers},

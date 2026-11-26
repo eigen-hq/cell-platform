@@ -139,6 +139,7 @@ type activity struct {
 	restoring    bool         // a restore waits for the app to be configured again
 	reason       string       // why the app is paused
 	failedChange string       // set if the newest finished change failed
+	restarted    string       // UID of the running restart whose new pods rolled out
 }
 
 func finished(p cellv1.RunPhase) bool {
@@ -214,6 +215,9 @@ func (r *AppReconciler) activity(ctx context.Context, app *cellv1.App) (activity
 		}
 		switch {
 		case cr.Status.Phase == cellv1.RunRunning && a.phase == "":
+			if cr.Spec.Action == "restart" && cr.Status.RolledOutAt != nil {
+				a.restarted = string(cr.UID)
+			}
 			switch {
 			case cr.Spec.Action == "restore":
 				a.phase = cellv1.PhaseRestoring

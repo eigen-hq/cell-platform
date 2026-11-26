@@ -186,6 +186,11 @@ func (r *AppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	}
 	r.setPhase(&app, healthy, msg, act)
 	app.Status.ObservedGeneration = app.Generation
+	// This check started after the restart's new pods rolled out, so it is
+	// the health result the restart waits for.
+	if healthy && act.restarted != "" {
+		app.Status.RestartChecked = act.restarted
+	}
 	if err == nil && healthy {
 		err = r.scheduleBackup(ctx, &app, target)
 	}

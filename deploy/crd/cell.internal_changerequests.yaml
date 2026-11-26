@@ -64,12 +64,14 @@ spec:
                 description: |-
                   Action: update applies Patch as a JSON merge patch on the App spec;
                   install creates the app with Patch as its spec; remove deletes the
-                  app; restore brings back the data of Backup.
+                  app; restore brings back the data of Backup; restart rolls out new
+                  pods of the app's workloads, spec and data unchanged.
                 enum:
                 - update
                 - install
                 - remove
                 - restore
+                - restart
                 type: string
               app:
                 type: string
@@ -156,7 +158,9 @@ spec:
               rule: (has(self.deleteData) && self.deleteData) == (has(oldSelf.deleteData)
                 && oldSelf.deleteData)
             - message: install and update need a patch
-              rule: self.action in ['remove', 'restore'] || has(self.patch)
+              rule: self.action in ['remove', 'restore', 'restart'] || has(self.patch)
+            - message: restart takes no patch
+              rule: self.action != 'restart' || !has(self.patch)
             - message: backup is only for action restore
               rule: self.action == 'restore' || !has(self.backup)
             - message: restore needs the name of a backup
@@ -212,6 +216,11 @@ spec:
                 x-kubernetes-preserve-unknown-fields: true
               restore:
                 description: Restore used for the rollback.
+                type: string
+              rolledOutAt:
+                description: RolledOutAt is, for a restart, when every workload ran
+                  its new pods.
+                format: date-time
                 type: string
               startedAt:
                 format: date-time

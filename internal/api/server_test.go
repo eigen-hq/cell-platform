@@ -534,6 +534,26 @@ func TestAppChanges(t *testing.T) {
 		t.Errorf("restore without backups: %d", code)
 	}
 
+	// Restart: a low-risk change; an agent only for its task's app.
+	for _, token := range []string{"none", "viewer"} {
+		if code, _ = h.do("POST", "/v0/apps/notes/restart", token, map[string]any{}); code != 403 {
+			t.Errorf("restart as %s: %d", token, code)
+		}
+	}
+	if code, _ = h.do("POST", "/v0/apps/plain/restart", "agent", map[string]any{}); code != 403 {
+		t.Errorf("agent restarts another app: %d", code)
+	}
+	code, body = h.do("POST", "/v0/apps/notes/restart", "agent", map[string]any{"reason": "hangs"})
+	if code != 202 || field(body, "action") != "restart" || field(body, "risk") != "low" || field(body, "reason") != "hangs" || field(body, "patch") != nil {
+		t.Errorf("restart: %d %v", code, body)
+	}
+	if code, body = h.do("POST", "/v0/apps/notes/restart", "admin", map[string]any{}); code != 202 || field(body, "reason") != "restart notes" {
+		t.Errorf("restart as admin: %d %v", code, body)
+	}
+	if code, _ = h.do("POST", "/v0/apps/plain/restart", "admin", map[string]any{"patch": map[string]any{}}); code != 400 {
+		t.Errorf("restart with an unknown field: %d", code)
+	}
+
 	// Remove: keeps the data unless asked.
 	code, body = h.do("DELETE", "/v0/apps/notes?deleteData=true&reason=gone", "agent", nil)
 	if code != 202 || field(body, "action") != "remove" || field(body, "deleteData") != true || field(body, "reason") != "gone" {
@@ -545,7 +565,7 @@ func TestAppChanges(t *testing.T) {
 
 	// The change log, newest first and per app.
 	code, body = h.do("GET", "/v0/changes?app=notes", "viewer", nil)
-	if code != 200 || len(body.([]any)) != 8 {
+	if code != 200 || len(body.([]any)) != 10 {
 		t.Errorf("change log: %d %v", code, body)
 	}
 	if code, body = h.do("GET", "/v0/changes?app=plain", "viewer", nil); code != 200 || len(body.([]any)) != 0 {

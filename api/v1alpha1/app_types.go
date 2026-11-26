@@ -200,6 +200,9 @@ type AppStatus struct {
 	// MCPEndpoint is where the cell's gateway reaches the app's MCP
 	// endpoint; set once the app's service is up.
 	MCPEndpoint string `json:"mcpEndpoint,omitempty"`
+	// RestartChecked is the UID of the running restart change whose new
+	// pods passed a health check after they rolled out.
+	RestartChecked string `json:"restartChecked,omitempty"`
 	// +listType=map
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`

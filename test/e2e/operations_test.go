@@ -13,7 +13,9 @@ import (
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -145,4 +147,92 @@ func TestFailedUpdateRollsBack(t *testing.T) {
 	admin.installed(t, "forgejo", 10*time.Minute)
 	m.expect("before-update")
 	t.Log("forgejo runs 15.0.11 again, with the marker from before the update")
+}
+
+// Through the API: a restart replaces the pods of an image app and of a
+// chart app, with spec and data unchanged. On the chart app, Flux checks
+// for drift afterwards and keeps the restart's mark: the template does not
+// change again.
+func TestRestart(t *testing.T) {
+	tc := newTestCell(t)
+	admin := tc.adminAPI(t)
+	for _, name := range []string{"forgejo", "nextcloud"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			admin.installed(t, name, 15*time.Minute)
+			ns := "app-" + name
+			before := appPods(t, ns)
+			change := admin.propose(t, admin, http.MethodPost, "/v0/apps/"+name+"/restart", map[string]any{"reason": "e2e"})
+			cr := admin.waitChange(t, change, 10*time.Minute, "Succeeded")
+			if field(cr, "backup") != "none" || field(cr, "restore") != nil {
+				t.Errorf("restart backed up or restored: %v", cr)
+			}
+			waitFor(t, 5*time.Minute, func() error {
+				for uid := range appPods(t, ns) {
+					if before[uid] {
+						return fmt.Errorf("pod %s from before the restart still runs", uid)
+					}
+				}
+				return nil
+			})
+			marks := restartMarks(t, ns)
+			if len(marks) == 0 {
+				t.Fatalf("%s: no workload carries the restart's mark", name)
+			}
+			if name == "forgejo" {
+				at := time.Now().UTC().Format(time.RFC3339Nano)
+				kubectl(t, "-n", ns, "annotate", "helmrelease", name, "--overwrite", "reconcile.fluxcd.io/requestedAt="+at)
+				kubectl(t, "-n", ns, "wait", "helmrelease/"+name, "--for=jsonpath={.status.lastHandledReconcileAt}="+at, "--timeout=5m")
+				if after := restartMarks(t, ns); fmt.Sprint(after) != fmt.Sprint(marks) {
+					t.Errorf("drift detection changed the restarted workloads: %v, before %v", after, marks)
+				}
+			}
+			admin.installed(t, name, 5*time.Minute)
+			t.Logf("%s: %d pods replaced, change log: %s", name, len(before), field(cr, "message"))
+		})
+	}
+}
+
+// appPods are the running pods of an app's workloads, without its database.
+func appPods(t *testing.T, ns string) map[string]bool {
+	t.Helper()
+	var pods corev1.PodList
+	if err := kube(t).List(context.Background(), &pods, client.InNamespace(ns)); err != nil {
+		t.Fatal(err)
+	}
+	uids := map[string]bool{}
+	for _, p := range pods.Items {
+		owner := metav1.GetControllerOf(&p)
+		if _, isDB := p.Labels["cnpg.io/cluster"]; isDB || owner == nil || (owner.Kind != "ReplicaSet" && owner.Kind != "StatefulSet") || p.DeletionTimestamp != nil {
+			continue
+		}
+		uids[string(p.UID)] = true
+	}
+	return uids
+}
+
+// restartMarks are the restart annotation and generation of each workload.
+func restartMarks(t *testing.T, ns string) map[string]string {
+	t.Helper()
+	ctx := context.Background()
+	var deploys appsv1.DeploymentList
+	var sets appsv1.StatefulSetList
+	if err := kube(t).List(ctx, &deploys, client.InNamespace(ns)); err != nil {
+		t.Fatal(err)
+	}
+	if err := kube(t).List(ctx, &sets, client.InNamespace(ns)); err != nil {
+		t.Fatal(err)
+	}
+	marks := map[string]string{}
+	for _, d := range deploys.Items {
+		if at := d.Spec.Template.Annotations["kubectl.kubernetes.io/restartedAt"]; at != "" {
+			marks["deployment/"+d.Name] = fmt.Sprintf("%s@%d", at, d.Generation)
+		}
+	}
+	for _, s := range sets.Items {
+		if at := s.Spec.Template.Annotations["kubectl.kubernetes.io/restartedAt"]; at != "" {
+			marks["statefulset/"+s.Name] = fmt.Sprintf("%s@%d", at, s.Generation)
+		}
+	}
+	return marks
 }

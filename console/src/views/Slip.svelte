@@ -32,7 +32,7 @@
   const agent = $derived(c.requester.kind === "Agent");
   const who = $derived(agent ? `${c.requester.name[0]!.toUpperCase()}${c.requester.name.slice(1)}` : c.requester.name);
   const groups = $derived(groupsOf(c));
-  const verb = $derived({ install: "install", update: "change", restore: "bring back", remove: c.deleteData ? "remove, delete data" : "remove" }[c.action]);
+  const verb = $derived({ install: "install", update: "change", restore: "bring back", restart: "restart", remove: c.deleteData ? "remove, delete data" : "remove" }[c.action]);
   const patch = $derived(c.patch && Object.keys(c.patch).length ? JSON.stringify(c.patch, null, 2) : "");
 </script>
 

@@ -117,6 +117,19 @@
     });
     asking = false;
   }
+  // A restart starts new pods; settings and data stay. Shown again only
+  // once no restart of this app is on its way.
+  const restarting = $derived(pending.some((c) => c.action === "restart"));
+  async function restart() {
+    if (asking) return;
+    asking = true;
+    await act(async () => {
+      const c = must(await api.POST("/v0/apps/{name}/restart", { ...path, body: { reason: "restarted from the console" } }));
+      pending = [...pending.filter((x) => x.name !== c.name), c];
+      return outcome(c);
+    });
+    asking = false;
+  }
   const toggle = (g: string) => (editing = editing!.includes(g) ? editing!.filter((x) => x !== g) : [...editing!, g]);
 
   const s = $derived(appStatus(app.phase));
@@ -250,6 +263,7 @@
   {#if admin}
   <section class="actions">
     {#if !trouble.length}<Button kind="quiet" onclick={diagnose}>Let Ops diagnose it</Button>{/if}
+    {#if !restarting && !asking}{@render confirm("restart", "Restart", restart)}{/if}
     {@render confirm("remove", actions.remove, () => remove(false))}
     {@render confirm("purge", actions.purge, () => remove(true), true)}
   </section>

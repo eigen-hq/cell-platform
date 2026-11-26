@@ -161,7 +161,8 @@ type ChangeRequest struct {
 // +kubebuilder:validation:XValidation:rule="self.action == oldSelf.action",message="action is immutable"
 // +kubebuilder:validation:XValidation:rule="has(self.backup) == has(oldSelf.backup) && (!has(self.backup) || self.backup == oldSelf.backup)",message="backup is immutable"
 // +kubebuilder:validation:XValidation:rule="(has(self.deleteData) && self.deleteData) == (has(oldSelf.deleteData) && oldSelf.deleteData)",message="deleteData is immutable"
-// +kubebuilder:validation:XValidation:rule="self.action in ['remove', 'restore'] || has(self.patch)",message="install and update need a patch"
+// +kubebuilder:validation:XValidation:rule="self.action in ['remove', 'restore', 'restart'] || has(self.patch)",message="install and update need a patch"
+// +kubebuilder:validation:XValidation:rule="self.action != 'restart' || !has(self.patch)",message="restart takes no patch"
 // +kubebuilder:validation:XValidation:rule="self.action == 'restore' || !has(self.backup)",message="backup is only for action restore"
 // +kubebuilder:validation:XValidation:rule="self.action != 'restore' || (has(self.backup) && size(self.backup) > 0 && self.backup != 'latest')",message="restore needs the name of a backup"
 // +kubebuilder:validation:XValidation:rule="self.action == 'remove' || !has(self.deleteData) || !self.deleteData",message="deleteData is only for action remove"
@@ -171,8 +172,9 @@ type ChangeRequestSpec struct {
 	App string `json:"app"`
 	// Action: update applies Patch as a JSON merge patch on the App spec;
 	// install creates the app with Patch as its spec; remove deletes the
-	// app; restore brings back the data of Backup.
-	// +kubebuilder:validation:Enum=update;install;remove;restore
+	// app; restore brings back the data of Backup; restart rolls out new
+	// pods of the app's workloads, spec and data unchanged.
+	// +kubebuilder:validation:Enum=update;install;remove;restore;restart
 	// +kubebuilder:default=update
 	Action string `json:"action,omitempty"`
 	// Backup to restore (action restore), by name: approvers see what comes
@@ -237,6 +239,8 @@ type ChangeRequestStatus struct {
 	AppliedGeneration int64 `json:"appliedGeneration,omitempty"`
 	// AppUID binds the change to the app it started on.
 	AppUID string `json:"appUID,omitempty"`
+	// RolledOutAt is, for a restart, when every workload ran its new pods.
+	RolledOutAt *metav1.Time `json:"rolledOutAt,omitempty"`
 }
 
 // +kubebuilder:object:root=true
