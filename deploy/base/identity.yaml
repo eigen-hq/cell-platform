@@ -69,9 +69,13 @@ spec:
               - auth.${CELL_DOMAIN}
 ---
 # The account operator and API use instead of the bootstrap token (E-77):
-# a service account in the superuser group, because only a superuser may
-# create app passwords for other users. state: present keeps the token's
-# key equal to the Secret on every apply.
+# a service account in a superuser group of its own, because only a
+# superuser may create app passwords for other users. The group is declared
+# here: authentik applies blueprints in no set order and retries a failed
+# one only hourly, so this one must not wait for "authentik Admins".
+# authentik applies a blueprint again only when the file changes, so the
+# token key is set when the account is made (a Secret recreated by hand
+# later is not taken over; the installer then stops with an error).
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -85,6 +89,13 @@ data:
     context:
       token: !Env [CELL_PLATFORM_TOKEN, null]
     entries:
+      - model: authentik_core.group
+        state: created
+        id: platform-group
+        identifiers:
+          name: cell-platform
+        attrs:
+          is_superuser: true
       - model: authentik_core.user
         state: present
         id: platform-user
@@ -95,7 +106,7 @@ data:
           type: service_account
           is_active: true
           groups:
-            - !Find [authentik_core.group, [name, authentik Admins]]
+            - !KeyOf platform-group
       - model: authentik_core.token
         state: present
         conditions:

@@ -111,7 +111,9 @@ func TestPlatformUsesItsOwnAuthentikAccount(t *testing.T) {
 		"type: service_account\n",
 		"token: !Env [CELL_PLATFORM_TOKEN, null]\n",
 		"key: !Context token\n",
-		"!Find [authentik_core.group, [name, authentik Admins]]\n",
+		// Its own superuser group, declared here: no wait for another blueprint.
+		"identifiers:\n      name: " + authentik.PlatformAccount + "\n    attrs:\n      is_superuser: true\n",
+		"- !KeyOf platform-group\n",
 	} {
 		if !strings.Contains(blueprint, want) {
 			t.Errorf("blueprint lacks %q:\n%s", want, blueprint)

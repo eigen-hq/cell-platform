@@ -111,7 +111,12 @@ func (c *Client) userPK(ctx context.Context, username string) (any, error) {
 	return u["pk"], nil
 }
 
+// groupObj finds a group by name. The platform account's superuser group
+// counts as missing, so nobody joins it through the API.
 func (c *Client) groupObj(ctx context.Context, name string) (map[string]any, error) {
+	if name == PlatformAccount {
+		return nil, fmt.Errorf("group %q: %w", name, ErrNotFound)
+	}
 	g, err := c.find(ctx, "core/groups/", url.Values{"name": {name}})
 	if err != nil {
 		return nil, err
@@ -218,6 +223,9 @@ func (c *Client) ListGroups(ctx context.Context) ([]Group, error) {
 	var groups []Group
 	for _, o := range objs {
 		g := Group{Name: fmt.Sprint(o["name"])}
+		if g.Name == PlatformAccount {
+			continue
+		}
 		for _, u := range names(o["users_obj"], "username") {
 			if !internalUser(u) {
 				g.Members = append(g.Members, u)

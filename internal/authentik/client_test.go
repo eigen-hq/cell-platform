@@ -460,7 +460,12 @@ func TestCreateAppPasswordChecksOwner(t *testing.T) {
 func TestPlatformAccountHidden(t *testing.T) {
 	api := newFakeAPI()
 	api.objects["core/users/"] = []map[string]any{{"pk": 7, "username": PlatformAccount}, {"pk": 9, "username": "alice"}}
-	srv := httptest.NewServer(api)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		q.Del("include_users")
+		r.URL.RawQuery = q.Encode()
+		api.ServeHTTP(w, r)
+	}))
 	defer srv.Close()
 	c := &Client{BaseURL: srv.URL, Token: "t", HTTP: srv.Client()}
 	ctx := context.Background()
@@ -471,12 +476,19 @@ func TestPlatformAccountHidden(t *testing.T) {
 	if _, err := c.CreateAppPassword(ctx, PlatformAccount); !errors.Is(err, ErrNotFound) {
 		t.Errorf("app password for the platform account: %v", err)
 	}
-	api.objects["core/groups/"] = []map[string]any{{"pk": "g-1", "name": "authentik Admins"}}
-	if _, err := c.ChangeGroupMembers(ctx, "authentik Admins", nil, []string{PlatformAccount}); !errors.Is(err, ErrNotFound) {
-		t.Errorf("removing the platform account from a group: %v", err)
+	api.objects["core/groups/"] = []map[string]any{{"pk": "g-1", "name": "finance"}, {"pk": "g-2", "name": PlatformAccount}}
+	if _, err := c.ChangeGroupMembers(ctx, "finance", []string{PlatformAccount}, nil); !errors.Is(err, ErrNotFound) {
+		t.Errorf("adding the platform account to a group: %v", err)
+	}
+	// Its superuser group: not listed, nobody joins it.
+	if groups, err := c.ListGroups(ctx); err != nil || len(groups) != 1 || groups[0].Name != "finance" {
+		t.Errorf("groups %v, err %v", groups, err)
+	}
+	if _, err := c.ChangeGroupMembers(ctx, PlatformAccount, []string{"alice"}, nil); !errors.Is(err, ErrNotFound) {
+		t.Errorf("joining the platform's group: %v", err)
 	}
 	for _, call := range api.calls {
-		if strings.HasPrefix(call, "POST core/tokens/") || strings.HasPrefix(call, "POST core/groups/g-1/") {
+		if strings.HasPrefix(call, "POST core/tokens/") || strings.HasPrefix(call, "POST core/groups/g-") {
 			t.Errorf("call reached authentik: %s", call)
 		}
 	}
