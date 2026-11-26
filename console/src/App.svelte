@@ -119,7 +119,7 @@
     {:else if section === "/agents" && admin}
       <Agents open={rest} onnavigate={navigate} />
     {:else if section === "/machines"}
-      <Machines {cell} />
+      <Machines {cell} {admin} />
     {:else if section === "/backups"}
       <Backups {admin} />
     {:else}

@@ -156,7 +156,7 @@
     <section class="trouble">
       <h3>What is wrong</h3>
       {#each trouble as c (c.type)}<p><strong>{c.reason || c.type}</strong> {c.message}</p>{/each}
-      <Button onclick={diagnose}>Let Ops diagnose it</Button>
+      {#if admin}<Button onclick={diagnose}>Let Ops diagnose it</Button>{/if}
     </section>
   {/if}
 
@@ -172,7 +172,7 @@
   {/if}
 
   <section>
-    <h3>Version {#if nextVersion === null}<button class="link" onclick={editVersion}>change</button>{/if}</h3>
+    <h3>Version {#if admin && nextVersion === null}<button class="link" onclick={editVersion}>change</button>{/if}</h3>
     {#if nextVersion !== null}
       <form class="version" onsubmit={(e) => (e.preventDefault(), askUpdate())}>
         <label>New version <input bind:value={nextVersion} autocomplete="off" spellcheck="false" /></label>
@@ -189,7 +189,7 @@
   </section>
 
   <section>
-    <h3>Who can open it {#if !editing && authMode(app) !== "none"}<button class="link" onclick={editAccess}>change</button>{/if}</h3>
+    <h3>Who can open it {#if admin && !editing && authMode(app) !== "none"}<button class="link" onclick={editAccess}>change</button>{/if}</h3>
     {#if editing}
       <div class="groups">
         {#each groups as g (g.name)}
@@ -215,11 +215,11 @@
         <li>
           <Status tone={b.phase === "Completed" ? "ok" : b.phase === "Failed" ? "bad" : "wait"} label={ago(b.createdAt)} />
           <span class="muted">{b.reason || b.phase.toLowerCase() || "pending"}</span>
-          {#if b.phase === "Completed"}{@render confirm(`restore:${b.name}`, "Bring back", () => restore(b))}{/if}
+          {#if admin && b.phase === "Completed"}{@render confirm(`restore:${b.name}`, "Bring back", () => restore(b))}{/if}
         </li>
       {/each}
     </ul>
-    <div class="row"><Button kind="quiet" onclick={backupNow}>Back up now</Button></div>
+    {#if admin}<div class="row"><Button kind="quiet" onclick={backupNow}>Back up now</Button></div>{/if}
   </section>
 
   {#if admin}
@@ -246,11 +246,14 @@
   </section>
   {/if}
 
+  <!-- Every action is a write: viewers see the state only (E-63). -->
+  {#if admin}
   <section class="actions">
     {#if !trouble.length}<Button kind="quiet" onclick={diagnose}>Let Ops diagnose it</Button>{/if}
     {@render confirm("remove", actions.remove, () => remove(false))}
     {@render confirm("purge", actions.purge, () => remove(true), true)}
   </section>
+  {/if}
 </Drawer>
 
 <style>

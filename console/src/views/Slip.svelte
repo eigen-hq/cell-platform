@@ -8,7 +8,8 @@
   import Avatar from "../lib/ui/Avatar.svelte";
   import Risk from "../lib/ui/Risk.svelte";
 
-  let { change: c, title, ondecided }: { change: Change; title: string; ondecided: () => void } = $props();
+  // Only admins decide (E-63): for anyone else the stub shows the plan alone.
+  let { change: c, title, admin, ondecided }: { change: Change; title: string; admin: boolean; ondecided: () => void } = $props();
   let busy = $state(false);
   let declining = $state(false);
   let failed = $state("");
@@ -83,10 +84,10 @@
   </div>
 
   <div class="stub">
-    {#if declining}
+    {#if admin && declining}
       <button class="key" disabled={busy} onclick={() => decide("reject")}>Yes, decline</button>
       <button class="ghost" disabled={busy} onclick={() => (declining = false)}>Keep it</button>
-    {:else}
+    {:else if admin}
       <button class="key" disabled={busy} onclick={() => decide("approve")}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>Approve
       </button>
@@ -96,7 +97,7 @@
     <ol class="steps" aria-label="What happens after a yes">
       {#each steps(c) as s (s)}<li>{s}</li>{/each}
     </ol>
-    {#if c.task}<a class="trail" href="/agents/{c.task}">How the agent got there</a>{/if}
+    {#if c.task && admin}<a class="trail" href="/agents/{c.task}">How the agent got there</a>{/if}
     <small class="ref">{c.name}</small>
   </div>
 </article>

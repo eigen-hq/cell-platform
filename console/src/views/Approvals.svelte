@@ -70,7 +70,7 @@
     <section class="waiting">
       <h2 class="sec-title">Waiting <small>newest first</small></h2>
       {#each waiting as c (c.name)}
-        <Slip change={c} title={title(c.app)} ondecided={load} />
+        <Slip change={c} title={title(c.app)} {admin} ondecided={load} />
       {:else}
         <div class="calm">
           <svg viewBox="0 0 120 80" aria-hidden="true">

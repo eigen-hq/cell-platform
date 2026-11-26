@@ -14,7 +14,7 @@
   type Node = components["schemas"]["Node"];
   type Join = components["schemas"]["Join"];
 
-  let { cell }: { cell: string } = $props();
+  let { cell, admin }: { cell: string; admin: boolean } = $props();
   let nodes = $state<Node[] | null>(null);
   let failed = $state("");
   let join = $state<Join | null>(null);
@@ -170,6 +170,8 @@
       </ul>
     </div>
 
+    <!-- A join token is for admins only (E-63). -->
+    {#if admin}
     <div class="card grow">
       <div class="pic" aria-hidden="true">
         {#each nodes.slice(0, 3) as m (m.name)}<span class="chip">{short(m.name)}</span>{/each}
@@ -189,6 +191,7 @@
         {#if joinError}<p class="error">{joinError}</p>{/if}
       {/if}
     </div>
+    {/if}
   </section>
 {/if}
 
@@ -444,6 +447,9 @@
     grid-template-columns: 1fr 1fr;
     gap: 12px;
     margin-top: 52px;
+  }
+  .band > :only-child {
+    grid-column: 1 / -1;
   }
   .card {
     display: grid;

@@ -103,10 +103,12 @@
         {/each}
       </div>
     {:else}
-      <p class="empty">Nothing installed yet. Pick a first app from the catalog below.</p>
+      <p class="empty">Nothing installed yet.{admin ? " Pick a first app from the catalog below." : ""}</p>
     {/if}
   </section>
 
+  <!-- Adding an app is a write: viewers see what runs, not the catalog (E-63). -->
+  {#if admin}
   <section class="add">
     <h2 class="sec-title">Add an app <small>from the catalog; it runs once approved</small></h2>
     {#if offer.length}
@@ -141,6 +143,7 @@
     <h2 class="sec-title">From an open-source project <small>any project with a Compose file; Packer turns it into an app</small></h2>
     <PackageForm taken={installed} />
   </section>
+  {/if}
 
   {#if current}
     <AppDrawer app={current} {admin} onclose={() => onnavigate("/apps")} onchange={load} />

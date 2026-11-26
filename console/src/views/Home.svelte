@@ -177,7 +177,7 @@
           <li>
             <a href="/backups">
               <span class="plus warn" aria-hidden="true">!</span>
-              <span><strong>Set a backup target</strong><small>backups have nowhere to go yet</small></span>
+              <span><strong>{admin ? "Set a backup target" : "No backup target"}</strong><small>backups have nowhere to go yet</small></span>
               <Status tone="bad" label="Not set" />
             </a>
           </li>
@@ -186,7 +186,7 @@
       {#if waiting[0]}
         <!-- keyed: a newer request must not inherit a half-made decision -->
         {#key waiting[0].name}
-          <Slip change={waiting[0]} title={title(waiting[0].app)} ondecided={load} />
+          <Slip change={waiting[0]} title={title(waiting[0].app)} {admin} ondecided={load} />
         {/key}
         <ul class="rows">
           {#each waiting.slice(1, 5) as c (c.name)}
@@ -230,12 +230,14 @@
             </a>
           </li>
         {/each}
-        <li>
-          <a href="/apps" class="add">
-            <span class="plus" aria-hidden="true">+</span>
-            <span><strong>Add an app</strong><small>from the catalog</small></span>
-          </a>
-        </li>
+        {#if admin}
+          <li>
+            <a href="/apps" class="add">
+              <span class="plus" aria-hidden="true">+</span>
+              <span><strong>Add an app</strong><small>from the catalog</small></span>
+            </a>
+          </li>
+        {/if}
       </ul>
     </section>
 
