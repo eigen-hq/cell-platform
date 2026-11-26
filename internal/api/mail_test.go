@@ -45,6 +45,17 @@ func TestMailAndInvites(t *testing.T) {
 	if err := h.server.Kube.Get(context.Background(), client.ObjectKey{Namespace: "cell-system", Name: "cell-mail"}, &s); err != nil || string(s.Data["password"]) != "pw" || string(s.Data["port"]) != "587" {
 		t.Fatalf("mail settings for the operator: %v %v", err, s.Data)
 	}
+	// An empty password keeps the one set before, but only for the same
+	// server and login.
+	if code, body = h.do("PUT", "/v0/mail", "admin", map[string]any{"host": "smtp.example.org", "username": "cell", "from": "it@example.org"}); code != 200 {
+		t.Fatalf("change sender only: %d %v", code, body)
+	}
+	if err := h.server.Kube.Get(context.Background(), client.ObjectKey{Namespace: "cell-system", Name: "cell-mail"}, &s); err != nil || string(s.Data["password"]) != "pw" || string(s.Data["from"]) != "it@example.org" {
+		t.Fatalf("password kept: %v %v", err, s.Data)
+	}
+	if code, _ = h.do("PUT", "/v0/mail", "admin", map[string]any{"host": "smtp.other.example", "username": "cell", "from": "it@example.org"}); code != 400 {
+		t.Errorf("password to another server: %d", code)
+	}
 	m, err := cell.ReadMail(s.Data)
 	if err != nil {
 		t.Fatal(err)

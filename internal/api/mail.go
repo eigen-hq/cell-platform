@@ -75,8 +75,22 @@ func (s *Server) setMail(w http.ResponseWriter, r *http.Request, _ *Caller) erro
 	if a, err := mail.ParseAddress(req.From); err != nil || a.Address != req.From {
 		return errorf(http.StatusBadRequest, "from: a plain address such as cell@example.com")
 	}
+	// Secret cell-mail is the one truth (E-82): the operator sets the
+	// identity's mail stage from it, which sends invites, and mails warnings
+	// with it. The last admin to save wins in both.
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: cell.SystemNamespace, Name: cell.MailSettings}}
+	// An empty password keeps the one set before for the same server and
+	// login; it never goes to another server.
+	if req.Username != "" && req.Password == "" {
+		if err := s.Kube.Get(r.Context(), client.ObjectKeyFromObject(secret), secret); err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+		if string(secret.Data["host"]) == req.Host && string(secret.Data["username"]) == req.Username {
+			req.Password = string(secret.Data["password"])
+		}
+	}
 	if (req.Username == "") != (req.Password == "") {
-		return errorf(http.StatusBadRequest, "username and password go together")
+		return errorf(http.StatusBadRequest, "password: the login's password, needed again for a new server or login")
 	}
 	m := authentik.Mail{Host: req.Host, Port: req.Port, Username: req.Username, Password: req.Password, From: req.From, TLS: req.TLS}
 	check := s.CheckMail
@@ -86,10 +100,6 @@ func (s *Server) setMail(w http.ResponseWriter, r *http.Request, _ *Caller) erro
 	if err := check(r.Context(), m); err != nil {
 		return errorf(http.StatusBadRequest, "mail server check failed: %v", err)
 	}
-	// Secret cell-mail is the one truth (E-82): the operator sets the
-	// identity's mail stage from it, which sends invites, and mails warnings
-	// with it. The last admin to save wins in both.
-	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: cell.SystemNamespace, Name: cell.MailSettings}}
 	patch, err := json.Marshal(map[string]any{"data": m.Data()})
 	if err != nil {
 		return err

@@ -250,6 +250,11 @@ rules:
     resources: [secrets]
     resourceNames: [cell-agent-llm, cell-mail]
     verbs: [patch]
+  # An empty password keeps the mail server's and is checked again with it.
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [cell-mail]
+    verbs: [get]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

@@ -1026,7 +1026,7 @@ components:
         host: {type: string}
         port: {type: integer, minimum: 1, maximum: 65535, description: "Default: 587, with tls 465."}
         username: {type: string}
-        password: {type: string, description: Stays in the cell; no answer holds it.}
+        password: {type: string, description: "Stays in the cell; no answer holds it. Empty with a username keeps the one set before for the same host and username."}
         from: {type: string, description: "The sender, a plain address."}
         tls: {type: boolean, description: "TLS from the start (port 465); false: STARTTLS, which the server must offer."}
     Models:
