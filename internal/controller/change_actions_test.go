@@ -17,6 +17,7 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -597,8 +598,15 @@ func TestChangeActionValidation(t *testing.T) {
 	if err := k8s.Create(ctx, cr); err != nil {
 		t.Fatal(err)
 	}
-	cr.Spec.Action, cr.Spec.Backup = "restore", "b1"
-	if err := k8s.Update(ctx, cr); !apierrors.IsInvalid(err) {
+	// The operator may update the request meanwhile: retry on the newest one.
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		if err := k8s.Get(ctx, client.ObjectKeyFromObject(cr), cr); err != nil {
+			return err
+		}
+		cr.Spec.Action, cr.Spec.Backup = "restore", "b1"
+		return k8s.Update(ctx, cr)
+	})
+	if !apierrors.IsInvalid(err) {
 		t.Errorf("action changed: %v", err)
 	}
 }
