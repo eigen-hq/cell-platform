@@ -38,7 +38,8 @@ spec:
             # to Secret cell-agent: until then the pod waits.
             - name: ANTHROPIC_BASE_URL
               value: http://cell-models.cell-system.svc.cluster.local
-            - name: ANTHROPIC_API_KEY
+            # A Bearer token, as every app sends its key (E-81).
+            - name: ANTHROPIC_AUTH_TOKEN
               valueFrom: {secretKeyRef: {name: cell-agent, key: modelKey}}
           resources:
             requests: {cpu: 10m, memory: 32Mi}

@@ -1,10 +1,15 @@
 package api
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -56,6 +61,8 @@ func (s *Server) setModels(w http.ResponseWriter, r *http.Request, _ *Caller) er
 		// APIKey empty keeps the key set before, for the same provider and
 		// address.
 		APIKey string `json:"apiKey"`
+		// TokensPerHour limits each agent and app; 0 means no limit.
+		TokensPerHour int64 `json:"tokensPerHour"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		return err
@@ -65,7 +72,11 @@ func (s *Server) setModels(w http.ResponseWriter, r *http.Request, _ *Caller) er
 		// The gateway adds the Anthropic API's /v1 itself.
 		req.BaseURL = strings.TrimSuffix(req.BaseURL, "/v1")
 	}
-	p := cell.ReadModelProvider(map[string][]byte{"provider": []byte(req.Provider), "baseUrl": []byte(req.BaseURL), "model": []byte(req.Model), "apiKey": []byte(req.APIKey)})
+	limit := []byte(nil)
+	if req.TokensPerHour != 0 {
+		limit = []byte(strconv.FormatInt(req.TokensPerHour, 10))
+	}
+	p := cell.ReadModelProvider(map[string][]byte{"provider": []byte(req.Provider), "baseUrl": []byte(req.BaseURL), "model": []byte(req.Model), "apiKey": []byte(req.APIKey), "tokensPerHour": limit})
 	if err := p.Check(); err != nil {
 		return errorf(http.StatusBadRequest, "%v", err)
 	}
@@ -94,9 +105,12 @@ func (s *Server) setModels(w http.ResponseWriter, r *http.Request, _ *Caller) er
 			return errorf(http.StatusBadRequest, "model provider check failed: %v", err)
 		}
 	}
-	data := map[string]any{"provider": []byte(p.Provider), "model": []byte(p.Model), "baseUrl": nil}
+	data := map[string]any{"provider": []byte(p.Provider), "model": []byte(p.Model), "baseUrl": nil, "tokensPerHour": nil}
 	if p.BaseURL != "" {
 		data["baseUrl"] = []byte(p.BaseURL)
+	}
+	if limit != nil {
+		data["tokensPerHour"] = limit
 	}
 	switch {
 	case p.APIKey != "":
@@ -136,6 +150,100 @@ func (s *Server) setModels(w http.ResponseWriter, r *http.Request, _ *Caller) er
 	}
 	writeJSON(w, http.StatusOK, p.View())
 	return nil
+}
+
+// modelsUsage tells the tokens each account used, from the gateway's
+// metrics: they count since the gateway last started.
+func (s *Server) modelsUsage(w http.ResponseWriter, r *http.Request, _ *Caller) error {
+	u := s.ModelsMetrics
+	if u == "" {
+		u = cell.ModelsMetricsURL
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return err
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return errorf(http.StatusServiceUnavailable, "the model gateway does not answer: %v", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		return errorf(http.StatusServiceUnavailable, "the model gateway answered %d", res.StatusCode)
+	}
+	accounts, err := tokenUsage(io.LimitReader(res.Body, 8<<20))
+	if err != nil {
+		return fmt.Errorf("model gateway metrics: %w", err)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"accounts": accounts})
+	return nil
+}
+
+// AccountUsage is the tokens one account used.
+type AccountUsage struct {
+	Account      string `json:"account"`
+	InputTokens  int64  `json:"inputTokens"`
+	OutputTokens int64  `json:"outputTokens"`
+}
+
+var metricLabel = regexp.MustCompile(`(\w+)="((?:[^"\\]|\\.)*)"`)
+
+// tokenUsage sums the gateway's token histogram per account, over models
+// and routes, sorted by account.
+func tokenUsage(in io.Reader) ([]AccountUsage, error) {
+	const name = "agentgateway_gen_ai_client_token_usage_sum{"
+	sums := map[string]*AccountUsage{}
+	sc := bufio.NewScanner(in)
+	sc.Buffer(make([]byte, 64<<10), 1<<20)
+	for sc.Scan() {
+		line, ok := strings.CutPrefix(sc.Text(), name)
+		if !ok {
+			continue
+		}
+		i := strings.LastIndex(line, "} ")
+		if i < 0 {
+			return nil, fmt.Errorf("unreadable line %q", sc.Text())
+		}
+		f := strings.Fields(line[i+2:])
+		if len(f) == 0 {
+			return nil, fmt.Errorf("unreadable line %q", sc.Text())
+		}
+		v, err := strconv.ParseFloat(f[0], 64)
+		if err != nil {
+			return nil, fmt.Errorf("unreadable line %q", sc.Text())
+		}
+		labels := map[string]string{}
+		for _, m := range metricLabel.FindAllStringSubmatch(line[:i], -1) {
+			labels[m[1]] = m[2]
+		}
+		// Requests without a known key are refused before they reach a model.
+		account := labels["account"]
+		if account == "" {
+			continue
+		}
+		a := sums[account]
+		if a == nil {
+			a = &AccountUsage{Account: account}
+			sums[account] = a
+		}
+		switch labels["gen_ai_token_type"] {
+		case "input":
+			a.InputTokens += int64(v)
+		case "output":
+			a.OutputTokens += int64(v)
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]AccountUsage, 0, len(sums))
+	for _, a := range sums {
+		out = append(out, *a)
+	}
+	slices.SortFunc(out, func(a, b AccountUsage) int { return strings.Compare(a.Account, b.Account) })
+	return out, nil
 }
 
 // checkModels lists the provider's models with the key. Only the status

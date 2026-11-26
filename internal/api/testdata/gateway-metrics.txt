@@ -1,0 +1,17 @@
+# HELP agentgateway_config_synchronized Whether the last configuration load/reload was successful or not, being synchronized with the on-disk configuration.
+# TYPE agentgateway_config_synchronized gauge
+# HELP agentgateway_tokio_global_queue_depth number of tasks currently scheduled in the runtime’s global queue
+# TYPE agentgateway_tokio_global_queue_depth gauge
+# HELP agentgateway_tokio_num_alive_tasks number of currently alive tasks in the runtime
+# TYPE agentgateway_tokio_num_alive_tasks gauge
+# HELP agentgateway_gen_ai_client_token_usage Number of tokens used per request.
+# TYPE agentgateway_gen_ai_client_token_usage histogram
+agentgateway_gen_ai_client_token_usage_sum{gen_ai_token_type="output",gen_ai_operation_name="chat",gen_ai_system="anthropic",gen_ai_request_model="claude-opus-5-5",gen_ai_response_model="claude-opus-5-5",bind="bind/3000",gateway="default/default",listener="llm",route="internal/llm:request",route_rule="unknown",account="cell-agent"} 21.0
+agentgateway_gen_ai_client_token_usage_count{gen_ai_token_type="output",gen_ai_operation_name="chat",gen_ai_system="anthropic",gen_ai_request_model="claude-opus-5-5",gen_ai_response_model="claude-opus-5-5",bind="bind/3000",gateway="default/default",listener="llm",route="internal/llm:request",route_rule="unknown",account="cell-agent"} 3
+agentgateway_gen_ai_client_token_usage_sum{gen_ai_token_type="input",gen_ai_operation_name="chat",gen_ai_system="anthropic",gen_ai_request_model="claude-opus-5-5",gen_ai_response_model="claude-opus-5-5",bind="bind/3000",gateway="default/default",listener="llm",route="internal/llm:request",route_rule="unknown",account="app-wiki"} 40.0
+agentgateway_gen_ai_client_token_usage_count{gen_ai_token_type="input",gen_ai_operation_name="chat",gen_ai_system="anthropic",gen_ai_request_model="claude-opus-5-5",gen_ai_response_model="claude-opus-5-5",bind="bind/3000",gateway="default/default",listener="llm",route="internal/llm:request",route_rule="unknown",account="app-wiki"} 1
+agentgateway_gen_ai_client_token_usage_sum{gen_ai_token_type="output",gen_ai_operation_name="chat",gen_ai_system="anthropic",gen_ai_request_model="claude-opus-5-5",gen_ai_response_model="claude-opus-5-5",bind="bind/3000",gateway="default/default",listener="llm",route="internal/llm:request",route_rule="unknown",account="app-wiki"} 7.0
+agentgateway_gen_ai_client_token_usage_count{gen_ai_token_type="output",gen_ai_operation_name="chat",gen_ai_system="anthropic",gen_ai_request_model="claude-opus-5-5",gen_ai_response_model="claude-opus-5-5",bind="bind/3000",gateway="default/default",listener="llm",route="internal/llm:request",route_rule="unknown",account="app-wiki"} 1
+agentgateway_gen_ai_client_token_usage_sum{gen_ai_token_type="input",gen_ai_operation_name="chat",gen_ai_system="anthropic",gen_ai_request_model="claude-opus-5-5",gen_ai_response_model="claude-opus-5-5",bind="bind/3000",gateway="default/default",listener="llm",route="internal/llm:request",route_rule="unknown",account="cell-agent"} 120.0
+agentgateway_gen_ai_client_token_usage_count{gen_ai_token_type="input",gen_ai_operation_name="chat",gen_ai_system="anthropic",gen_ai_request_model="claude-opus-5-5",gen_ai_response_model="claude-opus-5-5",bind="bind/3000",gateway="default/default",listener="llm",route="internal/llm:request",route_rule="unknown",account="cell-agent"} 3
+# EOF

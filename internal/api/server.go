@@ -97,8 +97,11 @@ type Server struct {
 	// CheckModels checks a model provider's key before it is taken; nil
 	// means a real request to the provider.
 	CheckModels func(ctx context.Context, p cell.ModelProvider) error
-	Now         func() time.Time
-	Log         *slog.Logger
+	// ModelsMetrics is the model gateway's metrics address; empty means the
+	// one in the cell.
+	ModelsMetrics string
+	Now           func() time.Time
+	Log           *slog.Logger
 }
 
 // route is one operation of the API; the tests check the table against
@@ -139,6 +142,7 @@ func (s *Server) routes() []route {
 		{"PUT", "/v0/mail", RoleAdmin, s.setMail},
 		{"GET", "/v0/models", RoleAgent, s.getModels},
 		{"PUT", "/v0/models", RoleAdmin, s.setModels},
+		{"GET", "/v0/models/usage", RoleAdmin, s.modelsUsage},
 		{"GET", "/v0/groups", RoleAgent, s.listGroups},
 		{"POST", "/v0/groups", RoleAdmin, s.createGroup},
 		{"PATCH", "/v0/groups/{name}/members", RoleAdmin, s.changeGroupMembers},

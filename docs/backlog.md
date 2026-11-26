@@ -56,7 +56,7 @@ What the console shows comes from the API. Without an endpoint there is no UI, n
 | Default set: apps a new cell starts with (among them parts of the office UI), installed and updated like any catalog app | open | First setup |
 | Own domain per app (e.g. the office UI on `eigen-office.com`): DNS check, certificate, login redirects and the app's base URL follow the domain; the cell address stays as a fallback | open | |
 | Own clients per app (mobile, desktop, CLI): the manifest declares them, each gets its own login client (public, PKCE) and reaches the app on its domain | open | Own domain per app |
-| Model access for apps: an app declares it in the manifest and gets the cell's model gateway with its own key and budget, no provider key in the app | open | Model gateway |
+| Model access for apps: an app declares it in the manifest and gets the cell's model gateway with its own key and budget, no provider key in the app | built (E-81), not yet verified on a cell | Model gateway |
 | Packaging of an open-source project by an agent (Compose) | running | Helm charts: O-15 |
 | Update and remove | running (update by hand; update policy: O-09) | O-09 |
 | Enforce data access per app: which people, which data | open | |
@@ -163,7 +163,7 @@ A core part of the platform, not an add-on (E-78): agents and apps reach models 
 | Model gateway: one open model API in the cell, any provider or own model behind it; no agent code bound to one provider's SDK | built (E-80); the agent still uses the Anthropic SDK against the gateway | O-30 |
 | Providers and keys in the console and the API (the customer's own keys), not only at install (`CELL_LLM_API_KEY`) | built (E-80) | Model gateway |
 | Model per task: which model an agent uses, fallback to another provider | open | Model gateway |
-| Usage and costs, budget and limits per agent, app or department | open | Model gateway |
+| Usage and costs, budget and limits per agent, app or department | built: tokens per account and one hourly token limit for each (E-81); budgets in money, per department and durable usage open (O-31) | Model gateway |
 | Run open models in the cell | open | Model gateway |
 
 ### Cell

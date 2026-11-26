@@ -3,6 +3,7 @@ package cell
 import (
 	"fmt"
 	"net/url"
+	"strconv"
 )
 
 // The model gateway (E-80). Every agent reaches its model through one
@@ -23,6 +24,13 @@ const (
 	// was made from: a kept key is written only on top of that version.
 	ModelsVersionKey = "settingsVersion"
 	AgentModelKey    = "modelKey"
+	// AppModelsSecret holds an app's key to the gateway (key AppModelsKey)
+	// in the app's namespace (E-81).
+	AppModelsSecret = "cell-models"
+	AppModelsKey    = "apiKey"
+	// ModelsMetricsURL is the gateway's Prometheus endpoint: tokens per
+	// account since the gateway started.
+	ModelsMetricsURL = "http://cell-models.cell-system.svc.cluster.local:15020/metrics"
 	// ModelsURL is where agents reach the gateway; it speaks the Anthropic
 	// Messages API and the OpenAI-compatible one.
 	ModelsURL = "http://cell-models.cell-system.svc.cluster.local"
@@ -42,17 +50,25 @@ type ModelsView struct {
 	Provider   string `json:"provider,omitempty"`
 	BaseURL    string `json:"baseUrl,omitempty"`
 	Model      string `json:"model,omitempty"`
+	// TokensPerHour limits each agent and app; 0 means no limit.
+	TokensPerHour int64 `json:"tokensPerHour,omitempty"`
 }
 
 // ModelProvider is the provider in ModelSettings. Settings written before
 // the gateway have only apiKey and model: they are Anthropic.
 type ModelProvider struct {
 	Provider, BaseURL, APIKey, Model string
+	TokensPerHour                    int64
 }
 
 // ReadModelProvider reads Secret ModelSettings' data.
 func ReadModelProvider(data map[string][]byte) ModelProvider {
 	p := ModelProvider{Provider: string(data["provider"]), BaseURL: string(data["baseUrl"]), APIKey: string(data["apiKey"]), Model: string(data["model"])}
+	// An unreadable limit is caught by Check.
+	p.TokensPerHour, _ = strconv.ParseInt(string(data["tokensPerHour"]), 10, 64)
+	if len(data["tokensPerHour"]) > 0 && p.TokensPerHour == 0 {
+		p.TokensPerHour = -1
+	}
 	if p.Provider == "" {
 		p.Provider = ProviderAnthropic
 	}
@@ -72,6 +88,9 @@ func (p ModelProvider) Check() error {
 	if p.Model == "" {
 		return fmt.Errorf("model: the provider's model name")
 	}
+	if p.TokensPerHour < 0 {
+		return fmt.Errorf("tokensPerHour: a whole number above 0, or none")
+	}
 	if p.BaseURL != "" {
 		u, err := url.Parse(p.BaseURL)
 		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
@@ -83,5 +102,5 @@ func (p ModelProvider) Check() error {
 
 // View is the provider without its key.
 func (p ModelProvider) View() ModelsView {
-	return ModelsView{Configured: p.APIKey != "" || p.Provider == ProviderOpenAI && p.BaseURL != "", Provider: p.Provider, BaseURL: p.BaseURL, Model: p.Model}
+	return ModelsView{Configured: p.APIKey != "" || p.Provider == ProviderOpenAI && p.BaseURL != "", Provider: p.Provider, BaseURL: p.BaseURL, Model: p.Model, TokensPerHour: p.TokensPerHour}
 }

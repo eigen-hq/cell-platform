@@ -194,6 +194,11 @@ spec:
                     x-kubernetes-validations:
                     - message: resizing the database is not supported yet
                       rule: self.size == oldSelf.size
+                  models:
+                    description: |-
+                      Models gives the app the cell's model gateway with a key of its own
+                      (E-81); templates see {{ .models.url }} and {{ .models.secretName }}.
+                    type: boolean
                   secrets:
                     description: |-
                       Secrets are generated once (key "password") and kept across reinstalls;

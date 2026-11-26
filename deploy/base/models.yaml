@@ -29,6 +29,9 @@ spec:
               containerPort: 3000
             - name: ready
               containerPort: 15021
+            # Prometheus: tokens per account, read by the API.
+            - name: metrics
+              containerPort: 15020
           readinessProbe:
             httpGet: {path: /healthz/ready, port: ready}
           volumeMounts:
@@ -61,3 +64,6 @@ spec:
     - name: http
       port: 80
       targetPort: http
+    - name: metrics
+      port: 15020
+      targetPort: metrics

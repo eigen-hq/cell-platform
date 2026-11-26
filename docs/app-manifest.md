@@ -72,6 +72,7 @@ spec:
 | `needs.database` | `engine: postgres`, `size`. One CloudNativePG database per app |
 | `needs.volumes` | `name`, `size`, `mountPath` (image apps), at most 16. Charts create their volumes themselves. As with the database, the size cannot be changed yet, because a rollback cannot shrink a volume |
 | `needs.secrets` | Names of generated secrets (key `password`), created once, kept across reinstalls |
+| `needs.models` | `true`: the app reaches the cell's model gateway with a key of its own (E-81), never the provider's. Its tokens count for the account `app-<name>` and stop at the cell's limit per hour |
 | `metadata.name` | Name of the app, at most 40 characters; names starting with `cell-` belong to the platform (its own clients in the identity service) |
 | `access` | `subdomain` (not `auth`, `api` and `mcp`, which belong to the cell; only once per cell: a host that another route already serves stays with that route; otherwise the operator reserves the host atomically as ConfigMap `host-<subdomain>` in `cell-system` before it sets anything up; whoever reserves first keeps it until its routes have left it or the app is removed), `port`, `service` (default: app name), `auth`, `groups` |
 | `access.auth` | `mode`, `redirectPaths` (OIDC callback paths), `secretKeys` (key names in the client secret, as the chart or app expects them) |
@@ -105,6 +106,7 @@ Strings in `source` and `access.service` are Go templates. A placeholder that do
 | `.auth.issuer`, `.auth.discoveryUrl`, `.auth.clientId`, `.auth.secretName` | OIDC values; the secret has the keys from `secretKeys` |
 | `.volumes.<name>.claim` | Name of the PersistentVolumeClaim |
 | `.secrets.<name>` | Name of the generated secret |
+| `.models.url`, `.models.openaiUrl`, `.models.model`, `.models.secretName` | Model gateway: the Anthropic Messages address, the OpenAI-compatible one (with `/v1`), the model name to ask for (`default`), the secret with the key in `apiKey`, sent as `Authorization: Bearer` |
 
 ## What the operator creates
 

@@ -117,6 +117,9 @@ type Needs struct {
 	// Secrets are generated once (key "password") and kept across reinstalls;
 	// templates see their names as {{ .secrets.<name> }}.
 	Secrets []string `json:"secrets,omitempty"`
+	// Models gives the app the cell's model gateway with a key of its own
+	// (E-81); templates see {{ .models.url }} and {{ .models.secretName }}.
+	Models bool `json:"models,omitempty"`
 }
 
 // +kubebuilder:validation:XValidation:rule="self.size == oldSelf.size",message="resizing the database is not supported yet"

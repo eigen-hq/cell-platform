@@ -21,6 +21,7 @@
   type App = components["schemas"]["App"];
   type Mail = components["schemas"]["Mail"];
   type Models = components["schemas"]["Models"];
+  type Usage = components["schemas"]["ModelsUsage"]["accounts"];
 
   const ADMINS = "cell-admins";
   const AGENTS = "cell-agents";
@@ -68,12 +69,30 @@
       modelsFailed = e instanceof Error ? e.message : String(e);
     }
   }
+  // Tokens per agent and app since the gateway last started.
+  let usage = $state<Usage | null>(null);
+  let usageFailed = $state("");
+  async function loadUsage() {
+    try {
+      usage = must(await api.GET("/v0/models/usage")).accounts;
+      usageFailed = "";
+    } catch (e) {
+      usageFailed = e instanceof Error ? e.message : String(e);
+    }
+  }
+  const accountName = (a: string) => (a === "cell-agent" ? "Platform agent" : a.replace(/^app-/, ""));
+  const tokens = (n: number) => n.toLocaleString("en");
+  let usageMax = $derived(Math.max(1, ...(usage ?? []).map((a) => a.inputTokens + a.outputTokens)));
 
   $effect(() => {
     load();
     loadMail();
     loadModels();
-    const t = setInterval(load, 15000);
+    loadUsage();
+    const t = setInterval(() => {
+      load();
+      loadUsage();
+    }, 15000);
     return () => clearInterval(t);
   });
 
@@ -197,12 +216,12 @@
   // The model provider: every agent of the cell reaches it through the
   // model gateway; its key stays there.
   let editingModels = $state(false);
-  let modelsForm = $state({ provider: "anthropic" as "anthropic" | "openai", baseUrl: "", model: "", apiKey: "" });
+  let modelsForm = $state({ provider: "anthropic" as "anthropic" | "openai", baseUrl: "", model: "", apiKey: "", tokensPerHour: null as number | null });
   let modelsNote = $state<{ text: string; bad?: boolean } | null>(null);
   let savingModels = $state(false);
   function editModels() {
     const m = models;
-    modelsForm = { provider: m?.provider ?? "anthropic", baseUrl: m?.baseUrl ?? "", model: m?.model ?? "", apiKey: "" };
+    modelsForm = { provider: m?.provider ?? "anthropic", baseUrl: m?.baseUrl ?? "", model: m?.model ?? "", apiKey: "", tokensPerHour: m?.tokensPerHour ?? null };
     modelsNote = null;
     editingModels = true;
   }
@@ -213,7 +232,7 @@
     modelsNote = null;
     try {
       const f = modelsForm;
-      const body = { provider: f.provider, baseUrl: f.baseUrl.trim() || undefined, model: f.model.trim() || undefined, apiKey: f.apiKey || undefined };
+      const body = { provider: f.provider, baseUrl: f.baseUrl.trim() || undefined, model: f.model.trim() || undefined, apiKey: f.apiKey || undefined, tokensPerHour: f.tokensPerHour || undefined };
       models = must(await api.PUT("/v0/models", { body }));
       editingModels = false;
       modelsNote = { text: `The provider took the key. Agents use ${models.model} within a minute.` };
@@ -385,6 +404,7 @@
         <label>Provider<select bind:value={modelsForm.provider}><option value="anthropic">Anthropic</option><option value="openai">OpenAI-compatible</option></select></label>
         <label>Address<input type="url" bind:value={modelsForm.baseUrl} required={modelsForm.provider === "openai"} placeholder={modelsForm.provider === "openai" ? "https://api.openai.com/v1" : "https://api.anthropic.com"} autocomplete="off" /></label>
         <label>Model<input bind:value={modelsForm.model} required={modelsForm.provider === "openai"} placeholder={modelsForm.provider === "openai" ? "gpt-5" : "claude-opus-5-5"} autocomplete="off" /></label>
+        <label>Tokens per hour<input type="number" min="1" step="1" bind:value={modelsForm.tokensPerHour} placeholder="no limit" /><small>for each agent and app on its own</small></label>
         <label>Key<input type="password" bind:value={modelsForm.apiKey} autocomplete="new-password" placeholder={models?.configured && models.provider === modelsForm.provider && (models.baseUrl ?? "") === modelsForm.baseUrl.trim().replace(/\/$/, "") ? "empty keeps the key" : ""} /></label>
         <div class="row">
           <Button type="submit" disabled={savingModels}>{savingModels ? "Checking the key" : "Check and save"}</Button>
@@ -392,9 +412,24 @@
         </div>
       </form>
     {:else if models?.configured}
-      <p class="mail-line"><span class="chip">{models.model}</span><small>from {models.provider === "openai" ? models.baseUrl : "Anthropic"}, for every agent of the cell</small></p>
+      <p class="mail-line"><span class="chip">{models.model}</span><small>from {models.provider === "openai" ? models.baseUrl : "Anthropic"}, for every agent and app of the cell, {models.tokensPerHour ? `at most ${tokens(models.tokensPerHour)} tokens an hour each` : "without a limit"}</small></p>
     {:else}
       <p class="mail-line"><small>No model provider yet. Agent tasks wait until one is set.</small></p>
+    {/if}
+    {#if usageFailed}<p class="note fail" role="alert">{usageFailed}</p>{/if}
+    {#if usage?.length}
+      <ul class="usage" aria-label="Tokens per account since the gateway last started">
+        {#each usage as a (a.account)}
+          <li>
+            <span class="who">{accountName(a.account)}</span>
+            <span class="bar" aria-hidden="true">
+              <span class="in" style:width="{(a.inputTokens / usageMax) * 100}%"></span><span class="out" style:width="{(a.outputTokens / usageMax) * 100}%"></span>
+            </span>
+            <small>{tokens(a.inputTokens)} in · {tokens(a.outputTokens)} out</small>
+          </li>
+        {/each}
+      </ul>
+      <small>Tokens since the model gateway last started.</small>
     {/if}
   </section>
 
@@ -641,6 +676,36 @@
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+  }
+  .usage {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .usage li {
+    display: grid;
+    grid-template-columns: minmax(120px, 180px) 1fr auto;
+    align-items: center;
+    gap: 12px;
+  }
+  .usage .who {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+  .usage .bar {
+    display: flex;
+    height: 12px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--color-info) 10%, transparent);
+  }
+  .usage .in {
+    background: var(--color-info);
+  }
+  .usage .out {
+    background: var(--color-ok);
   }
   .note {
     margin: 0;

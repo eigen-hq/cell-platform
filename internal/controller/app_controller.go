@@ -372,6 +372,13 @@ func (r *AppReconciler) install(ctx context.Context, app *cellv1.App, target *ba
 		secrets[name] = "secret-" + name
 	}
 	data["secrets"] = secrets
+	if app.Spec.Needs.Models {
+		// The gateway admits the key once the models reconcile has read it.
+		if _, err := r.ensureSecret(ctx, ns, cell.AppModelsSecret, corev1.SecretTypeOpaque, map[string]string{cell.AppModelsKey: token()}); err != nil {
+			return false, "", err
+		}
+		data["models"] = map[string]any{"url": cell.ModelsURL, "openaiUrl": cell.ModelsURL + "/v1", "secretName": cell.AppModelsSecret, "model": cell.ModelAlias}
+	}
 	volumes := map[string]any{}
 	for _, v := range app.Spec.Needs.Volumes {
 		volumes[v.Name] = map[string]any{"claim": v.Name}

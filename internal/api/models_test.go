@@ -2,9 +2,12 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -109,5 +112,58 @@ func TestCheckModels(t *testing.T) {
 	}
 	if len(paths) != 3 || paths[0] != "/v1/models" || paths[1] != "/v1/models" {
 		t.Errorf("paths %v", paths)
+	}
+}
+
+// Usage sums the gateway's token counts per account; the limit is stored
+// and 0 takes it away.
+func TestModelsUsageAndLimit(t *testing.T) {
+	metrics, err := os.ReadFile("testdata/gateway-metrics.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(metrics) }))
+	defer gw.Close()
+	h := newHarness(t)
+	h.server.ModelsMetrics = gw.URL
+	if code, _ := h.do("GET", "/v0/models/usage", "agent", nil); code != 403 {
+		t.Errorf("agent reads usage: %d", code)
+	}
+	code, body := h.do("GET", "/v0/models/usage", "admin", nil)
+	want := `[{"account":"app-wiki","inputTokens":40,"outputTokens":7},{"account":"cell-agent","inputTokens":120,"outputTokens":21}]`
+	if got, _ := json.Marshal(field(body, "accounts")); code != 200 || string(got) != want {
+		t.Errorf("usage: %d %s", code, got)
+	}
+
+	h.server.CheckModels = func(context.Context, cell.ModelProvider) error { return nil }
+	if code, _ := h.do("PUT", "/v0/models", "admin", map[string]any{"apiKey": "k1", "tokensPerHour": -5}); code != 400 {
+		t.Errorf("negative limit: %d", code)
+	}
+	if code, body := h.do("PUT", "/v0/models", "admin", map[string]any{"apiKey": "k1", "tokensPerHour": 50000}); code != 200 || field(body, "tokensPerHour") != float64(50000) {
+		t.Errorf("limit: %d %v", code, body)
+	}
+	var s corev1.Secret
+	key := client.ObjectKey{Namespace: cell.SystemNamespace, Name: cell.ModelSettings}
+	if err := h.kube.Get(context.Background(), key, &s); err != nil || string(s.Data["tokensPerHour"]) != "50000" {
+		t.Fatalf("stored %v %v", s.Data, err)
+	}
+	if code, _ := h.do("PUT", "/v0/models", "admin", map[string]any{"apiKey": "k2"}); code != 200 {
+		t.Errorf("no limit: %d", code)
+	}
+	if err := h.kube.Get(context.Background(), key, &s); err != nil || s.Data["tokensPerHour"] != nil {
+		t.Errorf("limit stays %v %v", s.Data, err)
+	}
+}
+
+// A cut-off sample is an error, not a crash.
+func TestTokenUsageUnreadable(t *testing.T) {
+	for _, in := range []string{
+		`agentgateway_gen_ai_client_token_usage_sum{account="a",gen_ai_token_type="input"} `,
+		`agentgateway_gen_ai_client_token_usage_sum{account="a",gen_ai_token_type="input"`,
+		`agentgateway_gen_ai_client_token_usage_sum{account="a",gen_ai_token_type="input"} x`,
+	} {
+		if _, err := tokenUsage(strings.NewReader(in)); err == nil {
+			t.Errorf("no error for %q", in)
+		}
 	}
 }

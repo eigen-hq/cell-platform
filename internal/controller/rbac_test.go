@@ -132,6 +132,9 @@ func denied(ctx context.Context, user string, attrs []authorizationv1.ResourceAt
 var (
 	operatorDenied = []authorizationv1.ResourceAttributes{
 		{Namespace: "kube-system", Verb: "get", Resource: "secrets"},
+		// An app namespace before the operator's grant in it: the models
+		// reconcile gets Forbidden there (TestModelsAppWithoutGrant).
+		{Namespace: "app-held", Verb: "get", Resource: "secrets", Name: "cell-models"},
 		{Namespace: "default", Verb: "create", Resource: "configmaps"},
 		{Namespace: "default", Verb: "create", Resource: "deployments", Group: "apps"},
 		{Namespace: "default", Verb: "create", Resource: "jobs", Group: "batch"},

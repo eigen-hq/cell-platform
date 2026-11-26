@@ -344,6 +344,20 @@ paths:
         "400": {$ref: "#/components/responses/Error"}
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /v0/models/usage:
+    get:
+      operationId: getModelsUsage
+      description: |
+        Tokens each agent and app used through the model gateway, since the
+        gateway last started. Accounts: cell-agent for the platform's agent,
+        app-<name> for an app.
+      responses:
+        default: {$ref: "#/components/responses/Error"}
+        "200": {description: Usage per account., content: {application/json: {schema: {$ref: "#/components/schemas/ModelsUsage"}}}}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
   /v0/groups:
     get:
       operationId: listGroups
@@ -1024,6 +1038,22 @@ components:
         provider: {type: string, enum: [anthropic, openai]}
         baseUrl: {type: string}
         model: {type: string}
+        tokensPerHour: {type: integer, format: int64, description: "Tokens each agent and app may use per hour; absent means no limit."}
+    ModelsUsage:
+      type: object
+      additionalProperties: false
+      required: [accounts]
+      properties:
+        accounts:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [account, inputTokens, outputTokens]
+            properties:
+              account: {type: string}
+              inputTokens: {type: integer, format: int64}
+              outputTokens: {type: integer, format: int64}
     ModelsRequest:
       type: object
       additionalProperties: false
@@ -1032,6 +1062,7 @@ components:
         baseUrl: {type: string, description: "Default for anthropic: https://api.anthropic.com. For anthropic the address without /v1 (a trailing /v1 is dropped); for openai the address the API answers under, such as https://api.openai.com/v1."}
         model: {type: string, description: "The provider's model name; default for anthropic: claude-opus-5-5."}
         apiKey: {type: string, description: "Stays in the model gateway; no answer holds it. Empty keeps the key set before for the same provider and address."}
+        tokensPerHour: {type: integer, format: int64, minimum: 0, description: "Tokens each agent and app may use per hour, each on its own; 0 or absent means no limit. A request that goes over the limit still finishes; the next one is refused (429) until the hour refills it."}
     BackupTarget:
       type: object
       additionalProperties: false

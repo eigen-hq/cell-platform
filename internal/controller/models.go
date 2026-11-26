@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"slices"
+	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -19,12 +21,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/yaml"
 
+	cellv1 "github.com/eigen-hq/cell-platform/api/v1alpha1"
 	"github.com/eigen-hq/cell-platform/internal/cell"
 )
 
 // ModelsReconciler writes the model gateway's configuration (E-80) from the
-// provider in Secret cell.ModelSettings and the agent's key in its account's
-// Secret, and tells what is set in ConfigMap cell.ModelsStatus. The
+// provider in Secret cell.ModelSettings, the agent's key in its account's
+// Secret and the keys of the apps that need models (E-81), and tells what is
+// set in ConfigMap cell.ModelsStatus. The
 // configuration holds the provider's key, so it is a Secret too; the
 // gateway reloads it when it changes.
 type ModelsReconciler struct {
@@ -41,6 +45,7 @@ func (r *ModelsReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&corev1.Secret{}, one, builder.WithPredicates(predicate.NewPredicateFuncs(func(o client.Object) bool {
 			return o.GetNamespace() == cell.SystemNamespace && slices.Contains(names, o.GetName())
 		}))).
+		Watches(&cellv1.App{}, one, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Complete(r)
 }
 
@@ -59,7 +64,38 @@ func (r *ModelsReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.
 	if p.Check() != nil {
 		view = cell.ModelsView{}
 	}
-	conf, err := modelsConfig(p, view.Configured, agent.Data[cell.AgentModelKey])
+	keys := []modelsKey{{account: cell.AgentAccount, key: agent.Data[cell.AgentModelKey]}}
+	var apps cellv1.AppList
+	if err := r.List(ctx, &apps); err != nil {
+		return ctrl.Result{}, err
+	}
+	// Sorted, so the same keys render the same configuration. The app's own
+	// reconcile makes its key; until then it gets none. Secrets in app
+	// namespaces are not watched (E-70): a replaced key is picked up by the
+	// next resync.
+	slices.SortFunc(apps.Items, func(a, b cellv1.App) int { return strings.Compare(a.Name, b.Name) })
+	var wait ctrl.Result
+	for _, app := range apps.Items {
+		if !app.Spec.Needs.Models || app.DeletionTimestamp != nil {
+			continue
+		}
+		var s corev1.Secret
+		err := r.Get(ctx, client.ObjectKey{Namespace: Namespace(app.Name), Name: cell.AppModelsSecret}, &s)
+		// Forbidden: the app's namespace or the operator's grant in it is not
+		// there yet (a held subdomain, say); the others still get in.
+		if apierrors.IsNotFound(err) || apierrors.IsForbidden(err) {
+			wait.RequeueAfter = 10 * time.Second
+			continue
+		}
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if wait.RequeueAfter == 0 {
+			wait.RequeueAfter = time.Minute
+		}
+		keys = append(keys, modelsKey{account: Namespace(app.Name), key: s.Data[cell.AppModelsKey]})
+	}
+	conf, err := modelsConfig(p, view.Configured, keys)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -82,17 +118,41 @@ func (r *ModelsReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.
 		return ctrl.Result{}, err
 	}
 	cm := corev1ac.ConfigMap(cell.ModelsStatus, cell.SystemNamespace).WithData(map[string]string{cell.ModelsStatusKey: string(raw), cell.ModelsVersionKey: settings.ResourceVersion})
-	return ctrl.Result{}, r.Apply(ctx, cm, client.FieldOwner(fieldOwner), client.ForceOwnership)
+	return wait, r.Apply(ctx, cm, client.FieldOwner(fieldOwner), client.ForceOwnership)
+}
+
+// modelsKey is a key to the gateway and the account it counts for.
+type modelsKey struct {
+	account string
+	key     []byte
 }
 
 // modelsConfig renders the gateway's configuration: every model name goes
-// to the configured model, and only a known key gets through. Without a
-// provider the gateway serves no model.
-func modelsConfig(p cell.ModelProvider, configured bool, agentKey []byte) ([]byte, error) {
+// to the configured model, only a known key gets through, and its tokens
+// count for its account. Without a provider the gateway serves no model.
+func modelsConfig(p cell.ModelProvider, configured bool, accounts []modelsKey) ([]byte, error) {
 	keys := []any{}
-	if len(agentKey) > 0 {
-		sum := sha256.Sum256(agentKey)
-		keys = append(keys, map[string]any{"keyHash": "sha256:" + hex.EncodeToString(sum[:]), "metadata": map[string]string{"account": cell.AgentAccount}})
+	for _, a := range accounts {
+		if len(a.key) == 0 {
+			continue
+		}
+		sum := sha256.Sum256(a.key)
+		keys = append(keys, map[string]any{"keyHash": "sha256:" + hex.EncodeToString(sum[:]), "metadata": map[string]string{"account": a.account}})
+	}
+	policies := map[string]any{"apiKey": map[string]any{
+		// Bearer in Authorization, as the OpenAI SDKs send it and the
+		// Anthropic ones with an auth token; the gateway removes it and
+		// sends the provider's own key.
+		"mode": "strict",
+		"keys": keys,
+	}}
+	if p.TokensPerHour > 0 {
+		// One bucket per account: a runaway agent or app stops at its own
+		// limit, not at everyone's.
+		policies["localRateLimit"] = []any{map[string]any{
+			"type": "tokens", "key": "apiKey.account",
+			"maxTokens": p.TokensPerHour, "tokensPerFill": p.TokensPerHour, "fillInterval": "1h",
+		}}
 	}
 	models := []any{}
 	if configured {
@@ -115,18 +175,14 @@ func modelsConfig(p cell.ModelProvider, configured bool, agentKey []byte) ([]byt
 		models = append(models, map[string]any{"name": "*", "provider": provider, "params": params})
 	}
 	return yaml.Marshal(map[string]any{
+		// Token usage per account, read by the API (GET /v0/models/usage).
+		"config": map[string]any{"metrics": map[string]any{"fields": map[string]any{"add": map[string]any{"account": "apiKey.account"}}}},
 		// Agent conversations grow; the default buffer is too small for them.
 		"frontendPolicies": map[string]any{"http": map[string]any{"maxBufferSize": 20 << 20}},
 		"llm": map[string]any{
-			"port":   3000,
-			"models": models,
-			"policies": map[string]any{"apiKey": map[string]any{
-				"mode": "strict",
-				"keys": keys,
-				// The Anthropic SDK sends its key there; the gateway removes it
-				// and sends the provider's own.
-				"location": map[string]any{"header": map[string]any{"name": "x-api-key"}},
-			}},
+			"port":     3000,
+			"models":   models,
+			"policies": policies,
 		},
 	})
 }

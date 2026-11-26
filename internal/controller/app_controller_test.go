@@ -358,6 +358,9 @@ func TestImageAppLifecycle(t *testing.T) {
 				Env: []corev1.EnvVar{
 					{Name: "DB_HOST", Value: "{{ .database.host }}"},
 					{Name: "ISSUER", Value: "{{ .auth.issuer }}"},
+					{Name: "LLM_URL", Value: "{{ .models.openaiUrl }}"},
+					{Name: "LLM_KEY", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "{{ .models.secretName }}"}, Key: "apiKey"}}},
 					{Name: "ADMIN_PASSWORD", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
 						LocalObjectReference: corev1.LocalObjectReference{Name: "{{ .secrets.admin }}"}, Key: "password"}}},
 				},
@@ -367,6 +370,7 @@ func TestImageAppLifecycle(t *testing.T) {
 				Database: &cellv1.Database{Engine: "postgres"},
 				Volumes:  []cellv1.Volume{{Name: "data", Size: resource.MustParse("1Gi"), MountPath: "/data"}},
 				Secrets:  []string{"admin"},
+				Models:   true,
 			},
 			Access: cellv1.Access{Subdomain: "notes", Port: 8080, Auth: cellv1.Auth{Mode: "oidc", RedirectPaths: []string{"/cb"}}},
 			Health: cellv1.Health{Path: "/health", TimeoutSeconds: 300},
@@ -399,8 +403,14 @@ func TestImageAppLifecycle(t *testing.T) {
 	}
 	if env["DB_HOST"].Value != "db-rw.app-notes.svc.cluster.local" ||
 		env["ISSUER"].Value != "https://auth.cell.localhost/application/o/notes/" ||
-		env["ADMIN_PASSWORD"].ValueFrom.SecretKeyRef.Name != "secret-admin" {
+		env["ADMIN_PASSWORD"].ValueFrom.SecretKeyRef.Name != "secret-admin" ||
+		env["LLM_URL"].Value != "http://cell-models.cell-system.svc.cluster.local/v1" ||
+		env["LLM_KEY"].ValueFrom.SecretKeyRef.Name != "cell-models" {
 		t.Errorf("placeholders not filled: %+v", env)
+	}
+	var modelKey corev1.Secret
+	if err := k8s.Get(ctx, client.ObjectKey{Namespace: ns, Name: "cell-models"}, &modelKey); err != nil || len(modelKey.Data["apiKey"]) < 32 {
+		t.Errorf("model key: %v", err)
 	}
 	if pod.Containers[0].Image != "example/notes:1.0" {
 		t.Errorf("image %s", pod.Containers[0].Image)
