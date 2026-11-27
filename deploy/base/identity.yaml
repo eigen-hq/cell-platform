@@ -289,16 +289,26 @@ data:
           re_evaluate_policies: false
           policy_engine_mode: any
           invalid_response_action: retry
+      # The second factor comes first: a person who has one proves it
+      # before the link may replace their password; a new person sets one
+      # up. Behind the password, a re-invite would lock them out.
       - model: authentik_flows.flowstagebinding
         identifiers:
           target: !KeyOf flow
           stage: !KeyOf second-factor
-          order: 30
+          order: 5
         attrs:
           evaluate_on_plan: true
           re_evaluate_policies: false
           policy_engine_mode: any
           invalid_response_action: retry
+      # Where it was bound before.
+      - model: authentik_flows.flowstagebinding
+        state: absent
+        identifiers:
+          target: !KeyOf flow
+          stage: !KeyOf second-factor
+          order: 30
       - model: authentik_flows.flowstagebinding
         identifiers:
           target: !KeyOf flow
