@@ -91,7 +91,7 @@ A question without a change ("which machines are nearly full?") ends after Under
 
 Only admins reply. A reply is refused while the agent works, when the agent that worked on the task is gone or no longer takes such tasks, and when the task has used its 200 steps: then ask again in a new task.
 
-- **Stop** (E-101). An admin stops a task that works or waits with *Stop* on the task in Agents. It shows *Stopped by* you at once, and the agent does no further step in it. What a stop does not undo: a step the agent was already doing finishes, and the model's answer it was waiting for still costs its tokens. A change it proposed stays in the change log, and you approve or decline it there; an approved change runs to its end like any approved change. A reply goes on from the conversation; the agent then checks whether a step the stop cut off ran.
+- **Stop** (E-101). An admin stops a task that works or waits with *Stop* on the task in Agents. It shows *Stopped by* you at once, and the agent does no further step in it. What a stop does not undo: a step the agent was already doing finishes, and the model's answer it was waiting for still costs its tokens. A change it proposed stays in the change log, and you approve or decline it there; an approved change runs to its end like any approved change. A reply goes on from the conversation; the agent then checks whether a step the stop cut off ran. A task stopped before an agent took it has no conversation: ask again in a new task.
 
 *Planned* (backlog: Conversations, Task thread in the console).
 

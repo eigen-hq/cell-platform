@@ -117,6 +117,9 @@ func TestConsoleLogin(t *testing.T) {
 		if os.Getenv("SKIP_BROWSER") != "" {
 			t.Skip("SKIP_BROWSER is set")
 		}
+		// Ops is paused, so the task the browser hands off waits until the
+		// browser stops it (E-101) and no model call races the click.
+		tc.pauseAgent(t, "ops")
 		cmd := exec.Command("npx", "playwright", "test")
 		cmd.Dir = filepath.Join(repoRoot(), "console")
 		cmd.Env = append(os.Environ(), "CONSOLE_URL="+origin, "CONSOLE_ADMIN_USER=e2e-console-admin", "CONSOLE_ADMIN_PASSWORD="+password,
