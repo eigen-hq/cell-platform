@@ -26,9 +26,9 @@ import (
 )
 
 // ModelsReconciler writes the model gateway's configuration (E-80) from the
-// provider in Secret cell.ModelSettings, the agent's key in its account's
-// Secret and the keys of the apps that need models (E-81), and tells what is
-// set in ConfigMap cell.ModelsStatus. The
+// provider in Secret cell.ModelSettings, each agent's key in its account's
+// Secret (E-97) and the keys of the apps that need models (E-81), and tells
+// what is set in ConfigMap cell.ModelsStatus. The
 // configuration holds the provider's key, so it is a Secret too; the
 // gateway reloads it when it changes.
 type ModelsReconciler struct {
@@ -39,22 +39,18 @@ func (r *ModelsReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	one := handler.EnqueueRequestsFromMapFunc(func(context.Context, client.Object) []reconcile.Request {
 		return []reconcile.Request{{NamespacedName: system(cell.ModelsSecret)}}
 	})
-	names := []string{cell.ModelSettings, cell.ModelsSecret, cell.AgentAccount}
+	names := []string{cell.ModelSettings, cell.ModelsSecret}
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("models").
 		Watches(&corev1.Secret{}, one, builder.WithPredicates(predicate.NewPredicateFuncs(func(o client.Object) bool {
-			return o.GetNamespace() == cell.SystemNamespace && slices.Contains(names, o.GetName())
+			return o.GetNamespace() == cell.SystemNamespace && (slices.Contains(names, o.GetName()) || strings.HasPrefix(o.GetName(), cell.AgentPrefix))
 		}))).
 		Watches(&cellv1.App{}, one, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Watches(&cellv1.Agent{}, one).
 		Complete(r)
 }
 
 func (r *ModelsReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
-	var agent corev1.Secret
-	if err := r.Get(ctx, system(cell.AgentAccount), &agent); err != nil {
-		// The operator creates it at start; the watch brings it.
-		return ctrl.Result{}, client.IgnoreNotFound(err)
-	}
 	var settings corev1.Secret
 	if err := r.Get(ctx, system(cell.ModelSettings), &settings); err != nil && !apierrors.IsNotFound(err) {
 		return ctrl.Result{}, err
@@ -64,7 +60,31 @@ func (r *ModelsReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.
 	if p.Check() != nil {
 		view = cell.ModelsView{}
 	}
-	keys := []modelsKey{{account: cell.AgentAccount, key: agent.Data[cell.AgentModelKey]}}
+	var agents cellv1.AgentList
+	if err := r.List(ctx, &agents); err != nil {
+		return ctrl.Result{}, err
+	}
+	slices.SortFunc(agents.Items, func(a, b cellv1.Agent) int { return strings.Compare(a.Name, b.Name) })
+	var keys []modelsKey
+	for _, a := range agents.Items {
+		if a.DeletionTimestamp != nil {
+			continue
+		}
+		var s corev1.Secret
+		// The agent's reconcile makes it; the watch brings it.
+		if err := r.Get(ctx, system(cell.AgentPrefix+a.Name), &s); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return ctrl.Result{}, err
+		}
+		// A Secret an earlier Agent of the name left for the garbage
+		// collector holds that Agent's key, not this one's.
+		if !metav1.IsControlledBy(&s, &a) {
+			continue
+		}
+		keys = append(keys, modelsKey{account: cell.AgentPrefix + a.Name, key: s.Data[cell.AgentModelKey]})
+	}
 	var apps cellv1.AppList
 	if err := r.List(ctx, &apps); err != nil {
 		return ctrl.Result{}, err

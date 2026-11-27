@@ -15,7 +15,9 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/utils/ptr"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -24,13 +26,13 @@ import (
 	"github.com/eigen-hq/cell-platform/internal/agent/agenttest"
 )
 
-// opsAgent is the agent with its account from the cell and a scripted
+// cellAgent is agent name of the cell with its account and a scripted
 // model: the run is repeatable and costs nothing, everything else is the
 // real cell.
-func (tc *testCell) opsAgent(t *testing.T, script agenttest.Script) *agent.Agent {
+func (tc *testCell) cellAgent(t *testing.T, name string, script agenttest.Script) *agent.Agent {
 	t.Helper()
 	var s corev1.Secret
-	if err := tc.kube.Get(context.Background(), client.ObjectKey{Namespace: "cell-system", Name: "cell-agent"}, &s); err != nil {
+	if err := tc.kube.Get(context.Background(), client.ObjectKey{Namespace: "cell-system", Name: "cell-agent-" + name}, &s); err != nil {
 		t.Fatalf("the operator set up no agent account: %v", err)
 	}
 	model := agenttest.Serve(script)
@@ -48,25 +50,43 @@ func (tc *testCell) opsAgent(t *testing.T, script agenttest.Script) *agent.Agent
 	}
 }
 
-// pauseAgent stops the cell's own agent, which may have a real model key,
-// for the length of the test.
-func (tc *testCell) pauseAgent(t *testing.T) {
+// agentAccount makes Agent name and returns a client with the account the
+// operator makes for it (E-97). The Agent goes at the end of the test; its
+// account stays in the identity.
+func (tc *testCell) agentAccount(t *testing.T, name string, spec cellv1.AgentSpec) *apiClient {
+	t.Helper()
+	ctx := context.Background()
+	a := &cellv1.Agent{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: spec}
+	if err := tc.kube.Create(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := tc.kube.Delete(ctx, a); err != nil && !apierrors.IsNotFound(err) {
+			t.Errorf("delete agent %s: %v", name, err)
+		}
+	})
+	var s corev1.Secret
+	waitFor(t, 2*time.Minute, func() error {
+		return tc.kube.Get(ctx, client.ObjectKey{Namespace: "cell-system", Name: "cell-agent-" + name}, &s)
+	})
+	return &apiClient{tc: tc, username: string(s.Data["username"]), password: string(s.Data["password"])}
+}
+
+// pauseAgent stops agent name of the cell, which may have a real model
+// key, for the length of the test.
+func (tc *testCell) pauseAgent(t *testing.T, name string) {
 	t.Helper()
 	ctx := context.Background()
 	scale := func(n int32) error {
-		var d appsv1.Deployment
-		if err := tc.kube.Get(ctx, client.ObjectKey{Namespace: "cell-system", Name: "cell-agent"}, &d); err != nil {
-			return err
-		}
-		d.Spec.Replicas = ptr.To(n)
-		return tc.kube.Update(ctx, &d)
+		patch := fmt.Sprintf(`{"spec":{"paused":%t}}`, n == 0)
+		return tc.kube.Patch(ctx, &cellv1.Agent{ObjectMeta: metav1.ObjectMeta{Name: name}}, client.RawPatch(types.MergePatchType, []byte(patch)))
 	}
 	running := func() error {
 		var d appsv1.Deployment
-		if err := tc.kube.Get(ctx, client.ObjectKey{Namespace: "cell-system", Name: "cell-agent"}, &d); err != nil {
+		if err := tc.kube.Get(ctx, client.ObjectKey{Namespace: "cell-system", Name: "cell-agent-" + name}, &d); err != nil {
 			return err
 		}
-		return check(d.Status.AvailableReplicas == 1 && d.Status.UpdatedReplicas == 1, "the cell's agent does not run: %+v", d.Status)
+		return check(d.Status.AvailableReplicas == 1 && d.Status.UpdatedReplicas == 1, "agent %s does not run: %+v", name, d.Status)
 	}
 	if err := running(); err != nil {
 		t.Fatal(err)
@@ -76,14 +96,14 @@ func (tc *testCell) pauseAgent(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		if err := scale(1); err != nil {
-			t.Errorf("restart the cell's agent: %v", err)
+			t.Errorf("restart agent %s: %v", name, err)
 			return
 		}
 		waitFor(t, 2*time.Minute, running)
 	})
 	waitFor(t, 2*time.Minute, func() error {
 		var pods corev1.PodList
-		if err := tc.kube.List(ctx, &pods, client.InNamespace("cell-system"), client.MatchingLabels{"app.kubernetes.io/name": "cell-agent"}); err != nil {
+		if err := tc.kube.List(ctx, &pods, client.InNamespace("cell-system"), client.MatchingLabels{"app.kubernetes.io/name": "cell-agent-" + name}); err != nil {
 			return err
 		}
 		if len(pods.Items) > 0 {
@@ -126,7 +146,7 @@ func TestAgentRepairsApp(t *testing.T) {
 	tc := newTestCell(t)
 	ctx := context.Background()
 	admin := tc.adminAPI(t)
-	tc.pauseAgent(t)
+	tc.pauseAgent(t, "ops")
 	admin.removed(t, "ailing")
 	t.Cleanup(func() { admin.removed(t, "ailing") })
 	install := admin.propose(t, admin, http.MethodPost, "/v0/apps", map[string]any{"catalog": "whoami", "name": "ailing", "subdomain": "ailing"})
@@ -160,7 +180,7 @@ func TestAgentRepairsApp(t *testing.T) {
 	})
 
 	var change string
-	a := tc.opsAgent(t, func(c agenttest.Conversation) (agenttest.Turn, error) {
+	a := tc.cellAgent(t, "ops", func(c agenttest.Conversation) (agenttest.Turn, error) {
 		switch c.Turn {
 		case 0:
 			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "getApp", Input: map[string]any{"name": "ailing"}}, {Tool: "listPods", Input: map[string]any{"name": "ailing"}}}}, nil
@@ -194,7 +214,7 @@ func TestAgentRepairsApp(t *testing.T) {
 	t.Logf("agent (scripted model) read %v and answered: %v", calls(done), field(done, "result"))
 	got := calls(done)
 	slices.Sort(got[:min(2, len(got))])
-	if field(done, "phase") != "Succeeded" || field(done, "assignee") != "cell-agent" ||
+	if field(done, "phase") != "Succeeded" || field(done, "assignee") != "cell-agent-ops" ||
 		!slices.Equal(got, []string{"GET /v0/apps/ailing", "GET /v0/apps/ailing/pods", "GET /v0/apps/ailing/logs", "PATCH /v0/apps/ailing"}) ||
 		!slices.Equal(field(done, "changes").([]any), []any{change}) || !strings.Contains(field(done, "result").(string), change) {
 		t.Fatalf("task %v", done)
@@ -220,7 +240,7 @@ func TestAgentPackagesApp(t *testing.T) {
 	tc := newTestCell(t)
 	ctx := context.Background()
 	admin := tc.adminAPI(t)
-	tc.pauseAgent(t)
+	tc.pauseAgent(t, "packer")
 	admin.removed(t, "memos")
 	t.Cleanup(func() { admin.removed(t, "memos") })
 	compose := `services:
@@ -240,7 +260,7 @@ func TestAgentPackagesApp(t *testing.T) {
 		"access": map[string]any{"subdomain": "memos", "port": 5230, "auth": map[string]any{"mode": "proxy"}},
 		"health": map[string]any{"path": "/", "timeoutSeconds": 300}}
 	var change string
-	a := tc.opsAgent(t, func(c agenttest.Conversation) (agenttest.Turn, error) {
+	a := tc.cellAgent(t, "packer", func(c agenttest.Conversation) (agenttest.Turn, error) {
 		switch c.Turn {
 		case 0:
 			if err := check(strings.Contains(c.Task, "neosmemo/memos:26.11.1"), "brief %q", c.Task); err != nil {

@@ -60,7 +60,7 @@ func TestAgentsWorkInTasks(t *testing.T) {
 		t.Errorf("admin claimed a task: %d", code)
 	}
 	code, body := h.do("POST", "/v0/tasks/notes-diagnose-1/claim", "agent", nil)
-	if code != 200 || field(body, "phase") != "Running" || field(body, "assignee") != "agent-user" {
+	if code != 200 || field(body, "phase") != "Running" || field(body, "assignee") != "cell-agent-ops" {
 		t.Fatalf("claim: %d %v", code, body)
 	}
 	if code, _ := h.do("POST", "/v0/tasks/notes-diagnose-1/claim", "agent", nil); code != 409 {
@@ -147,7 +147,7 @@ func TestAgentsWorkInTasks(t *testing.T) {
 
 	// A runaway agent stops at the step limit.
 	full := pendingTask("notes-diagnose-3")
-	full.Status = cellv1.TaskStatus{Phase: cellv1.RunRunning, Assignee: "agent-user", Steps: make([]cellv1.TaskStep, maxSteps)}
+	full.Status = cellv1.TaskStatus{Phase: cellv1.RunRunning, Assignee: "cell-agent-ops", Steps: make([]cellv1.TaskStep, maxSteps)}
 	if err := h.kube.Create(context.Background(), full); err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +343,7 @@ func TestInstallFromManifest(t *testing.T) {
 		return c.Create(ctx, obj, opts...)
 	}}, installed("notes", "oidc"), &cellv1.Task{ObjectMeta: metav1.ObjectMeta{Name: "memo-package-1"},
 		Spec:   cellv1.TaskSpec{Kind: "package", App: "memo", Input: "services: {}", Requester: cellv1.Requester{Kind: "Human", Name: "admin-user"}},
-		Status: cellv1.TaskStatus{Phase: cellv1.RunRunning, Assignee: "agent-user"}})
+		Status: cellv1.TaskStatus{Phase: cellv1.RunRunning, Assignee: "cell-agent-ops"}})
 	h.agentTask = "memo-package-1"
 	spec := map[string]any{"version": "1.0", "source": map[string]any{"image": map[string]any{"repository": "example/memo"}},
 		"needs":  map[string]any{"volumes": []any{map[string]any{"name": "data", "size": "1Gi", "mountPath": "/data"}}},

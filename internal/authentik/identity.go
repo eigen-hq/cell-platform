@@ -280,6 +280,36 @@ func (c *Client) EnsureServiceAccount(ctx context.Context, username string, grou
 	return nil
 }
 
+// RevokeAppPasswords deletes every app password of username, so none
+// handed out before still logs in; a user that does not exist has none.
+// The filters are only a hint (see find): a token is deleted only if it is
+// an app password of that user.
+func (c *Client) RevokeAppPasswords(ctx context.Context, username string) error {
+	if internalUser(username) {
+		return fmt.Errorf("user %q: %w", username, ErrNotFound)
+	}
+	u, err := c.find(ctx, "core/users/", url.Values{"username": {username}})
+	if err != nil || u == nil {
+		return err
+	}
+	pk := u["pk"]
+	tokens, err := c.list(ctx, "core/tokens/", url.Values{"user__username": {username}, "intent": {"app_password"}})
+	if err != nil {
+		return err
+	}
+	for _, t := range tokens {
+		if t["intent"] != "app_password" || fmt.Sprint(t["user"]) != fmt.Sprint(pk) {
+			continue
+		}
+		err := c.do(ctx, http.MethodDelete, "core/tokens/"+url.PathEscape(fmt.Sprint(t["identifier"]))+"/", nil, nil)
+		var ak *Error
+		if err != nil && (!errors.As(err, &ak) || ak.Status != http.StatusNotFound) {
+			return err
+		}
+	}
+	return nil
+}
+
 // CreateAppPassword creates a non-expiring app password for API logins
 // (client credentials grant) and returns its key. authentik makes a token
 // a caller without superuser rights creates its own, whatever user the

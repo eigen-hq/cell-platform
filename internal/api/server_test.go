@@ -223,21 +223,32 @@ func newHarnessWith(t *testing.T, funcs interceptor.Funcs, objs ...client.Object
 	}
 	work := &cellv1.Task{ObjectMeta: metav1.ObjectMeta{Name: agentWork},
 		Spec:   cellv1.TaskSpec{Kind: "diagnose", App: "notes", Requester: cellv1.Requester{Kind: "Human", Name: "admin-user"}},
-		Status: cellv1.TaskStatus{Phase: cellv1.RunRunning, Assignee: "agent-user"}}
-	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(append(objs, work)...).WithInterceptorFuncs(funcs).
+		Status: cellv1.TaskStatus{Phase: cellv1.RunRunning, Assignee: "cell-agent-ops"}}
+	// The harness's agent takes every task and calls every tool.
+	ops := &cellv1.Agent{ObjectMeta: metav1.ObjectMeta{Name: "ops"},
+		Spec: cellv1.AgentSpec{Kinds: []string{"diagnose", "package", "ask"}, Apps: []string{"*"}, Tools: []string{"*"}}}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(append(objs, work, ops)...).WithInterceptorFuncs(funcs).
 		WithStatusSubresource(&cellv1.Task{}).Build()
 	spec, err := os.ReadFile("../../api/openapi.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Agents' tokens are issued at the harness's time.
+	issued := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
 	s := &Server{
 		Kube:     kube,
 		Pods:     k8sfake.NewSimpleClientset(pods...).CoreV1(),
 		Identity: newFakeIdentity(),
 		Authenticate: func(_ context.Context, token string) (*Caller, error) {
 			switch token {
-			case "admin", "agent", "viewer", "none":
+			case "admin", "viewer", "none":
 				return &Caller{Username: token + "-user", Role: token, Groups: []string{}}, nil
+			case "agent":
+				return &Caller{Username: "cell-agent-ops", Role: RoleAgent, Groups: []string{GroupAgents}, IssuedAt: issued}, nil
+			}
+			// agent-<name>: the account of Agent <name>.
+			if name, ok := strings.CutPrefix(token, "agent-"); ok {
+				return &Caller{Username: "cell-agent-" + name, Role: RoleAgent, Groups: []string{GroupAgents}, IssuedAt: issued}, nil
 			}
 			return nil, errors.New("bad token")
 		},
@@ -279,7 +290,7 @@ func (h *harness) do(method, path, token string, body any) (int, any) {
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	if token == "agent" && h.agentTask != "" {
+	if strings.HasPrefix(token, "agent") && h.agentTask != "" {
 		req.Header.Set(TaskHeader, h.agentTask)
 	}
 	resp, err := h.srv.Client().Do(req)
@@ -427,7 +438,7 @@ func TestInstallWaitsForApproval(t *testing.T) {
 		t.Fatalf("install: %d %v", code, body)
 	}
 	name := field(body, "name").(string)
-	if field(body, "action") != "install" || field(body, "requester", "kind") != "Agent" || field(body, "requester", "name") != "agent-user" ||
+	if field(body, "action") != "install" || field(body, "requester", "kind") != "Agent" || field(body, "requester", "name") != "cell-agent-ops" ||
 		field(body, "approval", "required") != true || field(body, "approval", "decision") != nil {
 		t.Errorf("recorded change %v", body)
 	}
@@ -489,7 +500,7 @@ func TestInstallConflictsAndRejection(t *testing.T) {
 		}
 	}
 	// Another name on the same host would take over the app's traffic.
-	if code, _ := h.do("POST", "/v0/apps", "agent", map[string]any{"catalog": "notes", "name": "notes2"}); code != 409 {
+	if code, _ := h.do("POST", "/v0/apps", "admin", map[string]any{"catalog": "notes", "name": "notes2"}); code != 409 {
 		t.Errorf("install on a taken subdomain: %d", code)
 	}
 	code, body := h.do("POST", "/v0/apps", "admin", map[string]any{"catalog": "notes", "name": "notes2", "subdomain": "notes2"})
@@ -555,7 +566,11 @@ func TestAppChanges(t *testing.T) {
 	}
 
 	// Access: a low-risk update; an app without login cannot have groups.
-	code, body = h.do("PUT", "/v0/apps/notes/access", "agent", map[string]any{"groups": []string{"finance"}})
+	// It is no agent's tool (E-96): only admins set access.
+	if code, body = h.do("PUT", "/v0/apps/notes/access", "agent", map[string]any{"groups": []string{"finance"}}); code != 403 {
+		t.Errorf("agent sets access: %d %v", code, body)
+	}
+	code, body = h.do("PUT", "/v0/apps/notes/access", "admin", map[string]any{"groups": []string{"finance"}})
 	if code != 202 || field(body, "risk") != "low" || field(body, "patch", "access", "groups").([]any)[0] != "finance" {
 		t.Errorf("set access: %d %v", code, body)
 	}
@@ -564,7 +579,7 @@ func TestAppChanges(t *testing.T) {
 	}
 	// A forgotten or null list never opens the app to everyone.
 	for _, req := range []any{map[string]any{"reason": "oops"}, map[string]any{"groups": nil}} {
-		if code, _ = h.do("PUT", "/v0/apps/notes/access", "agent", req); code != 400 {
+		if code, _ = h.do("PUT", "/v0/apps/notes/access", "admin", req); code != 400 {
 			t.Errorf("access %v: %d", req, code)
 		}
 	}
@@ -707,10 +722,10 @@ func TestIdentity(t *testing.T) {
 	if code != 200 || len(field(body, "members").([]any)) != 0 {
 		t.Errorf("empty the group: %d %v", code, body)
 	}
-	if code, body = h.do("GET", "/v0/groups", "agent", nil); code != 200 || len(body.([]any)) != 2 {
+	if code, body = h.do("GET", "/v0/groups", "admin", nil); code != 200 || len(body.([]any)) != 2 {
 		t.Errorf("groups: %d %v", code, body)
 	}
-	if code, body = h.do("GET", "/v0/users", "agent", nil); code != 200 || len(body.([]any)) != 1 {
+	if code, body = h.do("GET", "/v0/users", "admin", nil); code != 200 || len(body.([]any)) != 1 {
 		t.Errorf("users: %d %v", code, body)
 	}
 }
@@ -781,7 +796,7 @@ func TestTokens(t *testing.T) {
 	now := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
 	tokens := &Tokens{UserinfoURL: userinfo.URL, ClientIDs: []string{"cell-api", "cell-console"}, HTTP: userinfo.Client(), TTL: 30 * time.Second, Now: func() time.Time { return now }}
 	exp := float64(now.Add(time.Hour).Unix())
-	good := jwt(map[string]any{"aud": "cell-api", "exp": exp})
+	good := jwt(map[string]any{"aud": "cell-api", "exp": exp, "iat": float64(now.Add(-time.Minute).Unix())})
 	otherApp := jwt(map[string]any{"aud": "forgejo", "exp": exp})
 	gateway := jwt(map[string]any{"aud": "cell-mcp", "exp": exp})
 	console := jwt(map[string]any{"aud": "cell-console", "exp": exp, "sub": "console"})
@@ -789,7 +804,7 @@ func TestTokens(t *testing.T) {
 	accept[good], accept[otherApp], accept[gateway], accept[console] = true, true, true, true
 
 	c, err := tokens.Check(context.Background(), good)
-	if err != nil || c.Username != "alice" || c.Role != RoleAgent {
+	if err != nil || c.Username != "alice" || c.Role != RoleAgent || !c.IssuedAt.Equal(now.Add(-time.Minute)) {
 		t.Fatalf("good token: %+v %v", c, err)
 	}
 	if _, err := tokens.Check(context.Background(), good); err != nil || calls != 1 {

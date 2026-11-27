@@ -29,6 +29,8 @@ type Turn struct {
 
 // Conversation is what the model got so far.
 type Conversation struct {
+	// System is the system prompt.
+	System string
 	// Task is the first user message.
 	Task string
 	// Results are the tool results since the model's last turn; errors
@@ -131,6 +133,8 @@ func (m *Model) answer(r *http.Request, script Script) (map[string]any, error) {
 			return nil, fmt.Errorf("message %d: tool calls %v without a result", i, open)
 		}
 		switch msg.Role {
+		case "system":
+			c.System = text
 		case "assistant":
 			if want, sig := reasoning(c.Turn); msg.ReasoningContent != want || msg.ReasoningSignature != sig {
 				return nil, fmt.Errorf("turn %d came back with reasoning %q, signature %q", c.Turn, msg.ReasoningContent, msg.ReasoningSignature)

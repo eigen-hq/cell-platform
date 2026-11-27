@@ -33,6 +33,10 @@ rules:
   - apiGroups: [cell.internal]
     resources: [tasks/status]
     verbs: [update]
+  # Every call of an agent is checked against its Agent (E-97).
+  - apiGroups: [cell.internal]
+    resources: [agents]
+    verbs: [get, list, watch]
   # Checking a manifest before anyone approves it: dry runs only, see the
   # policy cell-api-dry-run below.
   - apiGroups: [cell.internal]

@@ -151,18 +151,39 @@ If a check fails on a change that no task belongs to, for example one made by ha
 
 ## What agents may do
 
-**Today** the cell has two agents, *Ops* (diagnosis and asks) and *Packer* (packaging). They share the account `cell-agent` in the group `cell-agents` and may:
+**Today** every agent has an account of its own, made from an `Agent` resource: the kinds of tasks it takes, the apps whose tasks it takes, the tools it may call and instructions for its prompt (E-97). The cell comes with two:
+
+- *Ops* (account `cell-agent-ops`) diagnoses apps and answers asks, for every app, with every tool.
+- *Packer* (account `cell-agent-packer`) packages Compose files: it reads the catalog and an app and proposes an install, and cannot restart, restore or remove an app.
+
+Within what its `Agent` allows, an agent may:
 
 - read the cell's apps and machines with their usage over time, an app's pods, events, logs, backups and change log, and the catalog;
 - propose an update, a restart or an install, and, when you ask for it, removing an app or bringing back a backup, only for the app of their task. An ask about the whole cell may read the cell's state but not an app's logs, and may not propose changes.
 
-Their tools are the operations of the platform API marked for agents (E-96). They cannot see people and groups, mail, models or other tasks.
+Their tools are the operations of the platform API marked for agents (E-96). The API checks every call against the agent's `Agent`: a task it does not take or a tool it does not have is refused, in a task about one app it sees and changes only that app, and a change to the `Agent` counts from its next call. Agents cannot see people and groups, mail, models or tasks they do not take.
+
+Admins add, change and pause agents with `kubectl` until the console has a screen for it. An agent that only looks into one app:
+
+```yaml
+apiVersion: cell.internal/v1alpha1
+kind: Agent
+metadata:
+  name: notes-reader
+spec:
+  kinds: [diagnose]
+  apps: [notes]
+  tools: [getApp, listPods, appEvents, appLogs]
+  instructions: Answer in German.
+```
+
+The operator makes its account, credentials and Deployment `cell-agent-notes-reader` in `cell-system`; `spec.paused: true` stops it. If two agents take the same task, the first to claim it works on it.
 
 They may not approve and have no access to the cluster. They cannot read the cell's Secrets, but a log or a manifest can contain anything an app prints or holds, a password too; the agent and its model provider then see it (E-62).
 
 *Planned* (backlog: Agents as accounts, Tools per agent, Autonomy levels):
 
-- Each agent becomes an account of its own, with the apps, tools, model and budget an admin gives it.
+- Each agent gets a model and budget of its own, and admins manage agents in the console.
 - An agent may hand part of a task to another agent. That task shows up as a child of the first, with at most the rights and budget of its parent.
 - An agent working on your request has only the rights that both you and it have.
 - Agents apply a change themselves when the platform can undo it: an update, a configuration change, a restart, an app from the catalog. Each runs with a snapshot first, its checks and automatic rollback, and shows up in the change log, the task's receipt and a daily summary; you can undo it in one click. You decide what cannot be undone or reaches past the cell: deleting data or backups, uninstalling, restoring over the current state, apps from a manifest outside the catalog or a new image, changes that cost money or reach outside the cell, and who gets which rights, agents included. Admins can tighten this per agent and kind of change (E-95).

@@ -234,12 +234,19 @@ func viewChangeFor(c *Caller, cr *cellv1.ChangeRequest) (changeView, error) {
 }
 
 func (s *Server) listApps(w http.ResponseWriter, r *http.Request, c *Caller) error {
+	only := ""
+	if err := agentApp(r.Context(), c, &only); err != nil {
+		return err
+	}
 	var list cellv1.AppList
 	if err := s.Kube.List(r.Context(), &list); err != nil {
 		return err
 	}
 	out := []appView{}
 	for i := range list.Items {
+		if only != "" && list.Items[i].Name != only {
+			continue
+		}
 		v, err := viewAppFor(c, &list.Items[i])
 		if err != nil {
 			return err
@@ -383,6 +390,9 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request, c *Caller) e
 		}
 	default:
 		return errorf(http.StatusBadRequest, "give catalog (an entry of GET /v0/catalog) or manifest")
+	}
+	if err := agentApp(r.Context(), c, &name); err != nil {
+		return err
 	}
 	if !appName.MatchString(name) || strings.HasPrefix(name, "cell-") {
 		return errorf(http.StatusBadRequest, "app name %q: lowercase letters, digits and dashes, at most 40, starting with a letter, not with cell- (the platform's)", name)
@@ -804,6 +814,9 @@ func (s *Server) listChanges(w http.ResponseWriter, r *http.Request, c *Caller) 
 // agentApp keeps an agent in an app's task to that app: a change's reason
 // and message can quote what the app's logs say. An empty app becomes the
 // task's; another app is refused. A cell's task reads the whole log.
+//
+// Collections (apps, changes) and installs go through it too, not only the
+// routes under /v0/apps/{name}.
 func agentApp(ctx context.Context, c *Caller, app *string) error {
 	task := taskOf(ctx)
 	if c.Role != RoleAgent || task.App == "" {

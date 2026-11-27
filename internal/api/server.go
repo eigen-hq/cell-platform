@@ -44,6 +44,8 @@ type Caller struct {
 	Username string   `json:"username"`
 	Role     string   `json:"role"`
 	Groups   []string `json:"groups"`
+	// IssuedAt is when the identity issued the caller's token.
+	IssuedAt time.Time `json:"-"`
 }
 
 // RoleOf maps identity groups to an API role: admins may do everything,
@@ -121,8 +123,9 @@ type route struct {
 }
 
 // Viewers read the state of the cell only (E-63): apps, changes, backups,
-// machines and the backup target. People, tasks, pods, events and logs are
-// for agents and admins; viewerRoutes in the tests pins that list.
+// machines and the backup target. Tasks, pods, events and logs are for
+// agents and admins, people and groups for admins; viewerRoutes in the tests
+// pins that list.
 func (s *Server) routes() []route {
 	return []route{
 		{"GET", "/healthz", "", s.healthz},
@@ -141,8 +144,8 @@ func (s *Server) routes() []route {
 		{"POST", "/v0/apps/{name}/restore", RoleAgent, s.restoreApp},
 		{"POST", "/v0/apps/{name}/restart", RoleAgent, s.restartApp},
 		{"GET", "/v0/apps/{name}/access", RoleViewer, s.getAccess},
-		{"PUT", "/v0/apps/{name}/access", RoleAgent, s.setAccess},
-		{"GET", "/v0/users", RoleAgent, s.listUsers},
+		{"PUT", "/v0/apps/{name}/access", RoleAdmin, s.setAccess},
+		{"GET", "/v0/users", RoleAdmin, s.listUsers},
 		{"POST", "/v0/users", RoleAdmin, s.createUser},
 		{"DELETE", "/v0/users/{name}", RoleAdmin, s.removeUser},
 		{"POST", "/v0/users/{name}/tokens", RoleAdmin, s.createUserToken},
@@ -152,7 +155,7 @@ func (s *Server) routes() []route {
 		{"GET", "/v0/models", RoleAgent, s.getModels},
 		{"PUT", "/v0/models", RoleAdmin, s.setModels},
 		{"GET", "/v0/models/usage", RoleAdmin, s.modelsUsage},
-		{"GET", "/v0/groups", RoleAgent, s.listGroups},
+		{"GET", "/v0/groups", RoleAdmin, s.listGroups},
 		{"POST", "/v0/groups", RoleAdmin, s.createGroup},
 		{"PATCH", "/v0/groups/{name}/members", RoleAdmin, s.changeGroupMembers},
 		{"GET", "/v0/changes", RoleViewer, s.listChanges},
@@ -216,6 +219,14 @@ func (s *Server) wrap(rt route) http.HandlerFunc {
 				writeError(w, errorf(http.StatusForbidden, "needs role %s, you are %s", rt.role, c.Role))
 				return
 			}
+			if c.Role == RoleAgent {
+				ctx, err := s.withAgent(r.Context(), c)
+				if err != nil {
+					s.fail(w, r, err)
+					return
+				}
+				r = r.WithContext(ctx)
+			}
 			if c.Role == RoleAgent && !taskFree[rt.method+" "+rt.path] {
 				ctx, err := s.inTask(r, c)
 				if err != nil {
@@ -223,10 +234,20 @@ func (s *Server) wrap(rt route) http.HandlerFunc {
 					return
 				}
 				r = r.WithContext(ctx)
-				// An agent reads and changes only the app its task is about:
-				// what one app's logs say must not end up in another's.
-				if task := taskOf(ctx); strings.HasPrefix(rt.path, "/v0/apps/{name}") && r.PathValue("name") != task.App {
-					writeError(w, errorf(http.StatusForbidden, "task %s is about app %s, not %s", task.Name, task.App, r.PathValue("name")))
+				// Checked on every call, after it is recorded: an agent whose
+				// spec an admin narrows stops at its next call. It reads and
+				// changes only the app its task is about: what one app's logs
+				// say must not end up in another's.
+				a, task := agentOf(ctx), taskOf(ctx)
+				err = mayTake(a, task.Kind, task.App)
+				if err == nil {
+					err = mayCall(a, rt.method, rt.path)
+				}
+				if err == nil && strings.HasPrefix(rt.path, "/v0/apps/{name}") && r.PathValue("name") != task.App {
+					err = errorf(http.StatusForbidden, "task %s is about app %s, not %s", task.Name, task.App, r.PathValue("name"))
+				}
+				if err != nil {
+					s.fail(w, r, err)
 					return
 				}
 			}
@@ -303,9 +324,4 @@ func (s *Server) openapi(w http.ResponseWriter, _ *http.Request, _ *Caller) erro
 	w.Header().Set("Content-Type", "application/yaml")
 	_, err := w.Write(s.OpenAPI)
 	return err
-}
-
-func (s *Server) whoami(w http.ResponseWriter, _ *http.Request, c *Caller) error {
-	writeJSON(w, http.StatusOK, c)
-	return nil
 }

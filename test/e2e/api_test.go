@@ -260,7 +260,9 @@ func TestChangeApproval(t *testing.T) {
 	tc := newTestCell(t)
 	ctx := context.Background()
 	admin := tc.adminAPI(t)
-	agent := admin.account(t, "e2e-agent", "e2e-Agent-not-secret", "cell-agents")
+	// The cell's own agent would claim the same task; this one runs no pod.
+	tc.pauseAgent(t, "ops")
+	agent := tc.agentAccount(t, "e2e", cellv1.AgentSpec{Kinds: []string{"diagnose"}, Apps: []string{"whoami"}, Tools: []string{"updateApp", "getChange"}, Paused: true})
 	if got := field(agent.do(t, http.MethodGet, "/v0/whoami", nil, http.StatusOK), "role"); got != "agent" {
 		t.Fatalf("agent role %v", got)
 	}
@@ -275,7 +277,7 @@ func TestChangeApproval(t *testing.T) {
 	agent = agent.working(t, admin, "whoami")
 	cr := agent.do(t, http.MethodPatch, "/v0/apps/whoami", map[string]any{"patch": map[string]any{"title": "Who am I"}, "reason": "e2e"}, http.StatusAccepted)
 	name := field(cr, "name").(string)
-	if field(cr, "requester", "kind") != "Agent" || field(cr, "requester", "name") != "e2e-agent" || field(cr, "task") != agent.task {
+	if field(cr, "requester", "kind") != "Agent" || field(cr, "requester", "name") != "cell-agent-e2e" || field(cr, "task") != agent.task {
 		t.Errorf("requester %v, task %v", field(cr, "requester"), field(cr, "task"))
 	}
 	if steps := calls(admin.do(t, http.MethodGet, "/v0/tasks/"+agent.task, nil, http.StatusOK)); !slices.Equal(steps, []string{"PATCH /v0/apps/whoami"}) {

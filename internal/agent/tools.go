@@ -235,24 +235,32 @@ func (op operation) request(args json.RawMessage) (string, any, error) {
 	return path, body, nil
 }
 
-// tools are the agent's tools in task: each is one call of the platform
-// API, which records it as a step of the task and decides whether the
-// agent may make it.
-func (a *Agent) tools(task string) ([]tool, error) {
+// tools are the agent's tools in task, the ones its Agent names (* for
+// all, E-97): each is one call of the platform API, which records it as a
+// step of the task and decides whether the agent may make it.
+func (a *Agent) tools(task string, names []string) ([]tool, error) {
 	ops, err := operations()
 	if err != nil {
 		return nil, err
 	}
-	tools := make([]tool, len(ops))
-	for i, op := range ops {
-		tools[i] = tool{Name: op.Name, Description: op.Description, Params: op.Params,
+	for _, n := range names {
+		if n != "*" && !slices.ContainsFunc(ops, func(op operation) bool { return op.Name == n }) {
+			return nil, fmt.Errorf("the agent's Agent names %s, which is no tool of the API", n)
+		}
+	}
+	var tools []tool
+	for _, op := range ops {
+		if !slices.Contains(names, "*") && !slices.Contains(names, op.Name) {
+			continue
+		}
+		tools = append(tools, tool{Name: op.Name, Description: op.Description, Params: op.Params,
 			Run: func(ctx context.Context, args json.RawMessage) (string, error) {
 				path, body, err := op.request(args)
 				if err != nil {
 					return "", err
 				}
 				return a.call(ctx, op.Method, path, task, body)
-			}}
+			}})
 	}
 	return tools, nil
 }

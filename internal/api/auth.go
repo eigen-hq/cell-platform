@@ -58,7 +58,7 @@ func (t *Tokens) Check(ctx context.Context, token string) (*Caller, error) {
 
 	// The claims are read before the identity vouches for the token, but
 	// only used after it did: they belong to a token it issued.
-	exp, err := t.audience(token)
+	exp, iat, err := t.audience(token)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +85,7 @@ func (t *Tokens) Check(ctx context.Context, token string) (*Caller, error) {
 	if info.Username == "" {
 		return nil, errors.New("userinfo has no preferred_username")
 	}
-	caller := Caller{Username: info.Username, Groups: info.Groups, Role: RoleOf(info.Groups)}
+	caller := Caller{Username: info.Username, Groups: info.Groups, Role: RoleOf(info.Groups), IssuedAt: iat}
 	if caller.Groups == nil {
 		caller.Groups = []string{}
 	}
@@ -103,22 +103,23 @@ func (t *Tokens) Check(ctx context.Context, token string) (*Caller, error) {
 }
 
 // audience checks that the token is a JWT for one of the clients and returns
-// when it expires.
-func (t *Tokens) audience(token string) (time.Time, error) {
+// when it expires and when it was issued.
+func (t *Tokens) audience(token string) (exp, iat time.Time, err error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
-		return time.Time{}, errors.New("not a JWT")
+		return exp, iat, errors.New("not a JWT")
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return time.Time{}, errors.New("not a JWT")
+		return exp, iat, errors.New("not a JWT")
 	}
 	var claims struct {
 		Aud any     `json:"aud"`
 		Exp float64 `json:"exp"`
+		Iat float64 `json:"iat"`
 	}
 	if err := json.Unmarshal(payload, &claims); err != nil {
-		return time.Time{}, errors.New("not a JWT")
+		return exp, iat, errors.New("not a JWT")
 	}
 	var aud []string
 	switch a := claims.Aud.(type) {
@@ -132,7 +133,7 @@ func (t *Tokens) audience(token string) (time.Time, error) {
 		}
 	}
 	if !slices.ContainsFunc(aud, func(a string) bool { return slices.Contains(t.ClientIDs, a) }) {
-		return time.Time{}, fmt.Errorf("token is for %v, not for %v", aud, t.ClientIDs)
+		return exp, iat, fmt.Errorf("token is for %v, not for %v", aud, t.ClientIDs)
 	}
-	return time.Unix(int64(claims.Exp), 0), nil
+	return time.Unix(int64(claims.Exp), 0), time.Unix(int64(claims.Iat), 0), nil
 }

@@ -50,7 +50,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		return err
 	}
 	if a.Model == nil {
-		a.Log.Warn("no key to the model gateway (Secret cell-agent, key modelKey): tasks wait for an agent that has one")
+		a.Log.Warn("no key to the model gateway (Secret cell-agent-<name>, key modelKey): tasks wait for an agent that has one")
 		<-ctx.Done()
 		return nil
 	}
@@ -175,11 +175,28 @@ func (a *Agent) finish(ctx context.Context, name, result string, failed bool) er
 
 // work lets the model work on a claimed task and returns its answer.
 func (a *Agent) work(ctx context.Context, t task) (string, bool) {
-	tools, err := a.tools(t.Name)
+	// Read for every task: a change to the Agent counts from the next one.
+	var me struct {
+		Agent *struct {
+			Tools        []string `json:"tools"`
+			Instructions string   `json:"instructions"`
+		} `json:"agent"`
+	}
+	if err := a.API.JSON(ctx, http.MethodGet, "/v0/whoami", "", nil, &me); err != nil {
+		return "whoami: " + err.Error(), true
+	}
+	if me.Agent == nil {
+		return "whoami: the API names no Agent for this account", true
+	}
+	tools, err := a.tools(t.Name, me.Agent.Tools)
 	if err != nil {
 		return "tools: " + err.Error(), true
 	}
-	msgs := []message{{Role: "system", Text: systemPrompt}, {Role: "user", Text: brief(t)}}
+	prompt := systemPrompt
+	if me.Agent.Instructions != "" {
+		prompt = strings.TrimRight(prompt, "\n") + "\n\n## Instructions of this cell\n\n" + me.Agent.Instructions + "\n"
+	}
+	msgs := []message{{Role: "system", Text: prompt}, {Role: "user", Text: brief(t)}}
 	cuts := 0
 	// ponytail: a fixed turn limit, a token budget per task if costs need a cap
 	for range 40 {

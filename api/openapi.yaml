@@ -19,15 +19,15 @@ info:
     (`GET /v0/login`); its tokens are valid here too.
 
     Roles come from identity groups: members of `cell-admins` may do
-    everything, members of `cell-agents` read everything and propose
-    changes, members of `cell-viewers` read the state of the cell only:
+    everything, members of `cell-agents` work through the tools of their
+    Agent (below), members of `cell-viewers` read the state of the cell only:
     catalog, apps, their backups and access, changes, live events, machines
     and the backup target. For viewers an app's `spec` holds only `access`,
     and a change has no `patch` and, when an agent asked for it, no
     `reason`; status messages (conditions, changes, backups, events, the
     backup check) and the backup target's `accessKey` are left out: those
-    can carry configuration values or quote logs. People,
-    groups, tasks, pods, app events and logs answer viewers with 403. Every
+    can carry configuration values or quote logs. People and groups are
+    for admins; tasks, pods, app events and logs answer viewers with 403. Every
     other account
     of the identity (people who only use apps) has the role `none`: it may
     ask `GET /v0/whoami` and gets 403 everywhere else.
@@ -39,6 +39,11 @@ info:
     An agent proposes changes only for the app of its task (403 otherwise).
     Operations marked `x-agent` are the agents' tools: each becomes a tool
     with its description and its parameters and request body as arguments.
+    Each agent's account belongs to an Agent resource (`cell-agent-<name>`
+    for Agent `<name>`, E-97); it takes only the kinds of tasks and the
+    apps its Agent names, and in a task it calls only its Agent's tools
+    (403 otherwise). An account in `cell-agents` without an Agent gets 403
+    everywhere.
     A call outside a running task of the agent is refused (400, 404, 409);
     that is why every operation can answer with an error. Tasks are for
     agents and admins: results can quote logs.
@@ -390,8 +395,8 @@ paths:
       operationId: getModelsUsage
       description: |
         Tokens each agent and app used through the model gateway, since the
-        gateway last started. Accounts: cell-agent for the platform's agent,
-        app-<name> for an app.
+        gateway last started. Accounts: cell-agent-<name> for each agent of
+        the cell, app-<name> for an app.
       responses:
         default: {$ref: "#/components/responses/Error"}
         "200": {description: Usage per account., content: {application/json: {schema: {$ref: "#/components/schemas/ModelsUsage"}}}}
@@ -776,6 +781,21 @@ components:
         username: {type: string}
         role: {type: string, enum: [admin, agent, viewer, none]}
         groups: {type: array, items: {type: string}}
+        agent:
+          type: object
+          description: |
+            For an agent's account, its Agent (E-97): the kinds of tasks it
+            takes, the apps whose tasks it takes (* for all and for tasks
+            about the whole cell), the tools it may call (* for all
+            operations marked x-agent) and its added instructions.
+          additionalProperties: false
+          required: [name, kinds, apps, tools, instructions]
+          properties:
+            name: {type: string}
+            kinds: {type: array, items: {type: string}}
+            apps: {type: array, items: {type: string}}
+            tools: {type: array, items: {type: string}}
+            instructions: {type: string}
     CatalogEntry:
       type: object
       additionalProperties: false

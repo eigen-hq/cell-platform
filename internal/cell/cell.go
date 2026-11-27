@@ -24,9 +24,10 @@ const (
 	AgentGroup = "cell-agents"
 	// AdminGroup gives its members the admin role in the platform API.
 	AdminGroup = "cell-admins"
-	// AgentAccount is the ops agent's account in the identity; its
-	// credentials are the Secret of the same name in SystemNamespace.
-	AgentAccount = "cell-agent"
+	// AgentPrefix and an Agent's name are the agent's account in the
+	// identity, and the name of its credentials (a Secret) and its
+	// Deployment in SystemNamespace (E-97).
+	AgentPrefix = "cell-agent-"
 	// MetricsURL is the cell's metrics store (E-87); it answers the
 	// Prometheus query API.
 	MetricsURL = "http://cell-metrics.cell-system.svc.cluster.local:8428"

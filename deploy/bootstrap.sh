@@ -455,12 +455,14 @@ if [ -n "${CELL_LLM_API_KEY:-}" ]; then
 fi
 apply models.yaml
 apply agent.yaml
-# Both are up only once the operator created the agent's account and the
-# gateway's configuration (Secrets cell-agent, cell-models). The gateway
-# reloads its configuration and the agent asks for the provider: a new key
-# needs no restart.
+# Up only once the operator made the agents' accounts and Deployments and
+# the gateway's configuration (Secrets cell-agent-<name>, cell-models). The
+# gateway reloads its configuration and an agent asks for the provider: a
+# new key needs no restart.
 kubectl -n cell-system rollout status deploy/cell-models --timeout=5m >/dev/null
-kubectl -n cell-system rollout status deploy/cell-agent --timeout=5m >/dev/null
+kubectl -n cell-system wait --for=create deploy/cell-agent-ops deploy/cell-agent-packer --timeout=5m >/dev/null
+kubectl -n cell-system rollout status deploy/cell-agent-ops --timeout=5m >/dev/null
+kubectl -n cell-system rollout status deploy/cell-agent-packer --timeout=5m >/dev/null
 
 step "MCP gateway"
 apply mcp.yaml

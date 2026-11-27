@@ -124,7 +124,7 @@ Planned (E-89, stages as in `agents.md`): steps 2 to 4 become turns of a convers
 
 ## Agent model
 
-Agents are accounts in the identity service with their own permissions. Their tools are exclusively calls to the platform API.
+Agents are accounts in the identity service with their own permissions, one per `Agent` resource (E-97). Their tools are exclusively calls to the platform API.
 
 | Level | Examples | Rule |
 |---|---|---|
@@ -146,7 +146,7 @@ flowchart LR
   MCP --> API["Platform API"]
   API --> DB[("cell-db: conversations")]
   API --> K["Task, ChangeRequest"]
-  AG["cell-agent: loop"] --> API
+  AG["Agent: loop"] --> API
   AG --> M["cell-models"] --> PR["Provider"]
   OP["Operator: apply, checks"] --> K
   OP --> VM[("Metrics")]
@@ -154,7 +154,7 @@ flowchart LR
   API -. events .-> AG
 ```
 
-**The loop.** Our own in Go, in `cell-agent`, without an agent framework. For each turn it reads the task's conversation from the API, sends it to the model gateway, runs the tool calls the model returns through the platform API (each one a step, as today), appends what came back, and repeats until the model ends the turn or a limit is hit (model calls per turn, the account's token limit). The model may call tools on any turn, several at once; the calls of one turn run side by side and their results go back in order. A turn cut at the token limit or by a filter is dropped and runs none of its calls: the model hears so and does it again, and a second cut in a row ends the run. The agent keeps no state of its own: everything is in the API, so after a restart a task continues from its last item. Tasks run in parallel, each in its own goroutine, up to a limit per agent; the rest wait as *queued*.
+**The loop.** Our own in Go, in each agent's Deployment `cell-agent-<name>`, without an agent framework. For each turn it reads the task's conversation from the API, sends it to the model gateway, runs the tool calls the model returns through the platform API (each one a step, as today), appends what came back, and repeats until the model ends the turn or a limit is hit (model calls per turn, the account's token limit). The model may call tools on any turn, several at once; the calls of one turn run side by side and their results go back in order. A turn cut at the token limit or by a filter is dropped and runs none of its calls: the model hears so and does it again, and a second cut in a row ends the run. The agent keeps no state of its own: everything is in the API, so after a restart a task continues from its last item. Tasks run in parallel, each in its own goroutine, up to a limit per agent; the rest wait as *queued*.
 
 **Durable runs.** One run of a task (an attempt) belongs to one agent process at a time: the process claims it with a lease that it renews, and the API refuses writes from a process whose lease ran out or whose attempt number is old. The loop stores every `function_call` item before it runs it. The call goes to the API with the item's ID as idempotency key, and the API keeps the result under that key, so a repeated call returns the first result instead of acting twice. A `ChangeRequest` carries its key as a label, so after a crash between creating it and storing the result the API finds it again instead of creating a second one. On start and after every reconnect the agent first lists the work waiting for it in the API, then follows the event stream from its last event ID: events only wake it, the list is the truth. Scripted tests stop the agent after a stored call and after a created change before its result, deliver an event twice, and run two agents against one task.
 
@@ -166,7 +166,7 @@ flowchart LR
 
 **Turns end in structure.** The model ends a turn by calling one of two tools, `answer` or `ask`, whose parameters are the answer schema (Understood, Causes, Options, Receipt) or a question with form fields. Tool calls work on every model that matters, unlike strict structured output. The API checks an answer before it stores it: every evidence reference names a step of this task, every option names a `ChangeRequest` draft the API has priced (risk, reversibility, diff). The options of one answer form a group: approving one closes the others in the same call, and a new answer or a correction closes the open options of the answer before. An approval names the exact revision it saw (the change, its checks and the app's generation); the API refuses it if any of them moved, and the operator checks the app's generation again before it starts, so a stale proposal goes back to the agent instead of running. A form field for a secret is a question the API issues, with its own ID, its purpose and its destination (which Secret and key, chosen by the API from the purpose, never by the model); the value goes from the console straight into that Secret and never into an item, an event, a log line or an error message.
 
-**Tools.** Generated from `api/openapi.yaml` (E-96): an operation marked `x-agent` becomes a tool named by its operationId, with its description, and its path and query parameters and the properties of its JSON body as one argument object, every `$ref` inlined. The agent builds the catalog once at start, sorted by name, and refuses to start on a broken one. The API stays the only place that enforces rights; a tool the account may not use simply fails. The same catalog serves the loop and, through the MCP gateway, outside assistants (Interop). Tools of apps and of outside MCP servers also go through the API: it calls them through the gateway with the agent's identity and records call and result as a step; an agent never calls an MCP server itself. An outside tool that an admin has not marked as read-only is a proposal that needs approval, marked as one the cell cannot undo.
+**Tools.** Generated from `api/openapi.yaml` (E-96): an operation marked `x-agent` becomes a tool named by its operationId, with its description, and its path and query parameters and the properties of its JSON body as one argument object, every `$ref` inlined. The agent builds the catalog once at start, sorted by name, and refuses to start on a broken one. The agent offers the model only the tools its `Agent` names (E-97); the API stays the only place that enforces rights and refuses every other call. The same catalog serves the loop and, through the MCP gateway, outside assistants (Interop). Tools of apps and of outside MCP servers also go through the API: it calls them through the gateway with the agent's identity and records call and result as a step; an agent never calls an MCP server itself. An outside tool that an admin has not marked as read-only is a proposal that needs approval, marked as one the cell cannot undo.
 
 **Whose rights.** A task records who asked: a person, an assistant on a person's behalf, another agent, or the operator. Every call in the task gets only the rights that both the agent's account and the requester have, and a child task inherits them, never more. The API checks this on every call, not once at the start, so when a person loses a right, the next call of the task that needs it fails and the task shows why. Who may read a task, its items, attachments and children stays as today (E-63), plus the person who asked.
 
@@ -196,7 +196,7 @@ The data of third-party apps stays in the apps. Only what is common to all is he
 
 ## Interface to the UI
 
-REST with an OpenAPI description (`api/openapi.yaml`), login through tokens of the identity service. Roles come from groups of the identity service: admins may do everything, agents read and propose changes, viewers read the state of the cell only, without people, tasks, pods, events or logs (E-63), all other accounts see nothing (E-46). Every change to an app is created as a `ChangeRequest` without a decision; an admin approves it in a separate call (E-30).
+REST with an OpenAPI description (`api/openapi.yaml`), login through tokens of the identity service. Roles come from groups of the identity service: admins may do everything, agents read and propose changes within their `Agent` (E-97), viewers read the state of the cell only, without people, tasks, pods, events or logs (E-63), all other accounts see nothing (E-46). Every change to an app is created as a `ChangeRequest` without a decision; an admin approves it in a separate call (E-30).
 
 | Area | Purpose |
 |---|---|

@@ -28,7 +28,7 @@ func run(log *slog.Logger) error {
 	defer stop()
 	username, password := os.Getenv("CELL_AGENT_USERNAME"), os.Getenv("CELL_AGENT_PASSWORD")
 	if username == "" || password == "" {
-		return fmt.Errorf("CELL_AGENT_USERNAME and CELL_AGENT_PASSWORD are required (Secret cell-agent)")
+		return fmt.Errorf("CELL_AGENT_USERNAME and CELL_AGENT_PASSWORD are required (Secret cell-agent-<name>)")
 	}
 	a := &agent.Agent{
 		API: &agent.API{

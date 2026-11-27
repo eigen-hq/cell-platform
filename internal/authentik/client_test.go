@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -454,6 +456,45 @@ func TestCreateAppPasswordChecksOwner(t *testing.T) {
 				t.Errorf("tokens left %v, want the wrong one deleted", tokens)
 			}
 		})
+	}
+}
+
+// Revoking deletes the user's app passwords only, even from a server that
+// ignores the filters.
+func TestRevokeAppPasswords(t *testing.T) {
+	api := newFakeAPI()
+	api.objects["core/users/"] = []map[string]any{{"pk": 9, "username": "alice"}, {"pk": 10, "username": "bob"}}
+	tokens := map[string]map[string]any{
+		"a1": {"identifier": "a1", "user": 9, "intent": "app_password"},
+		"a2": {"identifier": "a2", "user": 9, "intent": "app_password"},
+		"a3": {"identifier": "a3", "user": 9, "intent": "recovery"},
+		"b1": {"identifier": "b1", "user": 10, "intent": "app_password"},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id, ok := strings.CutPrefix(r.URL.Path, "/api/v3/core/tokens/")
+		switch {
+		case !ok:
+			api.ServeHTTP(w, r)
+		case id == "" && r.Method == http.MethodGet:
+			var all []map[string]any
+			for _, k := range slices.Sorted(maps.Keys(tokens)) {
+				all = append(all, tokens[k])
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"results": all, "pagination": map[string]any{"next": 0}})
+		case r.Method == http.MethodDelete:
+			delete(tokens, strings.TrimSuffix(id, "/"))
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, `{"detail":"unexpected"}`, http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+	c := &Client{BaseURL: srv.URL, Token: "t", HTTP: srv.Client()}
+	if err := c.RevokeAppPasswords(context.Background(), "alice"); err != nil {
+		t.Fatal(err)
+	}
+	if left := slices.Sorted(maps.Keys(tokens)); !slices.Equal(left, []string{"a3", "b1"}) {
+		t.Errorf("tokens left %v, want a3 and b1", left)
 	}
 }
 

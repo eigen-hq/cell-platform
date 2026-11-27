@@ -66,18 +66,21 @@ func run() error {
 	if err := r.SetupWithManager(mgr); err != nil {
 		return err
 	}
-	// The ops agent's account and the MCP gateway's login client; the
-	// identity may still be starting.
+	agentImage := os.Getenv("AGENT_IMAGE")
+	if agentImage == "" {
+		return fmt.Errorf("AGENT_IMAGE is not set")
+	}
+	if err := (&controller.AgentReconciler{Client: mgr.GetClient(), Identity: identity, Image: agentImage}).SetupWithManager(mgr); err != nil {
+		return err
+	}
+	// The MCP gateway's login client; the identity may still be starting.
 	if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
 		for {
-			err := controller.EnsureAgentAccount(ctx, mgr.GetClient(), identity)
-			if err == nil {
-				err = identity.EnsureAPIClient(ctx, controller.GatewayClient, "MCP gateway", controller.GatewayTokenValidity)
-			}
+			err := identity.EnsureAPIClient(ctx, controller.GatewayClient, "MCP gateway", controller.GatewayTokenValidity)
 			if err == nil {
 				return nil
 			}
-			ctrl.Log.Info("waiting to set up the agent's account and the gateway's client", "error", err.Error())
+			ctrl.Log.Info("waiting to set up the gateway's client", "error", err.Error())
 			select {
 			case <-ctx.Done():
 				return nil

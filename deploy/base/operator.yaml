@@ -21,6 +21,13 @@ rules:
   - apiGroups: [cell.internal]
     resources: [tasks]
     verbs: [get, list, watch, create, patch]
+  # The cell's agents (E-97): their Secrets and Deployments belong to them.
+  - apiGroups: [cell.internal]
+    resources: [agents]
+    verbs: [get, list, watch, patch]
+  - apiGroups: [cell.internal]
+    resources: [agents/finalizers]
+    verbs: [update]
   # The watches follow the apps across namespaces; a host is free only if no
   # ingress in the cell uses it.
   - apiGroups: [apps]
@@ -114,8 +121,9 @@ rules:
 ---
 # The operator in its own namespace: the cell's configuration and host
 # claims, the login proxy's ingress per app, the check of a new backup
-# target and the restart of the backup gateway. Of the secrets it changes
-# only its own by name.
+# target, the restart of the backup gateway and the agents' Deployments
+# (E-97). Of the secrets it changes only its own by name; an agent's it
+# makes once.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -130,7 +138,7 @@ rules:
     verbs: [get, list, watch, create]
   - apiGroups: [""]
     resources: [secrets]
-    resourceNames: [cell-agent, cell-models, backup-target, backup-target-request]
+    resourceNames: [cell-models, backup-target, backup-target-request]
     verbs: [update, delete]
   - apiGroups: [""]
     resources: [pods]
@@ -145,6 +153,12 @@ rules:
     resources: [deployments]
     resourceNames: [backup-gateway]
     verbs: [patch]
+  # cell-agent-<name>, applied server-side: RBAC cannot match a name
+  # prefix. It opens nothing new: the Jobs above can already run any
+  # service account of the namespace.
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [create, patch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -355,6 +369,9 @@ spec:
           env:
             - name: BRIDGE_IMAGE
               value: "${BRIDGE_IMAGE}"
+            # The agents run from the platform image.
+            - name: AGENT_IMAGE
+              value: "${OPERATOR_IMAGE}"
             - name: RESTIC_IMAGE
               value: restic/restic:${RESTIC_VERSION}
             # Checks a backup target an admin sets before the cell uses it.

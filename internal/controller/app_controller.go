@@ -994,6 +994,10 @@ func (r *AppReconciler) remove(ctx context.Context, app *cellv1.App, hasNamespac
 // returns the API server's answer for each (current generation and status,
 // never a cached copy).
 func (r *AppReconciler) apply(ctx context.Context, objs ...client.Object) ([]*unstructured.Unstructured, error) {
+	return serverApply(ctx, r.Client, objs...)
+}
+
+func serverApply(ctx context.Context, c client.Client, objs ...client.Object) ([]*unstructured.Unstructured, error) {
 	var applied []*unstructured.Unstructured
 	for _, o := range objs {
 		u, ok := o.(*unstructured.Unstructured)
@@ -1002,7 +1006,7 @@ func (r *AppReconciler) apply(ctx context.Context, objs ...client.Object) ([]*un
 			if err != nil {
 				return nil, err
 			}
-			gvk, err := apiutil.GVKForObject(o, r.Scheme())
+			gvk, err := apiutil.GVKForObject(o, c.Scheme())
 			if err != nil {
 				return nil, err
 			}
@@ -1013,7 +1017,7 @@ func (r *AppReconciler) apply(ctx context.Context, objs ...client.Object) ([]*un
 			unstructured.RemoveNestedField(u.Object, "spec", "template", "metadata", "creationTimestamp")
 		}
 		gvk := u.GroupVersionKind()
-		if err := r.Apply(ctx, client.ApplyConfigurationFromUnstructured(u), client.FieldOwner(fieldOwner), client.ForceOwnership); err != nil {
+		if err := c.Apply(ctx, client.ApplyConfigurationFromUnstructured(u), client.FieldOwner(fieldOwner), client.ForceOwnership); err != nil {
 			return nil, fmt.Errorf("apply %s %s/%s: %w", gvk.Kind, u.GetNamespace(), u.GetName(), err)
 		}
 		u.SetGroupVersionKind(gvk)

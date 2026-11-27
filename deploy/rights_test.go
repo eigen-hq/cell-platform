@@ -26,6 +26,7 @@ var clusterWide = map[string][]string{
 		"cell.internal/restores:" + crud, "cell.internal/restores/status:" + crud,
 		"cell.internal/changerequests:" + crud, "cell.internal/changerequests/status:" + crud,
 		"cell.internal/tasks:get,list,watch,create,patch",
+		"cell.internal/agents:get,list,watch,patch", "cell.internal/agents/finalizers:update",
 		"apps/deployments:get,list,watch", "batch/jobs:get,list,watch",
 		"postgresql.cnpg.io/clusters:get,list,watch", "helm.toolkit.fluxcd.io/helmreleases:get,list,watch",
 		"networking.k8s.io/ingresses:list",
@@ -40,6 +41,7 @@ var clusterWide = map[string][]string{
 		"cell.internal/restores:get,list,watch",
 		"cell.internal/changerequests:get,list,watch,create,update",
 		"cell.internal/tasks:get,list,watch,create", "cell.internal/tasks/status:update",
+		"cell.internal/agents:get,list,watch",
 		"/namespaces:get", "/nodes:get,list",
 	},
 	// The kubelet's /metrics/* on every machine (E-87).
