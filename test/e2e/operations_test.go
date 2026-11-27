@@ -64,14 +64,36 @@ func (m marker) claim() string {
 	return ""
 }
 
+// node is where a running pod of the app has claim attached, or "".
+func (m marker) node(claim string) string {
+	var pods corev1.PodList
+	if err := kube(m.t).List(context.Background(), &pods, client.InNamespace(m.ns())); err != nil {
+		m.t.Fatal(err)
+	}
+	for _, p := range pods.Items {
+		for _, v := range p.Spec.Volumes {
+			if v.PersistentVolumeClaim != nil && v.PersistentVolumeClaim.ClaimName == claim && p.Status.Phase == corev1.PodRunning {
+				return p.Spec.NodeName
+			}
+		}
+	}
+	return ""
+}
+
 func (m marker) onVolume(script string) string {
-	overrides, _ := json.Marshal(map[string]any{"spec": map[string]any{
+	claim := m.claim()
+	spec := map[string]any{
 		"containers": []any{map[string]any{
 			"name": "marker", "image": "busybox:1.37", "command": []any{"sh", "-c", script},
 			"volumeMounts": []any{map[string]any{"name": "v", "mountPath": "/v"}},
 		}},
-		"volumes": []any{map[string]any{"name": "v", "persistentVolumeClaim": map[string]any{"claimName": m.claim()}}},
-	}})
+		"volumes": []any{map[string]any{"name": "v", "persistentVolumeClaim": map[string]any{"claimName": claim}}},
+	}
+	// A ReadWriteOnce volume is attached to one node at a time.
+	if node := m.node(claim); node != "" {
+		spec["nodeName"] = node
+	}
+	overrides, _ := json.Marshal(map[string]any{"spec": spec})
 	pod := fmt.Sprintf("marker-%d", time.Now().UnixNano())
 	kubectl(m.t, "-n", m.ns(), "run", pod, "--restart=Never", "--image=busybox:1.37", "--overrides="+string(overrides))
 	defer kubectl(m.t, "-n", m.ns(), "delete", "pod", pod, "--wait=false")

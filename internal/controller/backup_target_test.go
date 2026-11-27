@@ -22,6 +22,86 @@ import (
 	"github.com/eigen-hq/cell-platform/internal/cell"
 )
 
+// A backup runs next to the app: a running pod that mounts one of the
+// volumes fixes the node; waiting or finished pods and other volumes do not.
+func TestClaimNode(t *testing.T) {
+	pod := func(name, node, claim string, phase corev1.PodPhase) *corev1.Pod {
+		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "app-notes"},
+			Spec: corev1.PodSpec{NodeName: node, Volumes: []corev1.Volume{{Name: "v", VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: claim}}}}},
+			Status: corev1.PodStatus{Phase: phase}}
+	}
+	// The backup waiting on n4 for the volume the app has on n2 is listed first.
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithObjects(
+		pod("a-backup", "n4", "data", corev1.PodPending), pod("done", "n1", "data", corev1.PodSucceeded),
+		pod("other", "n3", "cache", corev1.PodRunning), pod("app", "n2", "data", corev1.PodRunning)).Build()
+	node, err := claimNode(context.Background(), c, "app-notes", []string{"data"})
+	if err != nil || node != "n2" {
+		t.Fatalf("node %q %v", node, err)
+	}
+	var spec corev1.PodSpec
+	onNode(&spec, node)
+	if terms := spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms; terms[0].MatchFields[0].Values[0] != "n2" {
+		t.Errorf("affinity %+v", terms)
+	}
+	if node, err := claimNode(context.Background(), c, "app-notes", []string{"logs"}); err != nil || node != "" {
+		t.Errorf("unmounted claim: %q %v", node, err)
+	}
+}
+
+// A backup Job kept on node A, or on no node, is made again for node B once
+// the volumes are attached there, but only while none of its pods started,
+// and only once the old one and its pods are gone.
+func TestStaleJob(t *testing.T) {
+	ctx := context.Background()
+	job := func(name, node string) *batchv1.Job {
+		j := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "app-notes", UID: types.UID(name + "-uid")}}
+		onNode(&j.Spec.Template.Spec, node)
+		return j
+	}
+	pod := func(job string, phase corev1.PodPhase) *corev1.Pod {
+		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: job + "-pod", Namespace: "app-notes",
+			Labels: map[string]string{"batch.kubernetes.io/controller-uid": job + "-uid"}}, Status: corev1.PodStatus{Phase: phase}}
+	}
+	propagation := map[string]metav1.DeletionPropagation{}
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithObjects(
+		job("on-a", "a"), pod("on-a", corev1.PodPending), job("old", ""), pod("old", corev1.PodPending),
+		job("running", "a"), pod("running", corev1.PodRunning), job("on-b", "b"), pod("on-b", corev1.PodPending)).
+		WithInterceptorFuncs(interceptor.Funcs{Delete: func(ctx context.Context, c client.WithWatch, o client.Object, opts ...client.DeleteOption) error {
+			var do client.DeleteOptions
+			do.ApplyOptions(opts)
+			if do.PropagationPolicy != nil {
+				propagation[o.GetName()] = *do.PropagationPolicy
+			}
+			return c.Delete(ctx, o, opts...)
+		}}).Build()
+	// Without a Reader, as the manager in the app tests runs it.
+	r := &BackupReconciler{Client: c}
+	for name, want := range map[string]bool{"on-a": true, "old": true, "running": false, "on-b": false} {
+		var j batchv1.Job
+		if err := c.Get(ctx, types.NamespacedName{Namespace: "app-notes", Name: name}, &j); err != nil {
+			t.Fatal(err)
+		}
+		stale, err := r.staleJob(ctx, &j, "b")
+		gone := apierrors.IsNotFound(c.Get(ctx, types.NamespacedName{Namespace: "app-notes", Name: name}, &batchv1.Job{}))
+		if err != nil || stale != want || gone != want || (want && propagation[name] != metav1.DeletePropagationForeground) {
+			t.Errorf("%s: stale %v, deleted %v (%s), %v; want %v", name, stale, gone, propagation[name], err, want)
+		}
+	}
+	// Still being deleted, its pod started meanwhile: no new one yet.
+	deleting := job("deleting", "a")
+	deleting.DeletionTimestamp = &metav1.Time{Time: time.Now()}
+	if stale, err := r.staleJob(ctx, deleting, "a"); err != nil || !stale {
+		t.Errorf("job being deleted: %v %v", stale, err)
+	}
+	if stale, err := r.staleJob(ctx, job("free", "a"), ""); err != nil || stale {
+		t.Errorf("volumes not attached: %v %v", stale, err)
+	}
+	if got := job("pinned", "b"); pinnedNode(&got.Spec.Template.Spec) != "b" || pinnedNode(&corev1.PodSpec{}) != "" {
+		t.Errorf("pinnedNode")
+	}
+}
+
 // An admin's target is checked by a Job and used only once the Job could
 // write to it; a failed check leaves the target as it was. The status
 // tells both, without a secret.

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -340,6 +341,87 @@ func dataClaims(ctx context.Context, c client.Client, app *cellv1.App) ([]string
 		}
 	}
 	return claims, nil
+}
+
+// claimNode is the node of a running pod with one of claims mounted, or ""
+// when none runs. A pod that mounts such a claim too must run there: a
+// ReadWriteOnce volume is attached to one node at a time. Only a running pod
+// has its volumes attached; one waiting for them (a backup on the wrong
+// node) does not count.
+// ponytail: one node for all claims; an app whose volumes are attached on
+// different nodes needs a Job per node.
+func claimNode(ctx context.Context, c client.Client, ns string, claims []string) (string, error) {
+	var pods corev1.PodList
+	if err := c.List(ctx, &pods, client.InNamespace(ns)); err != nil {
+		return "", err
+	}
+	for _, p := range pods.Items {
+		if p.Spec.NodeName == "" || p.Status.Phase != corev1.PodRunning {
+			continue
+		}
+		for _, v := range p.Spec.Volumes {
+			if v.PersistentVolumeClaim != nil && slices.Contains(claims, v.PersistentVolumeClaim.ClaimName) {
+				return p.Spec.NodeName, nil
+			}
+		}
+	}
+	return "", nil
+}
+
+// onNode keeps a pod on the named node, if any.
+func onNode(spec *corev1.PodSpec, node string) {
+	if node == "" {
+		return
+	}
+	spec.Affinity = &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{
+		RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{{
+			MatchFields: []corev1.NodeSelectorRequirement{{Key: "metadata.name", Operator: corev1.NodeSelectorOpIn, Values: []string{node}}},
+		}}},
+	}}
+}
+
+// pinnedNode is the node onNode keeps a pod on, or "".
+func pinnedNode(spec *corev1.PodSpec) string {
+	if a := spec.Affinity; a != nil && a.NodeAffinity != nil && a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+		for _, t := range a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+			for _, f := range t.MatchFields {
+				if f.Key == "metadata.name" && f.Operator == corev1.NodeSelectorOpIn && len(f.Values) == 1 {
+					return f.Values[0]
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// staleJob deletes a Job that is not kept on node, where its volumes are
+// attached now (the app moved, or the Job is from before it was kept
+// there), while none of its pods has started: it would wait for the
+// volumes for good and hold its locks. A pod that has not started has not
+// touched the backup. It reports whether the Job is deleted or still being
+// deleted; the caller creates it again once it is gone. In the foreground:
+// the Job is gone only after its pods, so a pod that started after the check
+// never runs next to the new one.
+func (r *BackupReconciler) staleJob(ctx context.Context, job *batchv1.Job, node string) (bool, error) {
+	if job.DeletionTimestamp != nil {
+		return true, nil
+	}
+	if node == "" || pinnedNode(&job.Spec.Template.Spec) == node {
+		return false, nil
+	}
+	var pods corev1.PodList
+	// Past the cache: a pod that has just started must not look pending.
+	if err := apiReader(r.Reader, r).List(ctx, &pods, client.InNamespace(job.Namespace), client.MatchingLabels{"batch.kubernetes.io/controller-uid": string(job.UID)}); err != nil {
+		return false, err
+	}
+	for _, p := range pods.Items {
+		if p.Status.Phase != corev1.PodPending {
+			return false, nil
+		}
+	}
+	uid := job.UID
+	err := r.Delete(ctx, job, client.Preconditions{UID: &uid}, client.PropagationPolicy(metav1.DeletePropagationForeground))
+	return true, client.IgnoreNotFound(err)
 }
 
 // createOnce creates an object unless it exists.

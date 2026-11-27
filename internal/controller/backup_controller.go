@@ -191,6 +191,11 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	// The app keeps running and its volumes attached.
+	node, err := claimNode(ctx, r, Namespace(app.Name), claims)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 	var dbServer, dbBackup string
 	if d := b.Status.Database; d != nil {
 		dbServer, dbBackup = d.ServerName, d.BackupID
@@ -200,8 +205,12 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		corev1.EnvVar{Name: "DB_SERVER", Value: dbServer},
 		corev1.EnvVar{Name: "DB_BACKUP", Value: dbBackup},
 		corev1.EnvVar{Name: "CLAIMS", Value: strings.Join(claims, " ")})
+	onNode(&job.Spec.Template.Spec, node)
 	job.Labels = runLabels(job.Labels, labelBackup, b.Name)
 	if ok, err := ensureChild(ctx, r, job, string(b.UID)); err != nil || !ok {
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, err
+	}
+	if stale, err := r.staleJob(ctx, job, node); err != nil || stale {
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, err
 	}
 	done, out, err := jobResult(ctx, r, job)
