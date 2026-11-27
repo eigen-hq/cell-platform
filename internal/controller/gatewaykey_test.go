@@ -29,7 +29,8 @@ func TestAppSecret(t *testing.T) {
 
 // The gateway's auth proxy gives an app's key its plain directory and the
 // "<app>.db" key the encrypted database archive, keyed by the backup
-// password alone (E-67), and refuses any other key id.
+// password alone (E-67), with its bucket in place, and refuses any other
+// key id.
 func TestGatewayProxy(t *testing.T) {
 	raw, err := os.ReadFile("../../deploy/base/backup-gateway.yaml")
 	if err != nil {
@@ -47,8 +48,27 @@ func TestGatewayProxy(t *testing.T) {
 		}
 	}
 	script := strings.ReplaceAll(cm.Data["proxy"], "/target/", dir+"/")
+	// rclone records what the proxy has it do.
+	calls := filepath.Join(dir, "calls")
+	fakeRclone := `#!/bin/sh
+case $1 in obscure) echo "obscured-$2" ;; *) [ -z "$FAIL" ] || exit 1; echo "$* $RCLONE_CONFIG_ARCHIVE_TYPE $RCLONE_CONFIG_ARCHIVE_REMOTE $RCLONE_CONFIG_ARCHIVE_PASSWORD" >> ` + calls + ` ;; esac
+`
+	bin := filepath.Join(dir, "bin")
+	if err := os.Mkdir(bin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "rclone"), []byte(fakeRclone), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	called := func() string {
+		b, _ := os.ReadFile(calls)
+		_ = os.Remove(calls)
+		return strings.TrimSpace(string(b))
+	}
+	fail := ""
 	proxy := func(user string) (map[string]string, error) {
 		cmd := exec.Command("sh", "-c", script)
+		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "FAIL="+fail)
 		cmd.Stdin = strings.NewReader(`{"user": "` + user + `", "pass": "x"}`)
 		out, err := cmd.Output()
 		if err != nil {
@@ -65,12 +85,23 @@ func TestGatewayProxy(t *testing.T) {
 		plain["_secret_access_key"] != gk.appSecret("notes") {
 		t.Errorf("app key: %v %v", plain, err)
 	}
+	if c := called(); c != "" {
+		t.Errorf("app key ran %q", c)
+	}
 	db, err := proxy("notes.db")
 	if err != nil || db["type"] != "crypt" || db["remote"] != "target:bucket/cell/apps/notes/crypt" ||
 		db["_secret_access_key"] != gk.appSecret("notes.db") || db["_obscure"] != "password,password2" ||
 		db["password"] != sum("crypt:notes:pw") || db["password2"] != sum("crypt-salt:notes:pw") {
 		t.Errorf("database key: %v %v", db, err)
 	}
+	if c, want := called(), "rcat archive:postgres/.bucket crypt target:bucket/cell/apps/notes/crypt obscured-"+sum("crypt:notes:pw"); c != want {
+		t.Errorf("database key ran %q, want %q", c, want)
+	}
+	fail = "1"
+	if out, err := proxy("notes.db"); err == nil {
+		t.Errorf("database key without its bucket: %v", out)
+	}
+	fail = ""
 	for _, bad := range []string{"", ".db", "notes.db.db", "Notes", "-notes", "notes-.db", "a/b"} {
 		if out, err := proxy(bad); err == nil {
 			t.Errorf("key id %q accepted: %v", bad, out)

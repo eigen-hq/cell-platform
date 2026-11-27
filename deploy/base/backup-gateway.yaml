@@ -34,6 +34,17 @@ data:
     [ -n "$password" ] || { echo "no backup password" >&2; exit 1; }
     pass=$(printf 'crypt:%s:%s' "$app" "$password" | sha256sum | cut -c1-64)
     salt=$(printf 'crypt-salt:%s:%s' "$app" "$password" | sha256sum | cut -c1-64)
+    # The archive's bucket: the database tools create it only when a
+    # database starts (barman 3.20.1), and the gateway keeps a bucket it
+    # made but holds nothing in only until it restarts. A file in it keeps
+    # it on a new or empty target, of any kind: a plain write, again each
+    # time, works on every remote. Without it no key: the gateway would
+    # keep the key and drop this error.
+    export RCLONE_CONFIG_ARCHIVE_TYPE=crypt RCLONE_CONFIG_ARCHIVE_REMOTE="target:$root/apps/$app/crypt"
+    RCLONE_CONFIG_ARCHIVE_PASSWORD=$(rclone obscure "$pass")
+    RCLONE_CONFIG_ARCHIVE_PASSWORD2=$(rclone obscure "$salt")
+    export RCLONE_CONFIG_ARCHIVE_PASSWORD RCLONE_CONFIG_ARCHIVE_PASSWORD2
+    echo bucket | rclone rcat archive:postgres/.bucket >&2 || { echo "no archive bucket for $app" >&2; exit 1; }
     printf '{"type":"crypt","remote":"target:%s/apps/%s/crypt","password":"%s","password2":"%s","_obscure":"password,password2","_root":"","_secret_access_key":"%s"}\n' "$root" "$app" "$pass" "$salt" "$secret"
 ---
 apiVersion: apps/v1
