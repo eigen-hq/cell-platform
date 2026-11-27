@@ -182,8 +182,12 @@ if [ -z "$backup_kept" ]; then
   changed=$(backup_target_manifest "$conf" root="$root" gatewayKey="$key" password="$CELL_BACKUP_PASSWORD" \
     prefix="$prefix" localVolume="$BACKUP_LOCAL_VOLUME" | apply_secret)
 fi
-apply backup-gateway.yaml
-case $changed in *unchanged*) ;; *) kubectl -n cell-system rollout restart deploy/backup-gateway >/dev/null ;; esac
+gw=$(render backup-gateway.yaml | kubectl apply -f -)
+# rclone keeps an app's backend while its key is in use (WAL archiving uses
+# it every few seconds), so a new target or proxy script needs a restart.
+if [[ $changed != *unchanged* ]] || configured "$gw" configmap/backup-gateway; then
+  kubectl -n cell-system rollout restart deploy/backup-gateway >/dev/null
+fi
 kubectl -n cell-system rollout status deploy/backup-gateway --timeout=5m >/dev/null
 
 if [ "$CELL_INGRESS_IP" != 127.0.0.1 ]; then
