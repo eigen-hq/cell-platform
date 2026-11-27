@@ -16,7 +16,7 @@
   // Characters as the API counts them (code points, not UTF-16 units).
   const long = $derived([...input].length > MAX_ASK);
   const examples = $derived(
-    app ? `Why is ${title ?? app} slow since this morning? Give it more memory if it needs it.` : "Which machine is fullest, and which apps run on it?",
+    app ? `Why did ${title ?? app} restart this morning? Let only admins open it.` : "Which machine is fullest, and which apps run on it?",
   );
 
   async function submit(e: SubmitEvent) {
