@@ -168,6 +168,31 @@ func names(list any) []string {
 	return out
 }
 
+// A change's reason and message can quote an app's logs: an agent in an
+// app's task reads only that app's changes.
+func TestAgentChangeLogScope(t *testing.T) {
+	h := newHarness(t, installed("notes", "oidc"), installed("plain", "none"), pendingTask("notes-diagnose-1"))
+	_, body := h.do("PATCH", "/v0/apps/plain", "admin", map[string]any{"patch": map[string]any{"version": "9"}, "reason": "plain logs say x"})
+	other := field(body, "name").(string)
+	h.do("PATCH", "/v0/apps/notes", "admin", map[string]any{"patch": map[string]any{"version": "2"}})
+	h.agentTask = "notes-diagnose-1"
+	h.do("POST", "/v0/tasks/notes-diagnose-1/claim", "agent", nil)
+
+	if code, _ := h.do("GET", "/v0/changes?app=plain", "agent", nil); code != 403 {
+		t.Errorf("agent lists another app's changes: %d", code)
+	}
+	if code, _ := h.do("GET", "/v0/changes/"+other, "agent", nil); code != 403 {
+		t.Errorf("agent reads another app's change: %d", code)
+	}
+	code, body := h.do("GET", "/v0/changes", "agent", nil)
+	if list, _ := body.([]any); code != 200 || len(list) != 1 || field(list[0], "app") != "notes" {
+		t.Errorf("agent's change log: %d %v", code, body)
+	}
+	if _, body := h.do("GET", "/v0/changes", "viewer", nil); len(body.([]any)) != 2 {
+		t.Errorf("viewer's change log %v", body)
+	}
+}
+
 func TestCreateTask(t *testing.T) {
 	h := newHarness(t, installed("notes", "oidc"))
 	compose := "services:\n  memo:\n    image: example/memo:1.0\n"

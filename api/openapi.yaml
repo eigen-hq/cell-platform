@@ -574,7 +574,7 @@ paths:
     get:
       operationId: listChanges
       x-agent: true
-      description: "The change log, newest first: proposed and finished changes with risk and outcome."
+      description: "The change log, newest first: proposed and finished changes with risk and outcome. An agent in an app's task sees only that app's changes."
       parameters:
         - {name: app, in: query, schema: {type: string}}
       responses:
@@ -588,7 +588,7 @@ paths:
     get:
       operationId: getChange
       x-agent: true
-      description: "A change with its patch, state and outcome."
+      description: "A change with its patch, state and outcome. An agent in an app's task reads only that app's changes."
       responses:
         default: {$ref: "#/components/responses/Error"}
         "200": {description: The change., content: {application/json: {schema: {$ref: "#/components/schemas/ChangeRequest"}}}}

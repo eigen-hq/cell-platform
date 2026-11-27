@@ -44,6 +44,8 @@ func TestRequest(t *testing.T) {
 		{op: "getApp", args: `{}`, err: `argument "name": a name is required`},
 		{op: "getApp", args: `{"name":""}`, err: `argument "name": a name is required`},
 		{op: "getApp", args: `{"name":3}`, err: `argument "name": a name is required`},
+		{op: "getApp", args: `{"name":".."}`, err: `argument "name": a name is required`},
+		{op: "getApp", args: `{"name":"."}`, err: `argument "name": a name is required`},
 		{op: "getApp", args: `{"name":"x","app":"y"}`, err: `unknown argument "app"; getApp takes name`},
 	} {
 		i := slices.IndexFunc(ops, func(o operation) bool { return o.Name == c.op })

@@ -218,9 +218,10 @@ func (op operation) request(args json.RawMessage) (string, any, error) {
 		if where != "path" {
 			continue
 		}
-		// An empty name would call another operation: /v0/apps/ lists apps.
+		// An empty name would call another operation (/v0/apps/ lists
+		// apps), and so would . or .., which the router cleans away.
 		var s string
-		if err := json.Unmarshal(in[name], &s); err != nil || s == "" {
+		if err := json.Unmarshal(in[name], &s); err != nil || s == "" || s == "." || s == ".." {
 			return "", nil, fmt.Errorf("argument %q: a name is required", name)
 		}
 		path = strings.ReplaceAll(path, "{"+name+"}", url.PathEscape(s))

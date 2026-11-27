@@ -782,6 +782,9 @@ func (s *Server) listChanges(w http.ResponseWriter, r *http.Request, c *Caller) 
 		return err
 	}
 	app := r.URL.Query().Get("app")
+	if err := agentApp(r.Context(), c, &app); err != nil {
+		return err
+	}
 	out := []changeView{}
 	for i := range list.Items {
 		if app != "" && list.Items[i].Spec.App != app {
@@ -795,6 +798,21 @@ func (s *Server) listChanges(w http.ResponseWriter, r *http.Request, c *Caller) 
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	writeJSON(w, http.StatusOK, out)
+	return nil
+}
+
+// agentApp keeps an agent in an app's task to that app: a change's reason
+// and message can quote what the app's logs say. An empty app becomes the
+// task's; another app is refused. A cell's task reads the whole log.
+func agentApp(ctx context.Context, c *Caller, app *string) error {
+	task := taskOf(ctx)
+	if c.Role != RoleAgent || task.App == "" {
+		return nil
+	}
+	if *app != "" && *app != task.App {
+		return errorf(http.StatusForbidden, "task %s is about app %s, not %s", task.Name, task.App, *app)
+	}
+	*app = task.App
 	return nil
 }
 
@@ -812,6 +830,10 @@ func (s *Server) change(ctx context.Context, name string) (*cellv1.ChangeRequest
 func (s *Server) getChange(w http.ResponseWriter, r *http.Request, c *Caller) error {
 	cr, err := s.change(r.Context(), r.PathValue("name"))
 	if err != nil {
+		return err
+	}
+	app := cr.Spec.App
+	if err := agentApp(r.Context(), c, &app); err != nil {
 		return err
 	}
 	v, err := viewChangeFor(c, cr)
