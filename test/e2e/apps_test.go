@@ -201,9 +201,24 @@ func isolated(t *testing.T, tc *testCell, app string) {
 		t.Helper()
 		// Only a refused or silent connection means the network kept the
 		// call out; an HTTP answer, even an error, means it got through.
-		out, err := exec.Command(filepath.Join(repoRoot(), "bin", "kubectl"), "-n", from, "run", "probe-"+app, "--rm", "-i", "--quiet",
-			"--restart=Never", "--pod-running-timeout=2m", "--image=busybox:1.37", "--",
-			"sh", "-c", "wget -q -T 5 -O /dev/null "+target+" 2>&1 && echo PROBE:answered; echo PROBE:done").CombinedOutput()
+		// A new pod on another machine is refused for a second or two, until
+		// that machine's network policy knows its address: five tries, the
+		// first answer counts. The pod runs detached and is read from its
+		// log: attaching to a pod on another machine is not reliable.
+		kc := func(args ...string) ([]byte, error) {
+			return exec.Command(filepath.Join(repoRoot(), "bin", "kubectl"), append([]string{"-n", from}, args...)...).CombinedOutput()
+		}
+		pod := "probe-" + app
+		_, _ = kc("delete", "pod", pod, "--ignore-not-found", "--wait")
+		defer func() { _, _ = kc("delete", "pod", pod, "--ignore-not-found", "--wait=false") }()
+		if out, err := kc("run", pod, "--restart=Never", "--image=busybox:1.37", "--",
+			"sh", "-c", "for i in 1 2 3 4 5; do wget -q -T 5 -O /dev/null "+target+" 2>&1 && { echo PROBE:answered; break; }; sleep 2; done; echo PROBE:done"); err != nil {
+			t.Fatalf("probe from %s did not start: %v %s", from, err, out)
+		}
+		out, err := kc("wait", "pod/"+pod, "--for=jsonpath={.status.phase}=Succeeded", "--timeout=3m")
+		if err == nil {
+			out, err = kc("logs", pod)
+		}
 		text := string(out)
 		switch {
 		case err != nil || !strings.Contains(text, "PROBE:done"):

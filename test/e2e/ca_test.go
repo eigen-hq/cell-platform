@@ -22,12 +22,16 @@ import (
 )
 
 // Security: the deployed cell CA only vouches for names in the cell domain.
+// A cell with public certificates (acme) has no CA of its own.
 func TestCellCAConstraints(t *testing.T) {
 	ctx := context.Background()
 	c := kube(t)
 	cfg, err := cell.LoadConfig(ctx, c)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if cfg.TLS != "selfsigned" {
+		t.Skipf("the cell's certificates are %s: no cell CA", cfg.TLS)
 	}
 	var s corev1.Secret
 	if err := c.Get(ctx, client.ObjectKey{Namespace: "cert-manager", Name: "cell-ca"}, &s); err != nil {
