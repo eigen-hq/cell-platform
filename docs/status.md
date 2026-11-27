@@ -193,7 +193,7 @@ Status 2026-11-27: console in Svelte at `https://console.<domain>`, served by `c
 | Ports between the machines open without a firewall | Machines talk only on the shared network (E-57); the firewall blocks 6443, 10250, 5001 and 51820 from outside; without a firewall they keep listening on all addresses |
 | Base services need too much memory for a small VM | Measured (see Cell by command); if needed, swap components |
 | "Runs" is not "integrated" | Make two levels visible in the catalog: generic and integrated |
-| Trust in agents | Approval as the default, log from the start |
+| Trust in agents | Every change waits for approval until checks on a change run; then agents apply what the platform can undo and a person decides the rest (E-95); log from the start |
 | An admin can point the mail host or the model address at a service inside the cell and read its answer in the check error; the gateway then sends model requests there from `cell-system` (security review 2026-11-27, low) | Admins only, who already control the cell; accepted for now. If admins get narrower roles: refuse cluster, private and loopback addresses for both, require https for a remote model address, drop the remote's text from check errors |
 
 ## Local development

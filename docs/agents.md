@@ -35,7 +35,7 @@ These rules hold for every agent in the cell.
 - **Rules first.** The operator does everything a rule can do without a model: install, restart, back up, update, roll back. Agents handle only what no rule covers.
 - **Only through the platform API.** An agent has an account of its own and only that account's rights. It has no access to the cluster and no shell.
 - **Every call is recorded.** Each API call an agent makes is a step in its task, with its time. *Runs today.* The step also keeps the part of the response the agent saw: *planned* (backlog: Conversations).
-- **Agents propose, people decide.** Every change an agent wants waits for an admin's approval. *Runs today.* Which changes may later run without you is up to you (backlog: Autonomy levels).
+- **Agents propose, people decide.** Every change an agent wants waits for an admin's approval. *Runs today.* Planned: agents apply what the platform can undo themselves; you decide only what cannot be undone, what reaches outside the cell and who gets which rights (E-95, backlog: Autonomy levels).
 - **Numbers come from the platform.** Risk level, diff, measurements and check results are computed by the platform. The model chooses and explains; you never have to trust a number it typed. *Planned* (backlog: Structured answers).
 - **"Done" is agreed before you approve.** A proposed change names the checks that prove it worked. The operator runs them, not the agent. *Planned* (backlog: Checks on a change).
 
@@ -165,7 +165,7 @@ They may not approve and have no access to the cluster. They cannot read the cel
 - Each agent becomes an account of its own, with the apps, tools, model and budget an admin gives it.
 - An agent may hand part of a task to another agent. That task shows up as a child of the first, with at most the rights and budget of its parent.
 - An agent working on your request has only the rights that both you and it have.
-- Admins decide per agent and kind of change what may run without approval. The first step covers only changes that can be rolled back, each with its checks and automatic rollback; everything else keeps your approval (E-92). Until an admin allows it, every change waits for you.
+- Agents apply a change themselves when the platform can undo it: an update, a configuration change, a restart, an app from the catalog. Each runs with a snapshot first, its checks and automatic rollback, and shows up in the change log, the task's receipt and a daily summary; you can undo it in one click. You decide what cannot be undone or reaches past the cell: deleting data or backups, uninstalling, restoring over the current state, apps from a manifest outside the catalog, changes that cost money or reach outside the cell, and who gets which rights, agents included. Admins can tighten this per agent and kind of change (E-95).
 
 ## Models
 

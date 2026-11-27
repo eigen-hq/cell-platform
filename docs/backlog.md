@@ -46,7 +46,7 @@ What the console shows comes from the API. Without an endpoint there is no UI, n
 | Four-eyes principle | open | O-12 |
 | Checks on a change: a change names the checks that prove it worked (from a fixed catalog with parameters, each with its data source: healthy, processor or memory below or above a value and no restarts first, response time with the probes, a log line gone once logs are kept), editable before approval; a result is passed, failed or inconclusive, and inconclusive never counts as passed; each kind of change says which rollback it has, and data a rollback would lose is shown before approval; the operator runs the checks in a verify window (rollback where the kind has one) and a watch window (task reopens, IT is warned; a change without a task gets a diagnosis task), keeps their state across restarts, and writes a receipt with before and after | open | Metrics, availability and response times per app |
 | Try on a copy: before it proposes a risky change, an agent applies it to a restored copy of the app and runs the checks there | open | Restore as a copy, checks on a change |
-| Approval policy (what may run automatically) | open | Autonomy levels |
+| Approval policy: what the platform can undo applies itself, a person decides the rest (E-95) | decided, open | Autonomy levels |
 | Update policy | open | O-09 |
 | Roles in the console: managers approve for their department, auditors read only | open | |
 
@@ -185,7 +185,7 @@ How people work with agents is in `agents.md`, the design in `architecture.md` (
 | Tools from the API contract: every operation in `api/openapi.yaml` marked for agents is a tool with its description and schema; one catalog for the loop and for MCP; replaces the 12 hand-written tools | open | Neutral model API |
 | Agents as accounts with permissions per app: an `Agent` resource with its own account, instructions, tools, apps, model and budget; Ops and Packer become two of them; an agent can hand part of a task to another (a child task, with at most the rights and the remaining budget of its parent, nested to a fixed depth); every call in a task has only the rights that both the agent and the requester have | open | Tools from the API contract |
 | Tools per agent: each agent gets the MCP tools of the apps it may use, changing with apps and permissions; calls go through the API, which records them | open | Tool gateway, agents as accounts |
-| Autonomy levels: per agent and kind of change, from "propose only" to "apply reversible changes with checks and automatic rollback"; revisits A-10 | open | Checks on a change, agents as accounts |
+| Autonomy levels: agents apply changes the operator can undo themselves, with snapshot, checks and automatic rollback; a person decides deleting data or backups, uninstalling, restoring over the current state, unreviewed manifests, spend, anything outside the cell and every widening of rights (E-95, replaces A-10); admins tighten per agent and kind of change | open | Checks on a change, agents as accounts |
 | Context index: documents, tickets, people and their references across all apps, in the platform's database and storage; own apps write directly, third-party apps are indexed | open | Data access per app, platform database |
 | Evals with real models: scenarios with a score per model and prompt | deliberately not now (E-89) | |
 

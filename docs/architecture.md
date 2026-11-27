@@ -129,8 +129,8 @@ Agents are accounts in the identity service with their own permissions. Their to
 | Level | Examples | Rule |
 |---|---|---|
 | 0 Read | Status, logs, events, metrics | Always allowed |
-| 1 Reversible | Restart, configuration change, update with snapshot | With approval; switching to automatic per cell is not built yet |
-| 2 Risky | Delete data, restore over the current state, uninstall | Always with approval by a human |
+| 1 Reversible | Restart, configuration change, update with snapshot, install from the catalog | With approval today; decided: applies itself with its checks and automatic rollback once checks on a change are built (E-95) |
+| 2 Risky | Delete data or backups, restore over the current state, uninstall, install from a manifest outside the catalog, spend, anything outside the cell, widening of rights | Always with approval by a person signed in to the console (E-95) |
 
 Agents reach their language model only through the cell's model gateway (E-80): one provider an admin sets, with the customer's key, which stays in the gateway; each agent has its own key to the gateway. The provider is replaceable without touching an agent.
 
