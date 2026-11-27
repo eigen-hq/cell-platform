@@ -323,19 +323,23 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request, c *Caller) e
 		if len(req.Manifest) > 0 {
 			return errorf(http.StatusBadRequest, "give manifest or manifestYaml, not both")
 		}
+		// Every key of the file is known: a typo or a wrong indent beside
+		// spec would otherwise be dropped. The status of an exported App
+		// is allowed and ignored.
 		var doc struct {
-			APIVersion string `json:"apiVersion"`
-			Kind       string `json:"kind"`
-			Metadata   struct {
-				Name string `json:"name"`
-			} `json:"metadata"`
-			Spec json.RawMessage `json:"spec"`
+			APIVersion string            `json:"apiVersion"`
+			Kind       string            `json:"kind"`
+			Metadata   metav1.ObjectMeta `json:"metadata"`
+			Spec       json.RawMessage   `json:"spec"`
+			Status     json.RawMessage   `json:"status"`
 		}
 		js, err := oneYAMLDocument(req.ManifestYAML)
 		if err != nil {
 			return errorf(http.StatusBadRequest, "manifest: %v", err)
 		}
-		if err := json.Unmarshal(js, &doc); err != nil {
+		dec := json.NewDecoder(bytes.NewReader(js))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&doc); err != nil {
 			return errorf(http.StatusBadRequest, "manifest: %v", err)
 		}
 		if doc.APIVersion != cellv1.GroupVersion.String() || doc.Kind != "App" || len(doc.Spec) == 0 || string(doc.Spec) == "null" {

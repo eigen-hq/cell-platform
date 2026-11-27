@@ -369,6 +369,8 @@ func TestInstallFromManifest(t *testing.T) {
 		"repeated key":                     {"manifestYaml": file + "  access:\n    subdomain: memo3\n    port: 5230\n"},
 		"two documents":                    {"manifestYaml": file + "---\n" + file},
 		"two documents, old Mac line ends": {"manifestYaml": strings.ReplaceAll(file+"---\n"+file, "\n", "\r")},
+		"unknown top key":                  {"manifestYaml": file + "health:\n  path: /health\n"},
+		"unknown metadata":                 {"manifestYaml": strings.Replace(file, "  name: memo2\n", "  name: memo2\n  lables: {a: b}\n", 1)},
 	} {
 		if code, body := h.do("POST", "/v0/apps", "admin", req); code != 400 {
 			t.Errorf("%s: %d %v", name, code, body)
@@ -377,6 +379,11 @@ func TestInstallFromManifest(t *testing.T) {
 	code, body = h.do("POST", "/v0/apps", "admin", map[string]any{"manifestYaml": file})
 	if code != 202 || field(body, "app") != "memo2" || field(body, "risk") != "high" || field(body, "patch", "access", "port") != 5230.0 {
 		t.Fatalf("install from a manifest file: %d %v", code, body)
+	}
+	// An App as kubectl prints it installs: labels, status and the rest.
+	exported := strings.NewReplacer("name: memo2", "name: memo4\n  labels: {team: ops}\n  resourceVersion: \"7\"", "subdomain: memo2", "subdomain: memo4").Replace(file) + "status:\n  phase: Ready\n"
+	if code, body := h.do("POST", "/v0/apps", "admin", map[string]any{"manifestYaml": exported}); code != 202 {
+		t.Fatalf("install from an exported App: %d %v", code, body)
 	}
 	// A date as the version stays the text it was, as kubectl reads it.
 	dated := strings.NewReplacer("name: memo2", "name: memo3", "subdomain: memo2", "subdomain: memo3", `version: "1.0"`, "version: 2026-11-27").Replace(file)
