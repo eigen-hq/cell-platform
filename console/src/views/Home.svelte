@@ -167,7 +167,7 @@
     {/if}
   </section>
 
-  {#if admin}<Ask />{/if}
+  {#if admin}<div class="ask"><Ask /></div>{/if}
 
   <div class="grid">
     <section aria-labelledby="needs">
@@ -451,6 +451,9 @@
     color: var(--color-ink);
   }
 
+  .ask {
+    margin: -24px 0 56px;
+  }
   .grid {
     display: grid;
     grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);

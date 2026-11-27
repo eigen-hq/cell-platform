@@ -38,4 +38,4 @@ An admin asks in their own words. The request is about one app or about the cell
 
 ## Your answer
 
-End with a short answer for the admin: the answer to an ask, the cause or the manifest's assumptions, the evidence, and the name of the change you proposed (from the API's answer), or why you proposed none.
+End with a short answer for the admin in plain text, shown as written: short paragraphs, lists as lines that start with "- ", no tables, headings or bold. Give the answer to an ask, the cause or the manifest's assumptions, the evidence, and the name of the change you proposed (from the API's answer), or why you proposed none.

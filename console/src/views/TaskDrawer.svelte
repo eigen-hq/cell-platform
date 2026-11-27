@@ -48,7 +48,8 @@
 
     <section>
       <h3>What it was given</h3>
-      <pre>{t.input || "nothing"}</pre>
+      <!-- a request is prose; a Compose file keeps its lines -->
+      <pre class:wrap={t.kind === "ask"}>{t.input || "nothing"}</pre>
     </section>
 
     <section>
@@ -141,8 +142,13 @@
     font: inherit;
     overflow-wrap: anywhere;
   }
+  .wrap {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
   .answer {
     margin: 0;
+    white-space: pre-line;
     padding: 14px 16px;
     border-radius: var(--radius-part);
     background: color-mix(in srgb, var(--color-info) 14%, transparent);
