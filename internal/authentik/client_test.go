@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -400,9 +401,12 @@ func TestEnsureAPIClientTokenValidity(t *testing.T) {
 	}
 }
 
+var slug = regexp.MustCompile(`^[-a-zA-Z0-9_]+$`)
+
 // authentik makes a token that a caller without superuser rights creates
 // its own, whatever user the request names. Such a token is deleted and
-// never handed out; one of the named user is.
+// never handed out; one of the named user is. Its identifier is a slug, as
+// authentik wants, also for an agent's account with a dot.
 func TestCreateAppPasswordChecksOwner(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -410,7 +414,7 @@ func TestCreateAppPasswordChecksOwner(t *testing.T) {
 	}{{"named user", nil}, {"caller instead", 7}} {
 		t.Run(tc.name, func(t *testing.T) {
 			api := newFakeAPI()
-			api.objects["core/users/"] = []map[string]any{{"pk": 7, "username": "platform"}, {"pk": 9, "username": "alice"}}
+			api.objects["core/users/"] = []map[string]any{{"pk": 7, "username": "platform"}, {"pk": 9, "username": "cell-agent-ops.u-1"}}
 			tokens := map[string]map[string]any{}
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				rest, ok := strings.CutPrefix(r.URL.Path, "/api/v3/core/tokens/")
@@ -423,6 +427,10 @@ func TestCreateAppPasswordChecksOwner(t *testing.T) {
 				case r.Method == http.MethodPost && id == "":
 					var tok map[string]any
 					_ = json.NewDecoder(r.Body).Decode(&tok)
+					if !slug.MatchString(fmt.Sprint(tok["identifier"])) {
+						http.Error(w, `{"identifier":["Enter a valid slug"]}`, http.StatusBadRequest)
+						return
+					}
 					if tc.owner != nil {
 						tok["user"] = tc.owner
 					}
@@ -442,9 +450,9 @@ func TestCreateAppPasswordChecksOwner(t *testing.T) {
 			}))
 			defer srv.Close()
 			c := &Client{BaseURL: srv.URL, Token: "t", HTTP: srv.Client()}
-			key, err := c.CreateAppPassword(context.Background(), "alice")
+			key, err := c.CreateAppPassword(context.Background(), "cell-agent-ops.u-1")
 			if tc.owner == nil {
-				if err != nil || !strings.HasPrefix(key, "secret-cell-api-alice-") || len(tokens) != 1 {
+				if err != nil || !strings.HasPrefix(key, "secret-cell-api-cell-agent-ops-u-1-") || len(tokens) != 1 {
 					t.Fatalf("key %q, err %v, tokens %v", key, err, tokens)
 				}
 				return

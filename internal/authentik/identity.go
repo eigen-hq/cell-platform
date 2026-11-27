@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"unicode"
 )
@@ -327,6 +328,8 @@ func (c *Client) RevokeAppPasswords(ctx context.Context, username string) error 
 	return nil
 }
 
+var notSlug = regexp.MustCompile(`[^-a-zA-Z0-9_]`)
+
 // CreateAppPassword creates a non-expiring app password for API logins
 // (client credentials grant) and returns its key. authentik makes a token
 // a caller without superuser rights creates its own, whatever user the
@@ -354,7 +357,8 @@ func (c *Client) CreateAppPassword(ctx context.Context, username string) (string
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	id := "cell-api-" + username + "-" + hex.EncodeToString(b)
+	// A slug: an agent's account has a dot, a person's may have more.
+	id := "cell-api-" + notSlug.ReplaceAllString(username, "-") + "-" + hex.EncodeToString(b)
 	if err := c.do(ctx, http.MethodPost, "core/tokens/", map[string]any{
 		"identifier": id, "intent": "app_password", "user": pk, "expiring": false, "description": "cell platform API",
 	}, nil); err != nil {
