@@ -2,7 +2,7 @@
 
 This guide is for the people who run a cell: admins in the console, and anyone who connects their own assistant to the cell. It explains how the cell's agents work, what you see from them, and what they may do.
 
-Each section says whether it **runs today** or is **planned**. Planned parts name their row in [`backlog.md`](backlog.md); the reasons are in [`decisions.md`](decisions.md) (E-88 to E-90). How it is built is in [`architecture.md`](architecture.md#agent-harness).
+Each section says whether it **runs today** or is **planned**. Planned parts name their row in [`backlog.md`](backlog.md); the reasons are in [`decisions.md`](decisions.md) (E-88 to E-92). How it is built is in [`architecture.md`](architecture.md#agent-harness).
 
 ## At a glance
 
@@ -165,7 +165,7 @@ They may not approve and have no access to the cluster. They cannot read the cel
 - Each agent becomes an account of its own, with the apps, tools, model and budget an admin gives it.
 - An agent may hand part of a task to another agent. That task shows up as a child of the first, with at most the rights and budget of its parent.
 - An agent working on your request has only the rights that both you and it have.
-- Admins decide per agent and kind of change what may run without approval (O-38). Until then every change waits for you.
+- Admins decide per agent and kind of change what may run without approval. The first step covers only changes that can be rolled back, each with its checks and automatic rollback; everything else keeps your approval (E-92). Until an admin allows it, every change waits for you.
 
 ## Models
 
@@ -182,7 +182,7 @@ They may not approve and have no access to the cluster. They cannot read the cel
 *Planned* (backlog: Your own assistant over MCP):
 
 - The same endpoint offers the platform's tools (for example the state of an app) and task tools: open a task, reply, read its answer.
-- Claude and other MCP clients sign in through the cell's login, with no token to copy (O-35).
-- Your assistant acts with your rights, never more, and the change log names both you and the assistant. As proposed in O-36, approving a change stays in the console: the API refuses it from an assistant.
+- Claude and other MCP clients sign in through the cell's login, with no token to copy (E-92).
+- Your assistant acts with your rights, never more, and the change log names both you and the assistant. Approving a change stays in the console: the API refuses it from an assistant.
 
 *Planned* (backlog: Agent to agent): agents in other systems can talk to the cell's agents over the A2A protocol, and the cell's agents can use outside agents and MCP servers that an admin registers (E-90).
