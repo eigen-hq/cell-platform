@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -173,29 +174,52 @@ func (a *Agent) finish(ctx context.Context, name, result string, failed bool) er
 func (a *Agent) work(ctx context.Context, t task) (string, bool) {
 	tools := a.tools(t.Name)
 	msgs := []message{{Role: "system", Text: systemPrompt}, {Role: "user", Text: brief(t)}}
+	cuts := 0
 	// ponytail: a fixed turn limit, a token budget per task if costs need a cap
 	for range 40 {
 		reply, stop, err := a.Model.complete(ctx, msgs, tools)
 		if err != nil {
 			return "model: " + modelError(err), true
 		}
-		msgs = append(msgs, reply)
 		answer := strings.TrimSpace(reply.Text)
 		// A turn cut at the token limit or by a filter may hold half a call:
-		// none of its calls run. Calls on a turn that ended as "stop" are
-		// whole; some OpenAI-compatible servers end every turn so.
+		// none of its calls run, the model hears so and goes on. A second cut
+		// in a row would likely repeat. Calls on a turn that ended as "stop"
+		// are whole; some OpenAI-compatible servers end every turn so.
 		if stop != "stop" && (stop != "tool_calls" || len(reply.Calls) == 0) {
-			return fmt.Sprintf("stopped before an answer (%s). %s", stop, answer), true
+			if cuts++; cuts == 2 {
+				return fmt.Sprintf("stopped before an answer (%s, twice in a row). %s", stop, answer), true
+			}
+			// Without text the turn was cut in its reasoning, which then has
+			// no signature to go back with.
+			if reply.Calls = nil; answer != "" {
+				msgs = append(msgs, reply)
+			}
+			msgs = append(msgs, message{Role: "user", Text: fmt.Sprintf(cutNote, stop)})
+			continue
 		}
+		cuts = 0
+		msgs = append(msgs, reply)
 		if len(reply.Calls) == 0 {
 			return answer, false
 		}
-		for _, c := range reply.Calls {
-			msgs = append(msgs, message{Role: "tool", CallID: c.ID, Text: run(ctx, tools, c)})
+		// The calls of one turn are independent: the model made them before
+		// it saw any result. Their results go back in the order of the calls.
+		results := make([]string, len(reply.Calls))
+		var wg sync.WaitGroup
+		for i, c := range reply.Calls {
+			wg.Go(func() { results[i] = run(ctx, tools, c) })
+		}
+		wg.Wait()
+		for i, c := range reply.Calls {
+			msgs = append(msgs, message{Role: "tool", CallID: c.ID, Text: results[i]})
 		}
 	}
 	return "stopped before an answer (40 model calls)", true
 }
+
+// cutNote tells the model that its last turn was cut.
+const cutNote = "Your last turn was cut off (%s), so none of its tool calls ran. Go on; split long output into smaller steps."
 
 // run runs one tool call. A failure goes back to the model as the result,
 // marked "ERROR ", so it can correct itself.

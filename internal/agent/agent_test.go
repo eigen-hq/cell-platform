@@ -166,6 +166,10 @@ func TestDiagnose(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, calls := c.task(t, "board-diagnose-1")
+	// The two calls of the first turn run side by side.
+	if len(calls) >= 2 {
+		slices.Sort(calls[:2])
+	}
 	if got.Status.Phase != cellv1.RunSucceeded || got.Status.Assignee != "cell-agent" || !strings.Contains(got.Status.Result, "Proposed change "+change) {
 		t.Errorf("task %+v", got.Status)
 	}
@@ -233,22 +237,34 @@ func TestPackage(t *testing.T) {
 	}
 }
 
-// A turn the model ended at its token limit or by a filter may hold half a
-// call: none of its calls run, the task fails with the reason.
+// A turn cut at the token limit or by a filter runs none of its calls: the
+// model hears so and goes on. A second cut in a row ends the task.
 func TestCutTurn(t *testing.T) {
 	for _, finish := range []string{"length", "content_filter"} {
-		task := &cellv1.Task{ObjectMeta: metav1.ObjectMeta{Name: "board-diagnose-1"},
-			Spec: cellv1.TaskSpec{Kind: "diagnose", App: "board", Requester: cellv1.Requester{Kind: "Operator", Name: "cell-operator"}}}
-		c := newCell(t, func(agenttest.Conversation) (agenttest.Turn, error) {
-			return agenttest.Turn{Finish: finish, Calls: []agenttest.Call{{Tool: "propose_update",
-				Input: map[string]any{"app": "board", "patch": map[string]any{"version": "2.0"}, "reason": "cut"}}}}, nil
-		}, task)
-		if err := c.agent.Once(context.Background()); err != nil {
-			t.Fatal(err)
-		}
-		got, calls := c.task(t, "board-diagnose-1")
-		if got.Status.Phase != cellv1.RunFailed || !strings.Contains(got.Status.Result, "("+finish+")") || len(calls) != 0 || len(c.changes(t)) != 0 {
-			t.Errorf("%s: task %+v, steps %q", finish, got.Status, calls)
+		for _, again := range []bool{false, true} {
+			task := &cellv1.Task{ObjectMeta: metav1.ObjectMeta{Name: "board-diagnose-1"},
+				Spec: cellv1.TaskSpec{Kind: "diagnose", App: "board", Requester: cellv1.Requester{Kind: "Operator", Name: "cell-operator"}}}
+			c := newCell(t, func(conv agenttest.Conversation) (agenttest.Turn, error) {
+				if len(conv.Notes) == 0 || again {
+					return agenttest.Turn{Finish: finish, Calls: []agenttest.Call{{Tool: "propose_update",
+						Input: map[string]any{"app": "board", "patch": map[string]any{"version": "2.0"}, "reason": "cut"}}}}, nil
+				}
+				if err := want(len(conv.Notes) == 1 && strings.Contains(conv.Notes[0], "("+finish+")"), "notes %q", conv.Notes); err != nil {
+					return agenttest.Turn{}, err
+				}
+				return agenttest.Turn{Text: "Nothing to change."}, nil
+			}, task)
+			if err := c.agent.Once(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			phase, result := cellv1.RunSucceeded, "Nothing to change."
+			if again {
+				phase, result = cellv1.RunFailed, "("+finish+", twice in a row)"
+			}
+			got, calls := c.task(t, "board-diagnose-1")
+			if got.Status.Phase != phase || !strings.Contains(got.Status.Result, result) || len(calls) != 0 || len(c.changes(t)) != 0 {
+				t.Errorf("%s, again %v: task %+v, steps %q", finish, again, got.Status, calls)
+			}
 		}
 	}
 }

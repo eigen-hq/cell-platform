@@ -34,6 +34,9 @@ type Conversation struct {
 	// Results are the tool results since the model's last turn; errors
 	// start with "ERROR ".
 	Results []string
+	// Notes are the agent's messages after the task since the model's last
+	// turn.
+	Notes []string
 	// Turn counts the model's earlier answers.
 	Turn int
 	// Tools are the names of the tools the agent offers.
@@ -49,6 +52,10 @@ type request struct {
 		Content            json.RawMessage `json:"content"`
 		ReasoningContent   string          `json:"reasoning_content"`
 		ReasoningSignature string          `json:"reasoning_signature"`
+		ToolCalls          []struct {
+			ID string `json:"id"`
+		} `json:"tool_calls"`
+		ToolCallID string `json:"tool_call_id"`
 	} `json:"messages"`
 	Tools []struct {
 		Function struct {
@@ -57,9 +64,9 @@ type request struct {
 	} `json:"tools"`
 }
 
-// Serve starts the model. Failures of the script, and a turn whose
-// reasoning the agent did not hand back unchanged, answer with HTTP 500
-// and are kept for Errors.
+// Serve starts the model. Failures of the script, a turn whose reasoning
+// the agent did not hand back unchanged, and a tool call without its result
+// answer with HTTP 500 and are kept for Errors.
 func Serve(script Script) *Model {
 	m := &Model{}
 	m.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -112,10 +119,16 @@ func (m *Model) answer(r *http.Request, script Script) (map[string]any, error) {
 	for _, t := range req.Tools {
 		c.Tools = append(c.Tools, t.Function.Name)
 	}
+	// Providers refuse a turn whose tool calls are not all answered right
+	// after it.
+	open := map[string]bool{}
 	for i, msg := range req.Messages {
 		text, err := content(msg.Content)
 		if err != nil {
 			return nil, fmt.Errorf("message %d: %w", i, err)
+		}
+		if msg.Role != "tool" && len(open) > 0 {
+			return nil, fmt.Errorf("message %d: tool calls %v without a result", i, open)
 		}
 		switch msg.Role {
 		case "assistant":
@@ -123,14 +136,26 @@ func (m *Model) answer(r *http.Request, script Script) (map[string]any, error) {
 				return nil, fmt.Errorf("turn %d came back with reasoning %q, signature %q", c.Turn, msg.ReasoningContent, msg.ReasoningSignature)
 			}
 			c.Turn++
-			c.Results = nil
+			c.Results, c.Notes = nil, nil
+			for _, call := range msg.ToolCalls {
+				open[call.ID] = true
+			}
 		case "user":
 			if c.Task == "" {
 				c.Task = text
+			} else {
+				c.Notes = append(c.Notes, text)
 			}
 		case "tool":
+			if !open[msg.ToolCallID] {
+				return nil, fmt.Errorf("message %d: result for call %q, which is not open", i, msg.ToolCallID)
+			}
+			delete(open, msg.ToolCallID)
 			c.Results = append(c.Results, text)
 		}
+	}
+	if len(open) > 0 {
+		return nil, fmt.Errorf("tool calls %v without a result", open)
 	}
 	if c.Task == "" {
 		return nil, fmt.Errorf("no user message")
