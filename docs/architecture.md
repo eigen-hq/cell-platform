@@ -75,7 +75,7 @@ A cell is a k3s cluster with everything a customer needs, on one or more machine
 | Platform database | Records that are not desired state: task conversations, model usage, later memory and the context index | CloudNativePG cluster `cell-db`, reached only by the API, except own apps writing to the context index (planned, E-92) |
 | MCP gateway | One endpoint for the tools of all apps, with permission check | agentgateway, configuration by the operator (E-36) |
 | Model gateway | One open model API for agents and apps, any provider behind it | agentgateway in standalone mode, `cell-models` (E-80) |
-| Ops agents | Diagnosis, asks, packaging; later more agents | Own development in Go: an own loop on one open model API (E-88, planned; today anthropic-sdk-go, E-33), see [Agent harness](#agent-harness) |
+| Ops agents | Diagnosis, asks, packaging; later more agents | Own development in Go: an own loop on one open model API, Chat Completions (E-88, E-93), see [Agent harness](#agent-harness) |
 
 ## Own resources
 
@@ -136,7 +136,7 @@ Agents reach their language model only through the cell's model gateway (E-80): 
 
 ## Agent harness
 
-Planned (E-88 to E-90); what runs today is the loop of E-32 and E-33 with the Anthropic SDK. How people use it is in `agents.md`; the order of the work is in `backlog.md`.
+Planned (E-88 to E-90). What runs today is the loop of E-32 on our own Chat Completions client (E-93), without a provider SDK. How people use it is in `agents.md`; the order of the work is in `backlog.md`.
 
 ```mermaid
 flowchart LR

@@ -33,13 +33,11 @@ spec:
               valueFrom: {secretKeyRef: {name: cell-agent, key: username}}
             - name: CELL_AGENT_PASSWORD
               valueFrom: {secretKeyRef: {name: cell-agent, key: password}}
-            # The model gateway (E-80) and the agent's own key to it; the
-            # provider's key stays in the gateway. The operator adds the key
-            # to Secret cell-agent: until then the pod waits.
-            - name: ANTHROPIC_BASE_URL
-              value: http://cell-models.cell-system.svc.cluster.local
-            # A Bearer token, as every app sends its key (E-81).
-            - name: ANTHROPIC_AUTH_TOKEN
+            # The agent's own key to the model gateway (E-80), a Bearer
+            # token as every app sends its key (E-81); the provider's key
+            # stays in the gateway. The operator adds the key to Secret
+            # cell-agent: until then the pod waits.
+            - name: CELL_MODELS_KEY
               valueFrom: {secretKeyRef: {name: cell-agent, key: modelKey}}
           resources:
             requests: {cpu: 10m, memory: 32Mi}

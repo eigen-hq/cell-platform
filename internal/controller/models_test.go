@@ -43,6 +43,7 @@ func TestModelsConfig(t *testing.T) {
 			Models []struct {
 				Name, Provider string
 				Params         map[string]string
+				PromptCaching  *struct{}
 			}
 			Policies struct {
 				APIKey struct {
@@ -66,7 +67,7 @@ func TestModelsConfig(t *testing.T) {
 		t.Error("the agent's key is in the gateway's configuration")
 	}
 	m := conf.LLM.Models
-	if len(m) != 1 || m[0].Name != "*" || m[0].Provider != "anthropic" || m[0].Params["model"] != cell.DefaultModel || m[0].Params["apiKey"] != providerKey {
+	if len(m) != 1 || m[0].Name != "*" || m[0].Provider != "anthropic" || m[0].Params["model"] != cell.DefaultModel || m[0].Params["apiKey"] != providerKey || m[0].PromptCaching == nil {
 		t.Errorf("models %+v", m)
 	}
 	var cm corev1.ConfigMap

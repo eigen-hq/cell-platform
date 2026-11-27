@@ -188,7 +188,6 @@ Pinned in `deploy/versions.env` (single source), checked on 2026-11-19 through G
 | Nextcloud | 34.0.6-apache (`stable`), user_oidc 8.13.0 | |
 | traefik/whoami | v1.12.0 | stand-in for a custom build |
 | kin-openapi | v0.153.0 | tests only: checks API responses against `api/openapi.yaml` |
-| anthropic-sdk-go | v2.12.0 | ops agent (E-33) |
 | Memos | neosmemo/memos 26.11.1 | catalog app with its own MCP endpoint (`/mcp`, since Memos 0.27); in the test the agent also packages it from a Compose file |
 | agentgateway | v1.7.0 (`cr.agentgateway.dev/agentgateway`) | MCP gateway (E-36) |
 | cel-go | v0.29.2 | tests only: evaluates the gateway's access rules |

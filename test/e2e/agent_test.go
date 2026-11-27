@@ -13,8 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/anthropic-sdk-go/v2"
-	"github.com/anthropics/anthropic-sdk-go/v2/option"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/ptr"
@@ -42,11 +40,11 @@ func (tc *testCell) opsAgent(t *testing.T, script agenttest.Script) *agent.Agent
 			t.Errorf("model: %v", err)
 		}
 	})
-	m := anthropic.NewClient(option.WithAPIKey("scripted"), option.WithBaseURL(model.URL), option.WithMaxRetries(0))
 	return &agent.Agent{
 		API: &agent.API{URL: "https://" + tc.cfg.Host("api"), TokenURL: "https://" + tc.cfg.Host("auth") + "/application/o/token/",
 			ClientID: "cell-api", Username: string(s.Data["username"]), Password: string(s.Data["password"]), HTTP: tc.akHTTP},
-		Model: &m, ModelID: "scripted", Log: slog.Default(), Poll: time.Second,
+		Model: &agent.Model{URL: model.URL, Key: "scripted", Name: "scripted", HTTP: http.DefaultClient},
+		Log:   slog.Default(), Poll: time.Second,
 	}
 }
 

@@ -14,12 +14,8 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
-
-	"github.com/anthropics/anthropic-sdk-go/v2"
-	"github.com/anthropics/anthropic-sdk-go/v2/option"
 )
 
 //go:embed prompt.md
@@ -30,9 +26,8 @@ type Agent struct {
 	API *API
 	// Model is the model gateway (E-80); nil without a key to it: tasks
 	// then wait for an agent that has one.
-	Model   *anthropic.Client
-	ModelID string
-	Log     *slog.Logger
+	Model *Model
+	Log   *slog.Logger
 	// Poll is how often the agent looks for new tasks.
 	Poll time.Duration
 }
@@ -176,71 +171,44 @@ func (a *Agent) finish(ctx context.Context, name, result string, failed bool) er
 
 // work lets the model work on a claimed task and returns its answer.
 func (a *Agent) work(ctx context.Context, t task) (string, bool) {
-	tools, err := a.tools(t.Name)
-	if err != nil {
-		return "agent: " + err.Error(), true
-	}
-	runner := a.Model.Beta.Messages.NewToolRunner(tools, anthropic.BetaToolRunnerParams{
-		BetaMessageNewParams: anthropic.BetaMessageNewParams{
-			Model:     a.ModelID,
-			MaxTokens: 16000,
-			System:    []anthropic.BetaTextBlockParam{{Text: systemPrompt}},
-			Messages:  []anthropic.BetaMessageParam{anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(brief(t)))},
-			// Every turn sends the whole conversation; the cache keeps that cheap.
-			CacheControl: anthropic.NewBetaCacheControlEphemeralParam(),
-			OutputConfig: anthropic.BetaOutputConfigParam{Effort: anthropic.BetaOutputConfigEffortHigh},
-		},
-		// ponytail: a fixed turn limit, a token budget per task if costs need a cap
-		MaxIterations: 40,
-		DisableThread: true,
-	})
-	msg, err := runner.RunToCompletion(ctx)
-	if err != nil {
-		return "model: " + modelError(err), true
-	}
-	var text []string
-	for _, b := range msg.Content {
-		if tb, ok := b.AsAny().(anthropic.BetaTextBlock); ok {
-			text = append(text, tb.Text)
+	tools := a.tools(t.Name)
+	msgs := []message{{Role: "system", Text: systemPrompt}, {Role: "user", Text: brief(t)}}
+	// ponytail: a fixed turn limit, a token budget per task if costs need a cap
+	for range 40 {
+		reply, stop, err := a.Model.complete(ctx, msgs, tools)
+		if err != nil {
+			return "model: " + modelError(err), true
+		}
+		msgs = append(msgs, reply)
+		answer := strings.TrimSpace(reply.Text)
+		// A turn cut at the token limit or by a filter may hold half a call:
+		// none of its calls run. Calls on a turn that ended as "stop" are
+		// whole; some OpenAI-compatible servers end every turn so.
+		if stop != "stop" && (stop != "tool_calls" || len(reply.Calls) == 0) {
+			return fmt.Sprintf("stopped before an answer (%s). %s", stop, answer), true
+		}
+		if len(reply.Calls) == 0 {
+			return answer, false
+		}
+		for _, c := range reply.Calls {
+			msgs = append(msgs, message{Role: "tool", CallID: c.ID, Text: run(ctx, tools, c)})
 		}
 	}
-	answer := strings.TrimSpace(strings.Join(text, "\n"))
-	if msg.StopReason != anthropic.BetaStopReasonEndTurn {
-		return fmt.Sprintf("stopped before an answer (%s). %s", msg.StopReason, answer), true
-	}
-	return answer, false
+	return "stopped before an answer (40 model calls)", true
 }
 
-// NoLongRetry keeps the model client from sleeping on the cell's token
-// limit: the gateway's 429 asks to wait until the hour refills (E-81), and
-// the SDK would hold the task that long. A short wait, such as one the
-// provider asks for, is still retried.
-func NoLongRetry(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
-	res, err := next(req)
-	if err == nil && res.StatusCode == http.StatusTooManyRequests {
-		if s, perr := strconv.Atoi(res.Header.Get("Retry-After")); perr == nil && s > 60 {
-			res.Header.Set("X-Should-Retry", "false")
-		}
+// run runs one tool call. A failure goes back to the model as the result,
+// marked "ERROR ", so it can correct itself.
+func run(ctx context.Context, tools []tool, c toolCall) string {
+	i := slices.IndexFunc(tools, func(t tool) bool { return t.Name == c.Name })
+	if i < 0 {
+		return "ERROR no tool " + c.Name
 	}
-	return res, err
-}
-
-// modelError explains the cell's token limit: the gateway's 429 with none
-// of its tokens left. A provider's 429 carries the gateway's headers too,
-// with tokens left; it and any other error stay as the SDK words them.
-func modelError(err error) string {
-	var e *anthropic.Error
-	if errors.As(err, &e) && e.StatusCode == http.StatusTooManyRequests && e.Response != nil {
-		h := e.Response.Header
-		if limit := h.Get("X-Ratelimit-Limit"); limit != "" && h.Get("X-Ratelimit-Remaining") == "0" {
-			wait := "later"
-			if s, perr := strconv.Atoi(h.Get("X-Ratelimit-Reset")); perr == nil {
-				wait = fmt.Sprintf("in %d minutes", (s+59)/60)
-			}
-			return fmt.Sprintf("the cell's limit of %s tokens per hour is used up; ask again %s, or raise the limit under Organization, Models", limit, wait)
-		}
+	out, err := tools[i].Run(ctx, c.Args)
+	if err != nil {
+		return "ERROR " + err.Error()
 	}
-	return err.Error()
+	return out
 }
 
 // brief is the task as the model reads it.

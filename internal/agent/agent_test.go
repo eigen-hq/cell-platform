@@ -17,8 +17,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/anthropic-sdk-go/v2"
-	"github.com/anthropics/anthropic-sdk-go/v2/option"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -81,10 +79,10 @@ func newCell(t *testing.T, script agenttest.Script, objs ...client.Object) *cell
 			t.Errorf("model: %v", err)
 		}
 	})
-	m := anthropic.NewClient(option.WithAPIKey("test"), option.WithBaseURL(model.URL), option.WithMaxRetries(0))
 	return &cell{kube: kube, agent: &Agent{
 		API:   &API{URL: api.URL, TokenURL: identity.URL, ClientID: "cell-api", Username: "cell-agent", Password: "app-password", HTTP: http.DefaultClient},
-		Model: &m, ModelID: "scripted", Log: slog.New(slog.DiscardHandler), Poll: time.Second,
+		Model: &Model{URL: model.URL, Key: "test", Name: "scripted", HTTP: http.DefaultClient},
+		Log:   slog.New(slog.DiscardHandler), Poll: time.Second,
 	}}
 }
 
@@ -171,7 +169,6 @@ func TestDiagnose(t *testing.T) {
 	if got.Status.Phase != cellv1.RunSucceeded || got.Status.Assignee != "cell-agent" || !strings.Contains(got.Status.Result, "Proposed change "+change) {
 		t.Errorf("task %+v", got.Status)
 	}
-	slices.Sort(calls[:2]) // the first two ran side by side
 	if want := []string{"GET /v0/apps/board", "GET /v0/apps/board/pods", "GET /v0/apps/board/logs?tail=50", "PATCH /v0/apps/board"}; !slices.Equal(calls, want) {
 		t.Errorf("steps %q, want %q", calls, want)
 	}
@@ -236,6 +233,26 @@ func TestPackage(t *testing.T) {
 	}
 }
 
+// A turn the model ended at its token limit or by a filter may hold half a
+// call: none of its calls run, the task fails with the reason.
+func TestCutTurn(t *testing.T) {
+	for _, finish := range []string{"length", "content_filter"} {
+		task := &cellv1.Task{ObjectMeta: metav1.ObjectMeta{Name: "board-diagnose-1"},
+			Spec: cellv1.TaskSpec{Kind: "diagnose", App: "board", Requester: cellv1.Requester{Kind: "Operator", Name: "cell-operator"}}}
+		c := newCell(t, func(agenttest.Conversation) (agenttest.Turn, error) {
+			return agenttest.Turn{Finish: finish, Calls: []agenttest.Call{{Tool: "propose_update",
+				Input: map[string]any{"app": "board", "patch": map[string]any{"version": "2.0"}, "reason": "cut"}}}}, nil
+		}, task)
+		if err := c.agent.Once(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		got, calls := c.task(t, "board-diagnose-1")
+		if got.Status.Phase != cellv1.RunFailed || !strings.Contains(got.Status.Result, "("+finish+")") || len(calls) != 0 || len(c.changes(t)) != 0 {
+			t.Errorf("%s: task %+v, steps %q", finish, got.Status, calls)
+		}
+	}
+}
+
 // A task the model cannot finish fails with the reason, and a restarted
 // agent ends the tasks it left running.
 func TestFailures(t *testing.T) {
@@ -262,7 +279,7 @@ func TestFailures(t *testing.T) {
 	// goes on.
 	// The API fails the first attempt to finish: the agent tries again
 	// instead of leaving the task running.
-	c.agent.Model = ptr(anthropic.NewClient(option.WithAPIKey("test"), option.WithBaseURL("http://127.0.0.1:1"), option.WithMaxRetries(0)))
+	c.agent.Model = &Model{URL: "http://127.0.0.1:1", HTTP: http.DefaultClient}
 	target, err := url.Parse(c.agent.API.URL)
 	if err != nil {
 		t.Fatal(err)
@@ -295,7 +312,7 @@ func TestLargeBacklog(t *testing.T) {
 			Spec: cellv1.TaskSpec{Kind: "package", App: fmt.Sprintf("app%d", i), Input: input, Requester: cellv1.Requester{Kind: "Human", Name: "admin"}}})
 	}
 	c := newCell(t, nil, tasks...)
-	c.agent.Model = ptr(anthropic.NewClient(option.WithAPIKey("test"), option.WithBaseURL("http://127.0.0.1:1"), option.WithMaxRetries(0)))
+	c.agent.Model = &Model{URL: "http://127.0.0.1:1", HTTP: http.DefaultClient}
 	if err := c.agent.Once(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -358,8 +375,6 @@ func TestLostClaim(t *testing.T) {
 	}
 }
 
-func ptr[T any](v T) *T { return &v }
-
 // Without a model provider the agent claims no task: it would only fail.
 func TestNoProvider(t *testing.T) {
 	pending := &cellv1.Task{ObjectMeta: metav1.ObjectMeta{Name: "board-diagnose-1"},
@@ -394,15 +409,14 @@ func TestTokenLimit(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
-		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"rate_limit_error","message":"rate limited"}}`))
+		_, _ = w.Write([]byte(`{"error":{"type":"rate_limit_error","message":"rate limited"}}`))
 	}))
 	t.Cleanup(srv.Close)
-	m := anthropic.NewClient(option.WithAuthToken("test"), option.WithBaseURL(srv.URL), option.WithMiddleware(NoLongRetry))
+	m := &Model{URL: srv.URL, Key: "test", Name: "default", HTTP: http.DefaultClient, Retries: 2}
 	ask := func(h map[string]string) (int32, error) {
 		calls.Store(0)
 		header.Store(h)
-		_, err := m.Messages.New(context.Background(), anthropic.MessageNewParams{Model: "default", MaxTokens: 5,
-			Messages: []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("x"))}})
+		_, _, err := m.complete(context.Background(), []message{{Role: "user", Text: "x"}}, nil)
 		return calls.Load(), err
 	}
 	start := time.Now()
