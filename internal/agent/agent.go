@@ -182,18 +182,14 @@ func (a *Agent) work(ctx context.Context, t task) (string, bool) {
 			return "model: " + modelError(err), true
 		}
 		answer := strings.TrimSpace(reply.Text)
-		// A turn cut at the token limit or by a filter may hold half a call:
-		// none of its calls run, the model hears so and goes on. A second cut
-		// in a row would likely repeat. Calls on a turn that ended as "stop"
-		// are whole; some OpenAI-compatible servers end every turn so.
+		// A turn cut at the token limit or by a filter may hold half a call,
+		// half an answer, or reasoning without its signature: it is dropped
+		// and the model, told so, does it again. A second cut in a row would
+		// likely repeat. Calls on a turn that ended as "stop" are whole; some
+		// OpenAI-compatible servers end every turn so.
 		if stop != "stop" && (stop != "tool_calls" || len(reply.Calls) == 0) {
 			if cuts++; cuts == 2 {
 				return fmt.Sprintf("stopped before an answer (%s, twice in a row). %s", stop, answer), true
-			}
-			// Without text the turn was cut in its reasoning, which then has
-			// no signature to go back with.
-			if reply.Calls = nil; answer != "" {
-				msgs = append(msgs, reply)
 			}
 			msgs = append(msgs, message{Role: "user", Text: fmt.Sprintf(cutNote, stop)})
 			continue
@@ -219,7 +215,7 @@ func (a *Agent) work(ctx context.Context, t task) (string, bool) {
 }
 
 // cutNote tells the model that its last turn was cut.
-const cutNote = "Your last turn was cut off (%s), so none of its tool calls ran. Go on; split long output into smaller steps."
+const cutNote = "Your last turn was cut off (%s) and dropped: none of its tool calls ran and its text is lost. Do it again in smaller steps."
 
 // run runs one tool call. A failure goes back to the model as the result,
 // marked "ERROR ", so it can correct itself.

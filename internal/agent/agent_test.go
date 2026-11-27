@@ -237,8 +237,9 @@ func TestPackage(t *testing.T) {
 	}
 }
 
-// A turn cut at the token limit or by a filter runs none of its calls: the
-// model hears so and goes on. A second cut in a row ends the task.
+// A turn cut at the token limit or by a filter is dropped: none of its calls
+// run, its half answer is not the result, and the model, told so, does it
+// again. A second cut in a row ends the task.
 func TestCutTurn(t *testing.T) {
 	for _, finish := range []string{"length", "content_filter"} {
 		for _, again := range []bool{false, true} {
@@ -246,10 +247,11 @@ func TestCutTurn(t *testing.T) {
 				Spec: cellv1.TaskSpec{Kind: "diagnose", App: "board", Requester: cellv1.Requester{Kind: "Operator", Name: "cell-operator"}}}
 			c := newCell(t, func(conv agenttest.Conversation) (agenttest.Turn, error) {
 				if len(conv.Notes) == 0 || again {
-					return agenttest.Turn{Finish: finish, Calls: []agenttest.Call{{Tool: "propose_update",
+					return agenttest.Turn{Finish: finish, Text: "The cause is", Calls: []agenttest.Call{{Tool: "propose_update",
 						Input: map[string]any{"app": "board", "patch": map[string]any{"version": "2.0"}, "reason": "cut"}}}}, nil
 				}
-				if err := want(len(conv.Notes) == 1 && strings.Contains(conv.Notes[0], "("+finish+")"), "notes %q", conv.Notes); err != nil {
+				// Turn 0 again: the cut turn did not go back.
+				if err := want(conv.Turn == 0 && len(conv.Notes) == 1 && strings.Contains(conv.Notes[0], "("+finish+")"), "turn %d, notes %q", conv.Turn, conv.Notes); err != nil {
 					return agenttest.Turn{}, err
 				}
 				return agenttest.Turn{Text: "Nothing to change."}, nil
@@ -259,10 +261,10 @@ func TestCutTurn(t *testing.T) {
 			}
 			phase, result := cellv1.RunSucceeded, "Nothing to change."
 			if again {
-				phase, result = cellv1.RunFailed, "("+finish+", twice in a row)"
+				phase, result = cellv1.RunFailed, "stopped before an answer ("+finish+", twice in a row)"
 			}
 			got, calls := c.task(t, "board-diagnose-1")
-			if got.Status.Phase != phase || !strings.Contains(got.Status.Result, result) || len(calls) != 0 || len(c.changes(t)) != 0 {
+			if got.Status.Phase != phase || !strings.HasPrefix(got.Status.Result, result) || len(calls) != 0 || len(c.changes(t)) != 0 {
 				t.Errorf("%s, again %v: task %+v, steps %q", finish, again, got.Status, calls)
 			}
 		}
