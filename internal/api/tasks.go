@@ -123,9 +123,16 @@ type taskView struct {
 	// Answer is the answer in parts, when the agent gave one (E-100).
 	Answer *cellv1.TaskAnswer `json:"answer"`
 	Reply  *replyView         `json:"reply"`
-	Steps  []stepView         `json:"steps"`
+	// Stopped: who stopped the task, while it stays stopped (E-101).
+	Stopped *stopView  `json:"stopped"`
+	Steps   []stepView `json:"steps"`
 	// Changes the agent proposed in the task (only for a single task).
 	Changes []string `json:"changes,omitempty"`
+}
+
+type stopView struct {
+	By string    `json:"by"`
+	At time.Time `json:"at"`
 }
 
 type replyView struct {
@@ -145,6 +152,9 @@ func viewTask(t *cellv1.Task) taskView {
 	}
 	if r := t.Status.Reply; r != nil {
 		v.Reply = &replyView{By: r.By, At: r.At.Time, Text: r.Text}
+	}
+	if st := t.Status.Stopped; st != nil {
+		v.Stopped = &stopView{By: st.By, At: st.At.Time}
 	}
 	for _, st := range t.Status.Steps {
 		v.Steps = append(v.Steps, stepView{At: st.At.Time, Call: st.Call})
@@ -566,8 +576,38 @@ func (s *Server) replyTask(w http.ResponseWriter, r *http.Request, c *Caller) er
 			return errorf(http.StatusConflict, "task %s has no transcript to go on from: start a new task", t.Name)
 		}
 		now := metav1.NewTime(s.now())
-		t.Status.Phase, t.Status.FinishedAt = cellv1.RunPending, nil
+		t.Status.Phase, t.Status.FinishedAt, t.Status.Stopped = cellv1.RunPending, nil, nil
 		t.Status.Reply = &cellv1.TaskReply{By: c.Username, At: now, Text: text}
+		return s.Kube.Status().Update(r.Context(), t)
+	})
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, viewTask(t))
+	return nil
+}
+
+// stopTask stops a task that waits or runs (E-101). The task fails at
+// once: the API refuses every later call of its agent in it, so no tool of
+// the agent's next turn runs, and the agent ends its run. A call the API
+// already serves finishes, and a model call in flight is not cut off. The
+// conversation stays: a reply goes on from it.
+func (s *Server) stopTask(w http.ResponseWriter, r *http.Request, c *Caller) error {
+	var t *cellv1.Task
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var err error
+		if t, err = s.task(r.Context(), r.PathValue("name")); err != nil {
+			return err
+		}
+		switch t.Status.Phase {
+		case "", cellv1.RunPending, cellv1.RunRunning, cellv1.RunWaitingForInput:
+		default:
+			return errorf(http.StatusConflict, "task %s is %s: only a task that waits or runs can be stopped", t.Name, t.Status.Phase)
+		}
+		now := metav1.NewTime(s.now())
+		t.Status.Phase, t.Status.FinishedAt, t.Status.Answer = cellv1.RunFailed, &now, nil
+		t.Status.Result = "Stopped by " + c.Username + "."
+		t.Status.Stopped = &cellv1.TaskStop{By: c.Username, At: now}
 		return s.Kube.Status().Update(r.Context(), t)
 	})
 	if err != nil {

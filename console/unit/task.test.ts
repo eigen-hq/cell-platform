@@ -1,7 +1,7 @@
 // Unit checks of plain helpers, run by node (npm run check).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { findingsTitle, looseChanges, optionKey, transcriptHolds, withTranscript, type Task } from "../src/lib/task.ts";
+import { findingsTitle, looseChanges, optionKey, taskState, transcriptHolds, withTranscript, type Task } from "../src/lib/task.ts";
 
 test("the transcript is read only after the task", async () => {
   const order: string[] = [];
@@ -48,6 +48,9 @@ test("a transcript holds until the task moves: a reply from anyone, a step, an a
   const working = { ...done, phase: "Running", finishedAt: null } as Task;
   assert.equal(transcriptHolds(working, { ...working }), false);
   assert.equal(transcriptHolds(done, { ...done, steps: [...done.steps, done.steps[0]] }), false);
+  // A stopped task: its agent's last post may land after the stop (E-101).
+  const stopped = { ...done, phase: "Failed", stopped: { by: "alice", at: "2026-11-27T10:07:00Z" } } as Task;
+  assert.equal(transcriptHolds(stopped, { ...stopped }), false);
 });
 
 test("an option's change shows with the option; the other changes below, once each", () => {
@@ -60,6 +63,12 @@ test("an option's change shows with the option; the other changes below, once ea
   assert.deepEqual(looseChanges({ ...t, answer: null }), ["a", "b", "c"]);
   assert.equal(findingsTitle("diagnose"), "Causes");
   assert.equal(findingsTitle("ask"), "What it found");
+});
+
+test("a stopped task is no failure of the agent", () => {
+  const t = { phase: "Failed", steps: [] } as unknown as Parameters<typeof taskState>[0];
+  assert.deepEqual(taskState(t), { label: "Could not finish", tone: "bad" });
+  assert.deepEqual(taskState({ ...t, stopped: { by: "alice", at: "" } }), { label: "Stopped by alice", tone: "wait" });
 });
 
 test("an option whose change a follow-up replaced is a new row", () => {

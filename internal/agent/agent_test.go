@@ -40,6 +40,7 @@ type cell struct {
 	kube  client.WithWatch
 	agent *Agent
 	items *store.Memory
+	api   string
 }
 
 // opsAccount is the account of the cell's agent, Agent ops (E-97).
@@ -75,6 +76,9 @@ func newCell(t *testing.T, script agenttest.Script, objs ...client.Object) *cell
 	api := httptest.NewServer((&cellapi.Server{
 		Kube: kube, Pods: k8sfake.NewSimpleClientset(pods...).CoreV1(), Catalog: catalog.FS, OpenAPI: apidoc.OpenAPI, Transcripts: items,
 		Authenticate: func(_ context.Context, token string) (*cellapi.Caller, error) {
+			if token == "admin-token" {
+				return &cellapi.Caller{Username: "alice", Role: cellapi.RoleAdmin}, nil
+			}
 			if token != "agent-token" {
 				return nil, errors.New("bad token")
 			}
@@ -98,7 +102,7 @@ func newCell(t *testing.T, script agenttest.Script, objs ...client.Object) *cell
 			t.Errorf("model: %v", err)
 		}
 	})
-	return &cell{kube: kube, items: items, agent: &Agent{
+	return &cell{kube: kube, items: items, api: api.URL, agent: &Agent{
 		API:   &API{URL: api.URL, TokenURL: identity.URL, ClientID: "cell-api", Username: opsAccount, Password: "app-password", HTTP: http.DefaultClient},
 		Model: &Model{URL: model.URL, Key: "test", Name: "scripted", HTTP: http.DefaultClient},
 		Log:   slog.New(slog.DiscardHandler), Poll: time.Second,
@@ -539,6 +543,25 @@ func (c *cell) reply(t *testing.T, name, by, text string) {
 	}
 }
 
+// stop stops the task through the API, as an admin does (E-101).
+func (c *cell) stop(name string) error {
+	req, err := http.NewRequest(http.MethodPost, c.api+"/v0/tasks/"+name+"/stop", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer admin-token")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("stop %s: %d %s", name, resp.StatusCode, b)
+	}
+	return nil
+}
+
 func (c *cell) once(t *testing.T) {
 	t.Helper()
 	if err := c.agent.Once(context.Background()); err != nil {
@@ -733,5 +756,37 @@ func TestAnswerWhileAsking(t *testing.T) {
 	c.once(t)
 	if got, _ := c.task(t, "board-ask-1"); got.Status.Phase != cellv1.RunSucceeded || got.Status.Answer != nil || got.Status.Result != "Proposed nothing: 2.0 is not out." {
 		t.Errorf("task %+v", got.Status)
+	}
+}
+
+// A person stops the task while the model thinks (E-101): the calls of the
+// model's turn do not run, the agent leaves the task stopped and goes on
+// with its other work, and a reply goes on from the conversation.
+func TestStop(t *testing.T) {
+	var c *cell
+	c = newCell(t, func(conv agenttest.Conversation) (agenttest.Turn, error) {
+		if len(conv.Notes) == 0 {
+			if err := c.stop("board-ask-1"); err != nil {
+				return agenttest.Turn{}, err
+			}
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "updateApp", Input: map[string]any{"name": "board", "version": "2.0"}}}}, nil
+		}
+		if err := want(slices.Equal(conv.Notes, []string{"Only read."}) && len(conv.Results) == 0, "notes %q, results %q", conv.Notes, conv.Results); err != nil {
+			return agenttest.Turn{}, err
+		}
+		return agenttest.Turn{Text: "Version 1.0 runs."}, nil
+	}, board.DeepCopy(), askTask("Update board."))
+	c.once(t)
+	got, calls := c.task(t, "board-ask-1")
+	if got.Status.Phase != cellv1.RunFailed || got.Status.Stopped == nil || got.Status.Stopped.By != "alice" || len(calls) != 0 {
+		t.Fatalf("stopped task %+v, steps %q", got.Status, calls)
+	}
+	if got := c.transcript(t, "board-ask-1"); !slices.Equal(got, []string{"message:user"}) {
+		t.Errorf("transcript %q: the stopped turn is not in it", got)
+	}
+	c.reply(t, "board-ask-1", "alice", "Only read.")
+	c.once(t)
+	if got, _ := c.task(t, "board-ask-1"); got.Status.Phase != cellv1.RunSucceeded || got.Status.Result != "Version 1.0 runs." {
+		t.Errorf("task after the reply %+v", got.Status)
 	}
 }

@@ -597,6 +597,23 @@ paths:
         "404": {$ref: "#/components/responses/Error"}
         "409": {$ref: "#/components/responses/Error"}
         "503": {$ref: "#/components/responses/Error"}
+  /v0/tasks/{name}/stop:
+    parameters: [{$ref: "#/components/parameters/task"}]
+    post:
+      operationId: stopTask
+      description: |
+        An admin stops a task that waits or runs (E-101). The task fails at
+        once with who stopped it; every later call of its agent in the task is
+        refused, so the agent ends its run. A call already being served
+        finishes. A reply goes on from the conversation. 409 for a task that
+        has finished.
+      responses:
+        default: {$ref: "#/components/responses/Error"}
+        "200": {description: The task., content: {application/json: {schema: {$ref: "#/components/schemas/Task"}}}}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
   /v0/tasks/{name}/items:
     parameters: [{$ref: "#/components/parameters/task"}]
     get:
@@ -1091,7 +1108,7 @@ components:
     Task:
       type: object
       additionalProperties: false
-      required: [name, kind, app, input, requester, phase, assignee, createdAt, startedAt, finishedAt, result, answer, reply, steps]
+      required: [name, kind, app, input, requester, phase, assignee, createdAt, startedAt, finishedAt, result, answer, reply, stopped, steps]
       properties:
         name: {type: string}
         kind: {type: string, enum: [diagnose, package, ask]}
@@ -1124,6 +1141,15 @@ components:
             by: {type: string}
             at: {type: string, format: date-time}
             text: {type: string}
+        stopped:
+          type: object
+          nullable: true
+          additionalProperties: false
+          description: "Who stopped the task and when (E-101), until a reply goes on with it."
+          required: [by, at]
+          properties:
+            by: {type: string}
+            at: {type: string, format: date-time}
         steps:
           type: array
           description: The agent's API calls in the task, recorded before they were served.

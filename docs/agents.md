@@ -8,7 +8,7 @@ Each section says whether it **runs today** or is **planned**. Planned parts nam
 
 | You want to | Today | Planned |
 |---|---|---|
-| Ask an agent about the cell or an app | Ask box on Home and on an app's page; reply to any task, and the agent asks you when it needs to | Several tasks at once, stop |
+| Ask an agent about the cell or an app | Ask box on Home and on an app's page; reply to any task, and the agent asks you when it needs to; stop a task | Several tasks at once |
 | Know the agent understood you | You read its answer | It restates the problem first and asks when unsure |
 | Trust its findings | Every API call it made is listed in the task | Every claim links to the call it rests on; numbers come from the platform |
 | Judge its proposal | One proposed change with its diff and risk | Options with risk, reversibility, effort and what "done" means |
@@ -91,6 +91,8 @@ A question without a change ("which machines are nearly full?") ends after Under
 
 Only admins reply. A reply is refused while the agent works, when the agent that worked on the task is gone or no longer takes such tasks, and when the task has used its 200 steps: then ask again in a new task.
 
+- **Stop** (E-101). An admin stops a task that works or waits with *Stop* on the task in Agents. It shows *Stopped by* you at once, and the agent does no further step in it. What a stop does not undo: a step the agent was already doing finishes, and the model's answer it was waiting for still costs its tokens. A change it proposed stays in the change log, and you approve or decline it there; an approved change runs to its end like any approved change. A reply goes on from the conversation; the agent then checks whether a step the stop cut off ran.
+
 *Planned* (backlog: Conversations, Task thread in the console).
 
 - **Questions as forms.** A question can be a short form. A secret you type into such a form goes straight into a Secret in the cell, which the cell picks, not the agent. Neither the agent nor the model provider sees it.
@@ -98,7 +100,7 @@ Only admins reply. A reply is refused while the agent works, when the agent that
 - **Ask about this.** Every block, evidence step and chart has this action. It opens a follow-up with that item attached.
 - **Several at once.** Agents work on several tasks in parallel, up to a limit per agent; the rest wait as *queued*. If the agent service restarts, each task resumes where it stopped, without doing a step twice.
 - **Long tasks.** A task that grows too long for its model stops as *limit reached*. An admin can raise the limit or start a new task from its summary.
-- **Stop.** An admin can stop a task at any time; the agent stops working on it. A change it proposed that nobody decided yet stays in the change log and can be declined. A change already approved runs to its end like any approved change. Stopping a task also stops the tasks it handed to other agents.
+- **Stop handed-on tasks.** Stopping a task also stops the tasks it handed to other agents.
 
 ## What an answer shows
 

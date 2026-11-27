@@ -213,6 +213,13 @@ func TestAgentRepairsApp(t *testing.T) {
 				return agenttest.Turn{}, err
 			}
 			return agenttest.Turn{Text: "Yes: ailing is Ready again."}, nil
+		case 6:
+			// The admin stops the task while the model thinks (E-101): the
+			// restart of this turn never runs.
+			if code, out := admin.call(t, http.MethodPost, "/v0/tasks/"+task+"/stop", nil); code != http.StatusOK {
+				return agenttest.Turn{}, fmt.Errorf("stop: HTTP %d %v", code, out)
+			}
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "restartApp", Input: map[string]any{"name": "ailing", "reason": "e2e"}}}}, nil
 		}
 		return agenttest.Turn{}, fmt.Errorf("turn %d", c.Turn)
 	})
@@ -274,6 +281,23 @@ func TestAgentRepairsApp(t *testing.T) {
 		t.Errorf("transcript after the reply %v", items)
 	}
 	t.Logf("the admin asked on, the agent answered from the conversation: %v", field(done, "result"))
+
+	// A stop (E-101): the admin asks for a restart and stops the task while
+	// the model thinks. Nothing of that turn runs or enters the transcript,
+	// and the agent leaves the task as the admin left it.
+	admin.do(t, http.MethodPost, "/v0/tasks/"+task+"/reply", map[string]any{"text": "Restart ailing."}, http.StatusOK)
+	if err := a.Take(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	done = admin.do(t, http.MethodGet, "/v0/tasks/"+task, nil, http.StatusOK)
+	if field(done, "phase") != "Failed" || field(done, "stopped", "by") != field(asked, "reply", "by") || len(calls(done)) != 5 {
+		t.Fatalf("stopped task %v", done)
+	}
+	items, _ = admin.do(t, http.MethodGet, "/v0/tasks/"+task+"/items", nil, http.StatusOK).([]any)
+	if len(items) != 21 || field(items[20], "item", "role") != "user" {
+		t.Errorf("transcript after the stop %v", items)
+	}
+	t.Logf("the admin stopped the task while the model thought: %v", field(done, "result"))
 }
 
 // Scenario B: the agent packages an app that is not in the

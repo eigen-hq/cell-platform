@@ -168,6 +168,12 @@ func (a *Agent) Take(ctx context.Context, name string) error {
 	a.Log.Info("working", "task", t.Name, "kind", t.Kind, "app", t.App)
 	ans := a.work(ctx, t)
 	err = a.finish(ctx, t.Name, ans)
+	if err != nil && a.lost(ctx, t.Name) {
+		// A person stopped the task (E-101), or the platform ended it: the
+		// API refused the run's next call, and the task stays as it is.
+		a.Log.Info("ended elsewhere", "task", t.Name)
+		return nil
+	}
 	if err != nil && ans.Answer != nil {
 		// The answer passed the check but not the finish: the task changed
 		// in between, for example its change was deleted.
@@ -179,6 +185,16 @@ func (a *Agent) Take(ctx context.Context, name string) error {
 	}
 	a.Log.Info("done", "task", t.Name, "failed", ans.Failed, "waiting", ans.Waiting)
 	return nil
+}
+
+// lost tells whether the task is no longer running for this agent. A
+// failed read tells nothing, so the caller keeps its own error.
+func (a *Agent) lost(ctx context.Context, name string) bool {
+	var t task
+	if err := a.API.JSON(ctx, http.MethodGet, "/v0/tasks/"+url.PathEscape(name), "", nil, &t); err != nil {
+		return false
+	}
+	return t.Phase != "Running" || t.Assignee != a.API.Username
 }
 
 // finish ends a task. It retries while the API is unreachable or failing,
@@ -313,8 +329,8 @@ func (a *Agent) conversation(ctx context.Context, t task, tr *transcript) ([]mes
 		said[i] = it.Item
 	}
 	msgs := messagesOf(said)
-	// A call without its output was cut off by a restart of the agent:
-	// providers refuse a call without a result.
+	// A call without its output was cut off by a restart of the agent or
+	// a stop (E-101): providers refuse a call without a result.
 	// ponytail: the outputs go last, where a cut leaves them; a gap further
 	// up would need the transcript rewritten
 	answered := map[string]bool{}
@@ -334,7 +350,7 @@ func (a *Agent) conversation(ctx context.Context, t task, tr *transcript) ([]mes
 	return append(msgs, more...), tr.add(ctx, more...)
 }
 
-// interruptedCall is the output of a call that a restart cut off.
+// interruptedCall is the output of a call that a restart or a stop cut off.
 const interruptedCall = "ERROR interrupted: this call may or may not have run; check before you repeat it"
 
 // ask is the model's way to ask the person a question it cannot go on

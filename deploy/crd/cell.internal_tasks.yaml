@@ -190,6 +190,7 @@ spec:
                   Pending until an agent claims it, Running while it works, then
                   Succeeded, Failed, or WaitingForInput when the agent asked the person
                   something. A reply makes it Pending again, for the same agent (E-99).
+                  A stop makes it Failed (E-101).
                 enum:
                 - Pending
                 - WaitingForApproval
@@ -250,6 +251,20 @@ spec:
                   type: object
                 maxItems: 200
                 type: array
+              stopped:
+                description: |-
+                  Stopped tells who stopped the task and when (E-101); a reply clears
+                  it.
+                properties:
+                  at:
+                    format: date-time
+                    type: string
+                  by:
+                    type: string
+                required:
+                - at
+                - by
+                type: object
             type: object
         required:
         - spec

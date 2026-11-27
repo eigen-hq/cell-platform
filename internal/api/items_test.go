@@ -224,3 +224,70 @@ func TestReplyNarrowed(t *testing.T) {
 		t.Errorf("the agent's next task: %d %v", code, body)
 	}
 }
+
+// An admin stops a task that waits or runs (E-101): it fails at once with
+// who stopped it and without the answer of an earlier run, its agent's
+// calls in it are refused from then on, and a reply goes on with it.
+func TestStop(t *testing.T) {
+	task := func(name string, phase cellv1.RunPhase, assignee string) *cellv1.Task {
+		tk := pendingTask(name)
+		tk.UID = types.UID("u-" + name)
+		tk.Status = cellv1.TaskStatus{Phase: phase, Assignee: assignee}
+		return tk
+	}
+	// A follow-up runs on a task that has an answer already.
+	running := task("running", cellv1.RunRunning, opsAccount)
+	running.Status.Answer = &cellv1.TaskAnswer{Summary: "Earlier answer."}
+	h := newHarness(t, running, task("asked", cellv1.RunWaitingForInput, opsAccount), task("pending", cellv1.RunPending, ""),
+		task("fresh", "", ""), task("done", cellv1.RunSucceeded, opsAccount), task("failed", cellv1.RunFailed, opsAccount))
+	h.agentTask = "running"
+	ts := &store.Memory{}
+	h.server.Transcripts = ts
+	if err := ts.Append(context.Background(), "u-running", 0, []json.RawMessage{json.RawMessage(`{"type":"message","role":"user","parts":[{"mediaType":"text/plain","text":"brief"}]}`)}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		task, token string
+		code        int
+	}{
+		{"running", "viewer", 403},
+		{"running", "agent", 403},
+		{"done", "admin", 409},
+		{"failed", "admin", 409},
+		{"missing", "admin", 404},
+		{"running", "admin", 200},
+		{"running", "admin", 409},
+		{"asked", "admin", 200},
+		{"pending", "admin", 200},
+		{"fresh", "admin", 200},
+	} {
+		if code, body := h.do("POST", "/v0/tasks/"+tc.task+"/stop", tc.token, nil); code != tc.code {
+			t.Errorf("stop %s as %s: %d %v, want %d", tc.task, tc.token, code, body, tc.code)
+		}
+	}
+	code, body := h.do("GET", "/v0/tasks/running", "admin", nil)
+	if code != 200 || field(body, "phase") != "Failed" || field(body, "stopped", "by") != "admin-user" || field(body, "answer") != nil ||
+		field(body, "result") != "Stopped by admin-user." || field(body, "finishedAt") == nil {
+		t.Errorf("stopped task: %d %v", code, body)
+	}
+
+	// The agent's next calls in the task are refused and leave no step.
+	if code, _ := h.do("GET", "/v0/apps", "agent", nil); code != 409 {
+		t.Errorf("a call in the stopped task: %d", code)
+	}
+	if code, _ := h.do("POST", "/v0/tasks/running/items", "agent", map[string]any{"from": 1, "items": []any{map[string]any{"type": "message", "role": "assistant", "parts": []any{map[string]any{"mediaType": "text/plain", "text": "late"}}}}}); code != 409 {
+		t.Errorf("a transcript post in the stopped task: %d", code)
+	}
+	if code, _ := h.do("POST", "/v0/tasks/running/finish", "agent", map[string]any{"result": "Done."}); code != 409 {
+		t.Errorf("a finish of the stopped task: %d", code)
+	}
+	if code, body := h.do("GET", "/v0/tasks/running", "admin", nil); field(body, "phase") != "Failed" || len(field(body, "steps").([]any)) != 0 {
+		t.Errorf("after the refused calls: %d %v", code, body)
+	}
+
+	// A reply goes on: the task is pending for its agent, no longer stopped.
+	if code, body := h.do("POST", "/v0/tasks/running/reply", "admin", map[string]any{"text": "Go on, but only read."}); code != 200 ||
+		field(body, "phase") != "Pending" || field(body, "stopped") != nil {
+		t.Errorf("reply to the stopped task: %d %v", code, body)
+	}
+}

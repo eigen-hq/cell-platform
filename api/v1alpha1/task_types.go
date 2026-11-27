@@ -49,6 +49,7 @@ type TaskStatus struct {
 	// Pending until an agent claims it, Running while it works, then
 	// Succeeded, Failed, or WaitingForInput when the agent asked the person
 	// something. A reply makes it Pending again, for the same agent (E-99).
+	// A stop makes it Failed (E-101).
 	Phase      RunPhase     `json:"phase,omitempty"`
 	Assignee   string       `json:"assignee,omitempty"`
 	StartedAt  *metav1.Time `json:"startedAt,omitempty"`
@@ -70,6 +71,14 @@ type TaskStatus struct {
 	// a follow-up. The agent adds it to the task's transcript, which keeps
 	// every reply, and goes on (E-99).
 	Reply *TaskReply `json:"reply,omitempty"`
+	// Stopped tells who stopped the task and when (E-101); a reply clears
+	// it.
+	Stopped *TaskStop `json:"stopped,omitempty"`
+}
+
+type TaskStop struct {
+	By string      `json:"by"`
+	At metav1.Time `json:"at"`
 }
 
 // TaskAnswer is an agent's answer in the parts a consultant's has (E-100).

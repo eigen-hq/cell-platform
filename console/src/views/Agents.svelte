@@ -12,6 +12,7 @@
   import { agents, crew, findingsTitle, findingState, looseChanges, optionKey, task as line, taskState, transcriptHolds, withTranscript, type Task } from "../lib/task";
   import { ago, stamp } from "../lib/time";
   import Avatar from "../lib/ui/Avatar.svelte";
+  import Button from "../lib/ui/Button.svelte";
   import Icon from "../lib/ui/Icon.svelte";
   import { agentIcon, type IconName } from "../lib/ui/icons";
   import Logo from "../lib/ui/Logo.svelte";
@@ -96,6 +97,23 @@
   }
   const reloadTask = () => open && loadTask(open);
 
+  // Stop (E-101): the task fails at once and its agent ends its run; a
+  // reply goes on from the conversation.
+  let stopping = $state(false);
+  let stopFailed = $state("");
+  async function stop(name: string) {
+    stopping = true;
+    stopFailed = "";
+    try {
+      must(await api.POST("/v0/tasks/{name}/stop", { params: { path: { name } } }));
+      await reloadTask();
+    } catch (e) {
+      stopFailed = msg(e);
+    } finally {
+      stopping = false;
+    }
+  }
+
   // The list polls, and so does a task page: a reply reopens even a finished
   // task (E-99), also one from another admin, and a decision on one of its
   // changes made elsewhere shows up. The transcript is read again only when
@@ -109,6 +127,7 @@
     }
     t = null;
     taskFailed = "";
+    stopFailed = "";
     entries = null;
     entriesFailed = "";
     loadTask(name);
@@ -235,9 +254,11 @@
           <div class="who">
             <Tile icon={agentIcon(a.name)} tone="agent" size={28} pulse={running(t)} />
             <h2 id="t-answer">{a.name} agent</h2>
-            <span>{t.phase === "Succeeded" ? `answered${took(t) ? ` in ${took(t)}` : ""}` : t.phase === "Failed" ? "could not finish" : asking(t) ? "asks you" : s.label.toLowerCase()}</span>
-            {#if t.phase === "Failed"}<Tag tone="warn">Could not finish</Tag>{:else if asking(t)}<Tag tone="agent">Waiting for your reply</Tag>{/if}
+            <span>{t.phase === "Succeeded" ? `answered${took(t) ? ` in ${took(t)}` : ""}` : t.phase === "Failed" ? s.label.toLowerCase() : asking(t) ? "asks you" : s.label.toLowerCase()}</span>
+            {#if t.stopped}<Tag>Stopped</Tag>{:else if t.phase === "Failed"}<Tag tone="warn">Could not finish</Tag>{:else if asking(t)}<Tag tone="agent">Waiting for your reply</Tag>{/if}
+            {#if running(t) || asking(t)}<span class="stop"><Button kind="outline" size="sm" disabled={stopping} onclick={() => t && stop(t.name)}>{stopping ? "Stopping" : "Stop"}</Button></span>{/if}
           </div>
+          {#if stopFailed}<p class="fail" role="alert">{stopFailed}</p>{/if}
 
           {#if answer.first}
             <p class="lead">{answer.first}</p>
@@ -356,7 +377,7 @@
       <aside class="facts" aria-label="About this task">
         <dl>
           <div><dt>Agent</dt><dd><Tile icon={agentIcon(a.name)} tone="agent" size={22} />{a.name}<small>{a.does}</small></dd></div>
-          <div><dt>State</dt><dd><Tag tone={t.phase === "Succeeded" ? "ok" : t.phase === "Failed" ? "warn" : "agent"}>{s.label}</Tag></dd></div>
+          <div><dt>State</dt><dd><Tag tone={t.phase === "Succeeded" ? "ok" : t.stopped ? "neutral" : t.phase === "Failed" ? "warn" : "agent"}>{s.label}</Tag></dd></div>
           {#if t.app}<div><dt>App</dt><dd><a class="go" href={itemPath("/apps", t.app)}>{title(t.app)}</a></dd></div>{/if}
           <div><dt>Asked</dt><dd class="mono">{new Date(t.createdAt).toLocaleString()}</dd></div>
           {#if t.startedAt}<div><dt>Started</dt><dd class="mono">{new Date(t.startedAt).toLocaleString()}</dd></div>{/if}
@@ -434,7 +455,7 @@
               <Tile icon={agentIcon(a.name)} tone="agent" size={26} />
               {#if x.app}<Logo app={byName.get(x.app) ?? { name: x.app }} title={title(x.app)} size={26} />{:else}<Tile icon="cell" size={26} />{/if}
               <span class="dt"><strong>{line(x, title(x.app))}</strong><small>{a.name} agent, asked by {asker(x)}</small></span>
-              {#if x.phase === "Failed"}<Tag tone="warn">Could not finish</Tag>{:else if asking(x)}<Tag tone="agent">Asks you</Tag>{:else}<Tag tone="ok">Done</Tag>{/if}
+              {#if x.stopped}<Tag>Stopped</Tag>{:else if x.phase === "Failed"}<Tag tone="warn">Could not finish</Tag>{:else if asking(x)}<Tag tone="agent">Asks you</Tag>{:else}<Tag tone="ok">Done</Tag>{/if}
               <time class="mono" datetime={x.finishedAt ?? x.createdAt}>{ago(x.finishedAt ?? x.createdAt)}</time>
               <Icon name="right" size={14} stroke={2} />
             </a>
@@ -664,6 +685,9 @@
   .card .who > span {
     font-size: 12.5px;
     color: var(--color-muted);
+  }
+  .card .who > .stop {
+    margin-left: auto;
   }
   .lead {
     margin: 16px 0 0;

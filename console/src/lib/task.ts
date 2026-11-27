@@ -53,13 +53,17 @@ export async function withTranscript<T, I>(
 /**
  * Whether the transcript read with task seen still holds for the task as it
  * is now: the agent is not at work on it and nothing moved since, no reply
- * (E-99, also from another admin), no new step, no new answer.
+ * (E-99, also from another admin), no new step, no new answer. A stopped
+ * task is always read again: a post of its agent that the API already
+ * served may land after the stop, and no field of the task tells when
+ * (E-101).
  */
 export function transcriptHolds(seen: Task | null, now: Task): boolean {
   return (
     !!seen &&
     now.phase !== "Pending" &&
     now.phase !== "Running" &&
+    !now.stopped &&
     seen.name === now.name &&
     seen.phase === now.phase &&
     seen.steps.length === now.steps.length &&
@@ -95,7 +99,8 @@ export function taskState(t: Task): { label: string; tone: "ok" | "wait" | "bad"
     case "Succeeded":
       return { label: "Done", tone: "ok" };
     case "Failed":
-      return { label: "Could not finish", tone: "bad" };
+      // A person's stop is no failure of the agent (E-101).
+      return t.stopped ? { label: `Stopped by ${t.stopped.by}`, tone: "wait" } : { label: "Could not finish", tone: "bad" };
     case "WaitingForInput":
       return { label: "Waiting for your reply", tone: "wait" };
   }

@@ -175,6 +175,7 @@ func (s *Server) routes() []route {
 		{"POST", "/v0/tasks/{name}/claim", RoleAgent, s.claimTask},
 		{"POST", "/v0/tasks/{name}/finish", RoleAgent, s.finishTask},
 		{"POST", "/v0/tasks/{name}/reply", RoleAdmin, s.replyTask},
+		{"POST", "/v0/tasks/{name}/stop", RoleAdmin, s.stopTask},
 		{"GET", "/v0/tasks/{name}/items", RoleAgent, s.listItems},
 		{"POST", "/v0/tasks/{name}/items", RoleAgent, s.appendItems},
 		{"GET", "/v0/nodes", RoleViewer, s.listNodes},
