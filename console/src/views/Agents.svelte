@@ -5,11 +5,11 @@
   // call it made, its answer and the changes it proposed.
   import { api, must } from "../lib/api/client";
   import type { components } from "../lib/api/schema";
-  import { ended, headline, open as isOpen, unsettled, type Change } from "../lib/change";
+  import { ended, headline, open as isOpen, type Change } from "../lib/change";
   import { isUp } from "../lib/home";
   import { newest, STALE } from "../lib/newest";
   import { itemPath } from "../lib/route";
-  import { agents, crew, task as line, taskState, withTranscript, type Task } from "../lib/task";
+  import { agents, crew, task as line, taskState, transcriptHolds, withTranscript, type Task } from "../lib/task";
   import { ago, stamp } from "../lib/time";
   import Avatar from "../lib/ui/Avatar.svelte";
   import Icon from "../lib/ui/Icon.svelte";
@@ -75,7 +75,11 @@
         Promise.all([
           withTranscript(
             () => api.GET("/v0/tasks/{name}", { params: { path: { name } } }).then(must),
-            () => api.GET("/v0/tasks/{name}/items", { params: { path: { name } } }).then(must),
+            // A settled task keeps the transcript it showed until it moves.
+            (now) =>
+              entries && !entriesFailed && transcriptHolds(t, now)
+                ? Promise.resolve(entries)
+                : api.GET("/v0/tasks/{name}/items", { params: { path: { name } } }).then(must),
           ),
           context(),
         ]),
@@ -92,9 +96,10 @@
   }
   const reloadTask = () => open && loadTask(open);
 
-  // The list polls; a task page polls while the task runs, one of its
-  // changes is still open (a decision made elsewhere shows up) or its
-  // transcript could not be read.
+  // The list polls, and so does a task page: a reply reopens even a finished
+  // task (E-99), also one from another admin, and a decision on one of its
+  // changes made elsewhere shows up. The transcript is read again only when
+  // the task moved.
   $effect(() => {
     const name = open;
     if (!name) {
@@ -107,27 +112,31 @@
     entries = null;
     entriesFailed = "";
     loadTask(name);
-    const i = setInterval(() => {
-      if (!t || running(t) || unsettled(proposed) || entriesFailed) loadTask(name);
-    }, 5000);
+    const i = setInterval(() => loadTask(name), 5000);
     return () => clearInterval(i);
   });
 
   const title = (app: string) => titles.get(app) ?? app;
   const byName = $derived(new Map(apps.map((a) => [a.name, a])));
   const running = (x: Task) => x.phase === "Pending" || x.phase === "Running";
+  // The agent asked the person and waits for the reply (E-99).
+  const asking = (x: Task) => x.phase === "WaitingForInput";
   const newestFirst = (x: Task, y: Task) => y.createdAt.localeCompare(x.createdAt);
   let working = $derived((tasks ?? []).filter(running).sort(newestFirst));
+  // Questions first: they wait for you.
   let finished = $derived(
-    (tasks ?? []).filter((x) => !running(x)).sort((x, y) => (y.finishedAt ?? y.createdAt).localeCompare(x.finishedAt ?? x.createdAt)),
+    (tasks ?? [])
+      .filter((x) => !running(x))
+      .sort((x, y) => Number(asking(y)) - Number(asking(x)) || (y.finishedAt ?? y.createdAt).localeCompare(x.finishedAt ?? x.createdAt)),
   );
+  let questions = $derived(finished.filter(asking).length);
   const count = (kinds: Task["kind"][], live: boolean) => (tasks ?? []).filter((x) => kinds.includes(x.kind) && running(x) === live).length;
   const asker = (x: Task) => (x.requester.kind === "Operator" ? "the platform" : x.requester.kind === "Human" ? x.requester.name : `the ${x.requester.name} agent`);
   const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
   let lede = $derived(
     tasks
-      ? `${working.length ? `${working.length === 1 ? "One task runs" : `${working.length} tasks run`} now` : "No agent is at work"}, ${plural(finished.length, "task")} finished. Agents only propose: every change they want waits for your approval.`
+      ? `${working.length ? `${working.length === 1 ? "One task runs" : `${working.length} tasks run`} now` : "No agent is at work"}, ${plural(finished.length, "task")} finished.${questions ? ` ${questions === 1 ? "One question waits" : `${questions} questions wait`} for your reply.` : ""} Agents only propose: every change they want waits for your approval.`
       : "",
   );
 
@@ -150,14 +159,15 @@
     return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
   };
   // The transcript as the page shows it: a call with its output under it.
-  type Said = { at: string; who: "brief" | "thought" | "said"; text: string };
+  type Said = { at: string; who: "brief" | "reply" | "thought" | "said"; text: string; by?: string };
   type Called = { at: string; who: "call"; name: string; args: string; output: string | null };
   let talk = $derived.by(() => {
     const out: (Said | Called)[] = [];
     const calls = new Map<string, Called>();
     for (const { at, item: it } of entries ?? []) {
       const text = (it.parts ?? []).map((p) => p.text).join("\n");
-      if (it.type === "message") out.push({ at, who: it.role === "user" ? "brief" : "said", text });
+      // A person's message after the brief carries its author (E-99).
+      if (it.type === "message") out.push(it.role !== "user" ? { at, who: "said", text } : it.name ? { at, who: "reply", by: it.name, text } : { at, who: "brief", text });
       else if (it.type === "reasoning") out.push({ at, who: "thought", text: it.text || "Kept by the model's provider, not readable." });
       else if (it.type === "function_call") {
         const c: Called = { at, who: "call", name: it.name ?? "", args: it.arguments ?? "", output: null };
@@ -171,7 +181,7 @@
     }
     return out;
   });
-  const whoSaid = { brief: "To the agent", thought: "Thinking", said: "The agent" } as const;
+  const whoSaid = { brief: "To the agent", reply: "Reply", thought: "Thinking", said: "The agent" } as const;
 
   // The answer: its first paragraph large, the rest under it.
   let answer = $derived.by(() => {
@@ -200,8 +210,8 @@
           <div class="who">
             <Tile icon={agentIcon(a.name)} tone="agent" size={28} pulse={running(t)} />
             <h2 id="t-answer">{a.name} agent</h2>
-            <span>{t.phase === "Succeeded" ? `answered${took(t) ? ` in ${took(t)}` : ""}` : t.phase === "Failed" ? "could not finish" : s.label.toLowerCase()}</span>
-            {#if t.phase === "Failed"}<Tag tone="warn">Could not finish</Tag>{/if}
+            <span>{t.phase === "Succeeded" ? `answered${took(t) ? ` in ${took(t)}` : ""}` : t.phase === "Failed" ? "could not finish" : asking(t) ? "asks you" : s.label.toLowerCase()}</span>
+            {#if t.phase === "Failed"}<Tag tone="warn">Could not finish</Tag>{:else if asking(t)}<Tag tone="agent">Waiting for your reply</Tag>{/if}
           </div>
 
           {#if answer.first}
@@ -221,6 +231,11 @@
               {#if last}<p class="call mono">{last.call}</p>{/if}
               <div class="track"><div class="flow"></div></div>
             </div>
+          {:else}
+            <!-- keyed by the task: a draft for one task must not reach another -->
+            {#key t.name}
+              <div class="reply"><Composer reply={{ task: t.name, asked: asking(t) }} big={false} onsent={reloadTask} /></div>
+            {/key}
           {/if}
 
           {#if names.length}
@@ -284,7 +299,7 @@
                         {#if e.output !== null}<pre class="mono wrap">{e.output || "empty"}</pre>{/if}
                       </details>
                     {:else}
-                      <div class="said"><span class="by">{whoSaid[e.who]}</span><p class:wrap={true}>{e.text}</p></div>
+                      <div class="said"><span class="by">{e.who === "reply" ? `Reply from ${e.by}` : whoSaid[e.who]}</span><p class:wrap={true}>{e.text}</p></div>
                     {/if}
                   </li>
                 {/each}
@@ -375,7 +390,7 @@
               <Tile icon={agentIcon(a.name)} tone="agent" size={26} />
               {#if x.app}<Logo app={byName.get(x.app) ?? { name: x.app }} title={title(x.app)} size={26} />{:else}<Tile icon="cell" size={26} />{/if}
               <span class="dt"><strong>{line(x, title(x.app))}</strong><small>{a.name} agent, asked by {asker(x)}</small></span>
-              {#if x.phase === "Failed"}<Tag tone="warn">Could not finish</Tag>{:else}<Tag tone="ok">Done</Tag>{/if}
+              {#if x.phase === "Failed"}<Tag tone="warn">Could not finish</Tag>{:else if asking(x)}<Tag tone="agent">Asks you</Tag>{:else}<Tag tone="ok">Done</Tag>{/if}
               <time class="mono" datetime={x.finishedAt ?? x.createdAt}>{ago(x.finishedAt ?? x.createdAt)}</time>
               <Icon name="right" size={14} stroke={2} />
             </a>
@@ -621,6 +636,9 @@
     color: var(--color-text);
     white-space: pre-line;
     overflow-wrap: anywhere;
+  }
+  .reply {
+    margin-top: 18px;
   }
   .live {
     margin-top: 18px;

@@ -199,10 +199,11 @@ spec:
               message:
                 type: string
               phase:
-                description: Lifecycle of Backup, Restore and ChangeRequest.
+                description: Lifecycle of Backup, Restore, ChangeRequest and Task.
                 enum:
                 - Pending
                 - WaitingForApproval
+                - WaitingForInput
                 - Running
                 - Completed
                 - Failed

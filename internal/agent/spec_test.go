@@ -28,7 +28,7 @@ func TestAgentSpec(t *testing.T) {
 		ops := &cellv1.Agent{ObjectMeta: metav1.ObjectMeta{Name: "ops", UID: "ops-1"},
 			Spec: cellv1.AgentSpec{Kinds: []string{"diagnose"}, Apps: []string{"board"}, Tools: tc.tools, Instructions: "Answer in one word."}}
 		c := newCell(t, func(conv agenttest.Conversation) (agenttest.Turn, error) {
-			if err := want(slices.Equal(conv.Tools, []string{"appLogs", "getApp"}) && strings.HasSuffix(conv.System, "\n\n## Instructions of this cell\n\nAnswer in one word.\n"),
+			if err := want(slices.Equal(conv.Tools, []string{"appLogs", "getApp", "ask"}) && strings.HasSuffix(conv.System, "\n\n## Instructions of this cell\n\nAnswer in one word.\n"),
 				"tools %q, prompt ends %q", conv.Tools, conv.System[max(0, len(conv.System)-80):]); err != nil {
 				return agenttest.Turn{}, err
 			}

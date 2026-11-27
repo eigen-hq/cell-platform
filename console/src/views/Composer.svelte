@@ -2,7 +2,9 @@
   // The ask box: an admin tells Ops in plain words what to look at or do,
   // about the cell or about one app (E-85). Ops answers in a task and
   // proposes changes, which wait for approval like every change. The ring
-  // turns while the box may hand work to an agent.
+  // turns while the box may hand work to an agent. With reply, the box
+  // answers the agent's question or follows up on its answer in that task
+  // (E-99): the agent goes on from the conversation.
   import { api, must } from "../lib/api/client";
   import { itemPath } from "../lib/route";
   import { MAX_ASK } from "../lib/task";
@@ -14,7 +16,16 @@
     title,
     suggestions = [],
     big = true,
-  }: { app?: string; title?: string; suggestions?: { text: string; icon: IconName }[]; big?: boolean } = $props();
+    reply,
+    onsent,
+  }: {
+    app?: string;
+    title?: string;
+    suggestions?: { text: string; icon: IconName }[];
+    big?: boolean;
+    reply?: { task: string; asked: boolean };
+    onsent?: () => void;
+  } = $props();
   let input = $state("");
   let busy = $state(false);
   let note = $state<{ text: string; bad?: boolean; task?: string } | null>(null);
@@ -23,8 +34,15 @@
   // Characters as the API counts them (code points, not UTF-16 units).
   const long = $derived([...input].length > MAX_ASK);
   const placeholder = $derived(
-    app ? `Ask Ops about ${title ?? app}, or hand off a task.` : "Ask anything about the cell or hand off a task.",
+    reply
+      ? reply.asked
+        ? "Answer Ops."
+        : "Follow up: ask Ops more, or tell it what to do next."
+      : app
+        ? `Ask Ops about ${title ?? app}, or hand off a task.`
+        : "Ask anything about the cell or hand off a task.",
   );
+  const label = $derived(reply ? "Reply to Ops" : app ? `Ask Ops about ${title ?? app}` : "Ask Ops about the cell");
 
   async function submit(e: SubmitEvent) {
     e.preventDefault();
@@ -32,6 +50,13 @@
     busy = true;
     note = null;
     try {
+      if (reply) {
+        must(await api.POST("/v0/tasks/{name}/reply", { params: { path: { name: reply.task } }, body: { text: input.trim() } }));
+        note = { text: "Sent. Ops goes on from the conversation." };
+        input = "";
+        onsent?.();
+        return;
+      }
       const t = must(await api.POST("/v0/tasks", { body: { kind: "ask", ...(app ? { app } : {}), input: input.trim() } }));
       note = { text: "Ops is on it. What it wants changed waits for your approval.", task: t.name };
       input = "";
@@ -57,11 +82,11 @@
 
 <div class="wrap" class:big>
   {#if big}<div class="glow" aria-hidden="true"></div>{/if}
-  <form class="ring" class:ring-fast={busy} onsubmit={submit} aria-label={app ? `Ask Ops about ${title ?? app}` : "Hand off to an agent"}>
+  <form class="ring" class:ring-fast={busy} onsubmit={submit} aria-label={reply || app ? label : "Hand off to an agent"}>
     <div class="ring-spin" aria-hidden="true"></div>
     <div class="face">
       <label>
-        <span class="vh">{app ? `Ask Ops about ${title ?? app}` : "Ask Ops about the cell"}</span>
+        <span class="vh">{label}</span>
         <textarea bind:this={box} bind:value={input} onkeydown={key} rows="1" {placeholder} aria-label="What should Ops do?" aria-invalid={long}></textarea>
       </label>
       <div class="foot">
@@ -70,7 +95,7 @@
         {/each}
         <span class="space"></span>
         <button type="submit" class="go-btn" disabled={busy || !input.trim() || long}>
-          {busy ? "Handing off" : "Hand off"}<Icon name="arrow" size={14} stroke={2.2} />
+          {reply ? (busy ? "Sending" : "Reply") : busy ? "Handing off" : "Hand off"}<Icon name="arrow" size={14} stroke={2.2} />
         </button>
       </div>
     </div>
@@ -84,7 +109,9 @@
     {#if note.task}<a class="go" href={itemPath("/agents", note.task)}>Follow Ops<Icon name="right" size={13} stroke={2} /></a>{/if}
   {:else}
     <Icon name="shield" size={13} stroke={2} />
-    {app
+    {reply
+      ? "Ops goes on from this conversation. Every change it proposes waits for your approval. No keys or passwords here."
+      : app
       ? `Ops reads ${title ?? app}: its state, pods, logs and changes. Every change it proposes waits for your approval. No keys or passwords here.`
       : "Ops reads the cell through the platform: apps, machines and changes. Every change it proposes waits for your approval. No keys or passwords here."}
   {/if}

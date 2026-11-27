@@ -8,7 +8,7 @@ Each section says whether it **runs today** or is **planned**. Planned parts nam
 
 | You want to | Today | Planned |
 |---|---|---|
-| Ask an agent about the cell or an app | Ask box on Home and on an app's page; one answer per task | Follow-ups, the agent asks back, several tasks at once |
+| Ask an agent about the cell or an app | Ask box on Home and on an app's page; reply to any task, and the agent asks you when it needs to | Several tasks at once, stop |
 | Know the agent understood you | You read its answer | It restates the problem first and asks when unsure |
 | Trust its findings | Every API call it made is listed in the task | Every claim links to the call it rests on; numbers come from the platform |
 | Judge its proposal | One proposed change with its diff and risk | Options with risk, reversibility, effort and what "done" means |
@@ -84,10 +84,16 @@ A question without a change ("which machines are nearly full?") ends after Under
 
 ### Talking back and forth
 
+**Runs today** (E-99):
+
+- **Follow-ups.** Reply on any task an agent answered, also one it could not finish: on the task in Agents, below its answer. The same agent goes on from the conversation, with everything it already found. While it works, the task shows *Reply sent, waiting for the agent*.
+- **The agent asks you.** When it needs a decision or a fact only you have, the task shows *Waiting for your reply* with its question, on Home and in Agents. Your reply goes to the same box. It never asks whether to make a change: it proposes the change, and you approve or decline it.
+
+Only admins reply. A reply is refused while the agent works, when the agent that worked on the task is gone or no longer takes such tasks, and when the task has used its 200 steps: then ask again in a new task.
+
 *Planned* (backlog: Conversations, Task thread in the console).
 
-- **Follow-ups.** Reply on any task, also a finished one. The agent continues with everything it already found.
-- **The agent asks you.** When it needs a decision or a fact, the task shows *Waiting for you* with its question, sometimes as a short form. A secret you type into such a form goes straight into a Secret in the cell, which the cell picks, not the agent. Neither the agent nor the model provider sees it.
+- **Questions as forms.** A question can be a short form. A secret you type into such a form goes straight into a Secret in the cell, which the cell picks, not the agent. Neither the agent nor the model provider sees it.
 - **Correct me.** Fix the agent's understanding on the Understood block. It starts again from there.
 - **Ask about this.** Every block, evidence step and chart has this action. It opens a follow-up with that item attached.
 - **Several at once.** Agents work on several tasks in parallel, up to a limit per agent; the rest wait as *queued*. If the agent service restarts, each task resumes where it stopped, without doing a step twice.

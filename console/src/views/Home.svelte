@@ -95,6 +95,8 @@
   let down = $derived(apps?.filter(isDown).length ?? 0);
   let backup = $derived(lastBackup(backups));
   let working = $derived(tasks.filter((t) => t.phase === "Pending" || t.phase === "Running").sort((x, y) => y.createdAt.localeCompare(x.createdAt)));
+  // Agents' questions to an admin (E-99).
+  let asking = $derived(tasks.filter((t) => t.phase === "WaitingForInput").sort((x, y) => (y.finishedAt ?? y.createdAt).localeCompare(x.finishedAt ?? x.createdAt)));
   // Apps an agent works on right now: their tile gets the moving ring.
   let busyApps = $derived(new Set(working.flatMap((t) => (t.app ? [t.app] : []))));
   let noTarget = $derived(target?.configured === false);
@@ -118,7 +120,8 @@
     ];
     const agentsLine = admin && working.length ? `${working.length === 1 ? "One agent is" : `${working.length} agents are`} working` : "";
     const wait = waiting.length ? `${waiting.length === 1 ? "one decision waits" : `${waiting.length} decisions wait`} for ${admin ? "you" : "an admin"}` : "";
-    const tail = [agentsLine, wait].filter(Boolean).join(", ");
+    const ask = admin && asking.length ? `${asking.length === 1 ? "one question waits" : `${asking.length} questions wait`} for your reply` : "";
+    const tail = [agentsLine, wait, ask].filter(Boolean).join(", ");
     return `${parts.join(", ")}.${tail ? ` ${tail.replace(/^./, (x) => x.toUpperCase())}.` : ""}`;
   });
 
@@ -163,13 +166,32 @@
     <section class="sec" aria-labelledby="h-agents">
       <div class="sec-head">
         <h2 id="h-agents">{admin ? "Agents" : "Waiting for a decision"}</h2>
-        <span>{admin ? `${working.length} working, ${waiting.length} waiting for you` : `${waiting.length} for an admin`}</span>
+        <span>{admin ? `${working.length} working, ${waiting.length + asking.length} waiting for you` : `${waiting.length} for an admin`}</span>
         <span class="end">{#if admin}<a href="/agents">All tasks</a>{/if}<a href="/changes">All changes</a></span>
       </div>
       <ul class="list">
         {#each waiting.slice(0, 5) as c (c.name)}
           <!-- keyed by the change: a newer request must not inherit a half-made decision -->
           <li><Slip change={c} title={title(c.app)} app={byName.get(c.app)} {admin} ondecided={load} /></li>
+        {/each}
+        {#each asking.slice(0, 5) as t (t.name)}
+          {@const a = agents[t.kind]}
+          <li>
+            <a class="task row" href={itemPath("/agents", t.name)}>
+              <span class="who">
+                <Tile icon={agentIcon(a.name)} tone="agent" size={30} />
+                <span><strong>{a.name} agent</strong><small>asks you</small></span>
+              </span>
+              <span class="what">
+                {#if t.app}<Logo app={byName.get(t.app) ?? { name: t.app }} title={title(t.app)} />{:else}<Tile icon="cell" size={36} />{/if}
+                <span class="txt">
+                  <strong>{t.result}</strong>
+                  <small>{task(t, title(t.app ?? ""))}</small>
+                </span>
+              </span>
+              <Icon name="right" size={14} stroke={2} />
+            </a>
+          </li>
         {/each}
         {#each working.slice(0, 5) as t (t.name)}
           {@const a = agents[t.kind]}
@@ -193,7 +215,7 @@
             </a>
           </li>
         {/each}
-        {#if admin && !waiting.length && !working.length}
+        {#if admin && !waiting.length && !working.length && !asking.length}
           <li class="empty">No agent is at work and nothing waits for you. Hand off a task above, or ask Ops about one app from its page.</li>
         {/if}
       </ul>

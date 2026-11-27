@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cellv1 "github.com/eigen-hq/cell-platform/api/v1alpha1"
+	"github.com/eigen-hq/cell-platform/internal/cell"
 )
 
 // TaskHeader names the task an agent's call belongs to. Agents work only
@@ -108,9 +109,16 @@ type taskView struct {
 	StartedAt  *time.Time    `json:"startedAt"`
 	FinishedAt *time.Time    `json:"finishedAt"`
 	Result     string        `json:"result"`
+	Reply      *replyView    `json:"reply"`
 	Steps      []stepView    `json:"steps"`
 	// Changes the agent proposed in the task (only for a single task).
 	Changes []string `json:"changes,omitempty"`
+}
+
+type replyView struct {
+	By   string    `json:"by"`
+	At   time.Time `json:"at"`
+	Text string    `json:"text"`
 }
 
 func viewTask(t *cellv1.Task) taskView {
@@ -121,6 +129,9 @@ func viewTask(t *cellv1.Task) taskView {
 		Steps: []stepView{}}
 	if v.Phase == "" {
 		v.Phase = string(cellv1.RunPending)
+	}
+	if r := t.Status.Reply; r != nil {
+		v.Reply = &replyView{By: r.By, At: r.At.Time, Text: r.Text}
 	}
 	for _, st := range t.Status.Steps {
 		v.Steps = append(v.Steps, stepView{At: st.At.Time, Call: st.Call})
@@ -249,10 +260,25 @@ func (s *Server) claimTask(w http.ResponseWriter, r *http.Request, c *Caller) er
 	if t.Status.Phase != "" && t.Status.Phase != cellv1.RunPending {
 		return errorf(http.StatusConflict, "task %s is %s", t.Name, t.Status.Phase)
 	}
-	if err := mayTake(agentOf(r.Context()), t.Spec.Kind, t.Spec.App); err != nil {
-		return err
+	// A reply goes to the agent that holds the conversation (E-99).
+	if t.Status.Assignee != "" && t.Status.Assignee != c.Username {
+		return errorf(http.StatusConflict, "task %s waits for %s", t.Name, t.Status.Assignee)
 	}
 	now := metav1.NewTime(s.now())
+	if err := mayTake(agentOf(r.Context()), t.Spec.Kind, t.Spec.App); err != nil {
+		if t.Status.Assignee != c.Username {
+			return err
+		}
+		// A reply waits for this agent, which no longer takes such tasks
+		// since: the task fails, so the reply waits for nobody and the agent
+		// goes on with its other work.
+		t.Status.Phase, t.Status.FinishedAt = cellv1.RunFailed, &now
+		t.Status.Result = "The reply was not taken: " + err.Error() + ". Ask again in a new task."
+		if err := s.Kube.Status().Update(r.Context(), t); err != nil && !apierrors.IsConflict(err) {
+			return err
+		}
+		return errorf(http.StatusConflict, "task %s: %v", t.Name, err)
+	}
 	t.Status.Phase, t.Status.Assignee, t.Status.StartedAt = cellv1.RunRunning, c.Username, &now
 	// The resource version makes two agents claiming at once safe: one wins.
 	if err := s.Kube.Status().Update(r.Context(), t); err != nil {
@@ -268,6 +294,9 @@ func (s *Server) claimTask(w http.ResponseWriter, r *http.Request, c *Caller) er
 type finishTaskRequest struct {
 	Result string `json:"result"`
 	Failed bool   `json:"failed"`
+	// Waiting: the result is a question to the person, whose reply the
+	// agent needs to go on.
+	Waiting bool `json:"waiting"`
 }
 
 // finishTask records the agent's answer and ends the task.
@@ -275,6 +304,9 @@ func (s *Server) finishTask(w http.ResponseWriter, r *http.Request, c *Caller) e
 	var req finishTaskRequest
 	if err := readJSON(r, &req); err != nil {
 		return err
+	}
+	if req.Failed && req.Waiting {
+		return errorf(http.StatusBadRequest, "a task fails or waits, not both")
 	}
 	if len(req.Result) > 16384 {
 		req.Result = req.Result[:16384]
@@ -293,11 +325,96 @@ func (s *Server) finishTask(w http.ResponseWriter, r *http.Request, c *Caller) e
 		if req.Failed {
 			t.Status.Phase = cellv1.RunFailed
 		}
+		if req.Waiting {
+			t.Status.Phase = cellv1.RunWaitingForInput
+		}
 		return s.Kube.Status().Update(r.Context(), t)
 	})
 	if err != nil {
 		return err
 	}
 	writeJSON(w, http.StatusOK, viewTask(t))
+	return nil
+}
+
+type replyRequest struct {
+	Text string `json:"text"`
+}
+
+// replyTask hands a person's reply to the agent that holds the task's
+// conversation: the answer to its question, or a follow-up to its answer
+// (E-99). The task is pending again, for that agent only; it reads the
+// conversation back from the transcript and goes on.
+func (s *Server) replyTask(w http.ResponseWriter, r *http.Request, c *Caller) error {
+	var req replyRequest
+	if err := readJSON(r, &req); err != nil {
+		return err
+	}
+	text := strings.TrimSpace(req.Text)
+	if text == "" {
+		return errorf(http.StatusBadRequest, "a reply needs text")
+	}
+	if n := utf8.RuneCountInString(text); n > maxAsk {
+		return errorf(http.StatusBadRequest, "the reply has %d characters, at most %d", n, maxAsk)
+	}
+	ts, err := s.transcripts()
+	if err != nil {
+		return err
+	}
+	var t *cellv1.Task
+	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var err error
+		if t, err = s.task(r.Context(), r.PathValue("name")); err != nil {
+			return err
+		}
+		switch t.Status.Phase {
+		case cellv1.RunSucceeded, cellv1.RunFailed, cellv1.RunWaitingForInput:
+		default:
+			return errorf(http.StatusConflict, "task %s is %s: reply when the agent has answered or asked", t.Name, viewTask(t).Phase)
+		}
+		if len(t.Status.Steps) >= maxSteps {
+			return errorf(http.StatusConflict, "task %s has %d steps, the most a task can have: start a new task", t.Name, maxSteps)
+		}
+		if err := s.holds(r.Context(), t); err != nil {
+			return err
+		}
+		key, err := transcriptOf(t)
+		if err != nil {
+			return err
+		}
+		items, err := ts.Items(r.Context(), key)
+		if err != nil {
+			return err
+		}
+		if len(items) == 0 {
+			return errorf(http.StatusConflict, "task %s has no transcript to go on from: start a new task", t.Name)
+		}
+		now := metav1.NewTime(s.now())
+		t.Status.Phase, t.Status.FinishedAt = cellv1.RunPending, nil
+		t.Status.Reply = &cellv1.TaskReply{By: c.Username, At: now, Text: text}
+		return s.Kube.Status().Update(r.Context(), t)
+	})
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, viewTask(t))
+	return nil
+}
+
+// holds refuses a reply that no agent could take: the task's agent is gone,
+// being deleted, made again (another UID) or no longer takes such tasks.
+func (s *Server) holds(ctx context.Context, t *cellv1.Task) error {
+	name, uid, ok := cell.AgentOf(t.Status.Assignee)
+	if !ok {
+		return errorf(http.StatusConflict, "task %s was not worked on by an agent: start a new task", t.Name)
+	}
+	var a cellv1.Agent
+	err := s.Kube.Get(ctx, client.ObjectKey{Name: name}, &a)
+	if client.IgnoreNotFound(err) != nil {
+		return err
+	}
+	if err != nil || string(a.UID) != uid || !a.DeletionTimestamp.IsZero() || !a.Spec.Takes(t.Spec.Kind, t.Spec.App) {
+		return errorf(http.StatusConflict, "agent %s that worked on task %s is gone or no longer takes it: start a new task", name, t.Name)
+	}
 	return nil
 }

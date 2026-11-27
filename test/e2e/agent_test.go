@@ -203,6 +203,16 @@ func TestAgentRepairsApp(t *testing.T) {
 			}
 			change = cr.Name
 			return agenttest.Turn{Text: "Cause: WHOAMI_PORT_NUMBER=8080. Proposed change " + cr.Name + "."}, nil
+		case 4:
+			if err := check(slices.Equal(c.Notes, []string{"Is ailing healthy now?"}) && len(c.Results) == 0, "reply %q, results %q", c.Notes, c.Results); err != nil {
+				return agenttest.Turn{}, err
+			}
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "getApp", Input: map[string]any{"name": "ailing"}}}}, nil
+		case 5:
+			if err := check(len(c.Results) == 1 && strings.Contains(c.Results[0], "Ready"), "app %q", c.Results); err != nil {
+				return agenttest.Turn{}, err
+			}
+			return agenttest.Turn{Text: "Yes: ailing is Ready again."}, nil
 		}
 		return agenttest.Turn{}, fmt.Errorf("turn %d", c.Turn)
 	})
@@ -244,6 +254,26 @@ func TestAgentRepairsApp(t *testing.T) {
 		return check(field(app, "phase") == "Ready", "ailing is %v: %v", field(app, "phase"), field(app, "conditions"))
 	})
 	t.Logf("admin approved %s, ailing is healthy again", change)
+
+	// A follow-up (E-99): the admin asks on, the same agent goes on from the
+	// transcript with the reply as the next message.
+	asked := admin.do(t, http.MethodPost, "/v0/tasks/"+task+"/reply", map[string]any{"text": "Is ailing healthy now?"}, http.StatusOK)
+	if field(asked, "phase") != "Pending" || field(asked, "assignee") != a.API.Username {
+		t.Fatalf("replied task %v", asked)
+	}
+	if err := a.Take(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	done = admin.do(t, http.MethodGet, "/v0/tasks/"+task, nil, http.StatusOK)
+	if got := calls(done); field(done, "phase") != "Succeeded" || field(done, "result") != "Yes: ailing is Ready again." || len(got) != 5 || got[4] != "GET /v0/apps/ailing" {
+		t.Fatalf("follow-up %v", done)
+	}
+	items, _ = admin.do(t, http.MethodGet, "/v0/tasks/"+task+"/items", nil, http.StatusOK).([]any)
+	if len(items) != 20 || field(items[14], "item", "role") != "user" || field(items[14], "item", "name") != field(asked, "reply", "by") ||
+		field(items[19], "item", "role") != "assistant" {
+		t.Errorf("transcript after the reply %v", items)
+	}
+	t.Logf("the admin asked on, the agent answered from the conversation: %v", field(done, "result"))
 }
 
 // Scenario B: the agent packages an app that is not in the

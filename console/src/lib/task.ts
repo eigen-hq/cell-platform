@@ -39,26 +39,46 @@ export function task(t: Task, title: string): string {
  */
 export async function withTranscript<T, I>(
   task: () => Promise<T>,
-  items: () => Promise<I>,
+  items: (t: T) => Promise<I>,
 ): Promise<{ task: T; items: I | null; err: string }> {
   const t = await task();
   try {
-    return { task: t, items: await items(), err: "" };
+    return { task: t, items: await items(t), err: "" };
   } catch (e) {
     return { task: t, items: null, err: e instanceof Error ? e.message : String(e) };
   }
+}
+
+/**
+ * Whether the transcript read with task seen still holds for the task as it
+ * is now: the agent is not at work on it and nothing moved since, no reply
+ * (E-99, also from another admin), no new step, no new answer.
+ */
+export function transcriptHolds(seen: Task | null, now: Task): boolean {
+  return (
+    !!seen &&
+    now.phase !== "Pending" &&
+    now.phase !== "Running" &&
+    seen.name === now.name &&
+    seen.phase === now.phase &&
+    seen.steps.length === now.steps.length &&
+    seen.finishedAt === now.finishedAt &&
+    (seen.reply?.at ?? "") === (now.reply?.at ?? "")
+  );
 }
 
 /** Where a task stands. */
 export function taskState(t: Task): { label: string; tone: "ok" | "wait" | "bad" } {
   switch (t.phase) {
     case "Pending":
-      return { label: "Waiting for an agent", tone: "wait" };
+      return { label: t.reply ? "Reply sent, waiting for the agent" : "Waiting for an agent", tone: "wait" };
     case "Running":
       return { label: `Working, ${t.steps.length} ${t.steps.length === 1 ? "step" : "steps"} so far`, tone: "wait" };
     case "Succeeded":
       return { label: "Done", tone: "ok" };
     case "Failed":
       return { label: "Could not finish", tone: "bad" };
+    case "WaitingForInput":
+      return { label: "Waiting for your reply", tone: "wait" };
   }
 }

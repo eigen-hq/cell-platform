@@ -350,6 +350,37 @@ func TestAgentTaskFinishedMeanwhile(t *testing.T) {
 	}
 }
 
+// A task that waits for its agent, for the person's reply or for the agent
+// to take that reply, fails once the agent is gone; a pending task no agent
+// holds yet stays (E-99).
+func TestAgentTaskOpenWork(t *testing.T) {
+	ctx := context.Background()
+	task := func(name string, phase cellv1.RunPhase, assignee string) *cellv1.Task {
+		return &cellv1.Task{ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec:   cellv1.TaskSpec{Kind: "ask", Requester: cellv1.Requester{Kind: "Human", Name: "alice"}},
+			Status: cellv1.TaskStatus{Phase: phase, Assignee: assignee}}
+	}
+	tasks := []*cellv1.Task{task("replied", cellv1.RunPending, "cell-agent-gone.g-1"),
+		task("asking", cellv1.RunWaitingForInput, "cell-agent-gone.g-1"),
+		task("new", cellv1.RunPending, ""), task("done", cellv1.RunSucceeded, "cell-agent-gone.g-1")}
+	b := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithStatusSubresource(&cellv1.Task{})
+	for _, x := range tasks {
+		b = b.WithObjects(x)
+	}
+	c := b.Build()
+	r := &AgentTaskReconciler{Client: c}
+	want := map[string]cellv1.RunPhase{"replied": cellv1.RunFailed, "asking": cellv1.RunFailed, "new": cellv1.RunPending, "done": cellv1.RunSucceeded}
+	for _, x := range tasks {
+		if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(x)}); err != nil {
+			t.Fatal(err)
+		}
+		var got cellv1.Task
+		if err := c.Get(ctx, client.ObjectKeyFromObject(x), &got); err != nil || got.Status.Phase != want[x.Name] {
+			t.Errorf("task %s %s, want %s: %v", x.Name, got.Status.Phase, want[x.Name], err)
+		}
+	}
+}
+
 // Tasks of a deleted Agent fail even if listing them failed at first: the
 // error goes back through the queue.
 func TestAgentTasksAfterListFailure(t *testing.T) {

@@ -141,19 +141,27 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	return ctrl.Result{}, err
 }
 
-// AgentTaskReconciler fails each task that becomes the running task of an
-// account whose Agent is gone, being deleted or made again, as a claim that
-// raced the deletion; AgentReconciler fails those already running.
+// held tells whether task is an agent's open work: running, waiting for a
+// person's reply, or pending with a reply for that agent (E-99).
+func held(t *cellv1.Task) bool {
+	_, _, ok := cell.AgentOf(t.Status.Assignee)
+	switch t.Status.Phase {
+	case cellv1.RunRunning, cellv1.RunPending, cellv1.RunWaitingForInput:
+		return ok
+	}
+	return false
+}
+
+// AgentTaskReconciler fails each task that becomes the open work of an
+// account whose Agent is gone, being deleted or made again, as a claim or
+// a reply that raced the deletion; AgentReconciler fails those already
+// open.
 type AgentTaskReconciler struct {
 	client.Client
 }
 
 func (r *AgentTaskReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	agents := func(o client.Object) bool {
-		t := o.(*cellv1.Task)
-		_, _, ok := cell.AgentOf(t.Status.Assignee)
-		return ok && t.Status.Phase == cellv1.RunRunning
-	}
+	agents := func(o client.Object) bool { return held(o.(*cellv1.Task)) }
 	claimed := predicate.Funcs{
 		CreateFunc: func(e event.CreateEvent) bool { return agents(e.Object) },
 		UpdateFunc: func(e event.UpdateEvent) bool {
@@ -171,7 +179,7 @@ func (r *AgentTaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	return ctrl.Result{}, failTask(ctx, r.Client, req.NamespacedName)
 }
 
-// failTasks fails the running tasks of Agent name's accounts that failTask
+// failTasks fails the open tasks of Agent name's accounts that failTask
 // fails.
 func failTasks(ctx context.Context, c client.Client, name string) error {
 	var tasks cellv1.TaskList
@@ -179,7 +187,7 @@ func failTasks(ctx context.Context, c client.Client, name string) error {
 		return err
 	}
 	for _, t := range tasks.Items {
-		if n, _, ok := cell.AgentOf(t.Status.Assignee); ok && n == name && t.Status.Phase == cellv1.RunRunning {
+		if n, _, ok := cell.AgentOf(t.Status.Assignee); ok && n == name && held(&t) {
 			if err := failTask(ctx, c, client.ObjectKeyFromObject(&t)); err != nil {
 				return err
 			}
@@ -188,7 +196,7 @@ func failTasks(ctx context.Context, c client.Client, name string) error {
 	return nil
 }
 
-// failTask fails a running task whose agent can never finish it: the Agent
+// failTask fails an open task whose agent can never finish it: the Agent
 // of its account is gone, being deleted or made again (another UID), so the
 // API refuses the account. The admin sees why and can ask again.
 func failTask(ctx context.Context, c client.Client, key client.ObjectKey) error {
@@ -199,8 +207,8 @@ func failTask(ctx context.Context, c client.Client, key client.ObjectKey) error 
 		if err := c.Get(ctx, key, &t); err != nil {
 			return client.IgnoreNotFound(err)
 		}
-		name, uid, ok := cell.AgentOf(t.Status.Assignee)
-		if !ok || t.Status.Phase != cellv1.RunRunning {
+		name, uid, _ := cell.AgentOf(t.Status.Assignee)
+		if !held(&t) {
 			return nil
 		}
 		// Cached: the Agent whose credentials the claim used was in the

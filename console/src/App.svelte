@@ -31,7 +31,7 @@
   const admin = $derived(screen.kind === "ready" && screen.me.role === "admin");
 
   // Counts on the tabs, from the same API the views read.
-  let counts = $state<{ apps?: number; machines?: number; waiting?: number; working?: number }>({});
+  let counts = $state<{ apps?: number; machines?: number; waiting?: number; working?: number; asking?: number }>({});
   const guard = newest();
   async function count() {
     try {
@@ -45,6 +45,7 @@
         machines: must(n).length,
         waiting: must(c).filter((x) => x.phase === "WaitingForApproval").length,
         working: t ? must(t).filter((x) => x.phase === "Pending" || x.phase === "Running").length : undefined,
+        asking: t ? must(t).filter((x) => x.phase === "WaitingForInput").length : undefined,
       };
     } catch {
       counts = {}; // the view on screen says what broke; the tabs just lose their numbers
@@ -66,7 +67,7 @@
     { href: "/backups", label: "Backups", icon: "backups" },
     { href: "/changes", label: "Changes", icon: "changes", count: counts.waiting || undefined },
     // Viewers read the state of the cell only (E-63): no agents, no people.
-    ...(admin ? [{ href: "/agents", label: "Agents", icon: "agents", count: counts.working || undefined, live: !!counts.working } as Tab] : []),
+    ...(admin ? [{ href: "/agents", label: "Agents", icon: "agents", count: (counts.working ?? 0) + (counts.asking ?? 0) || undefined, live: !!counts.working } as Tab] : []),
   ]);
 
   // Leaving for the identity can fail (no login description, no network):

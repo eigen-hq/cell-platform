@@ -526,3 +526,144 @@ func TestTokenLimit(t *testing.T) {
 		t.Errorf("provider's 429: %v after %d calls", err, n)
 	}
 }
+
+// reply does what the API's reply does (E-99): the task is pending again,
+// with the person's reply.
+func (c *cell) reply(t *testing.T, name, by, text string) {
+	t.Helper()
+	task, _ := c.task(t, name)
+	task.Status.Phase, task.Status.FinishedAt = cellv1.RunPending, nil
+	task.Status.Reply = &cellv1.TaskReply{By: by, At: metav1.Now(), Text: text}
+	if err := c.kube.Status().Update(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (c *cell) once(t *testing.T) {
+	t.Helper()
+	if err := c.agent.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+var board = &cellv1.App{ObjectMeta: metav1.ObjectMeta{Name: "board"},
+	Spec: cellv1.AppSpec{Version: "1.0", Source: cellv1.Source{Image: &cellv1.ImageSource{Repository: "example/board"}},
+		Access: cellv1.Access{Subdomain: "board", Port: 80, Auth: cellv1.Auth{Mode: "none"}}}}
+
+func askTask(input string) *cellv1.Task {
+	return &cellv1.Task{ObjectMeta: metav1.ObjectMeta{Name: "board-ask-1"},
+		Spec: cellv1.TaskSpec{Kind: "ask", App: "board", Input: input, Requester: cellv1.Requester{Kind: "Human", Name: "alice"}}}
+}
+
+// A reply goes on from the transcript (E-99): the model gets the
+// conversation as it was, its reasoning unchanged, and the reply as the
+// next message; the transcript keeps the reply with its author.
+func TestFollowUp(t *testing.T) {
+	c := newCell(t, func(conv agenttest.Conversation) (agenttest.Turn, error) {
+		switch conv.Turn {
+		case 0:
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "getApp", Input: map[string]any{"name": "board"}}}}, nil
+		case 1:
+			return agenttest.Turn{Text: "Version 1.0."}, nil
+		case 2:
+			if err := want(strings.Contains(conv.Task, "Which version runs?") && slices.Equal(conv.Notes, []string{"And its port?"}) && len(conv.Results) == 0,
+				"task %q, notes %q, results %q", conv.Task, conv.Notes, conv.Results); err != nil {
+				return agenttest.Turn{}, err
+			}
+			return agenttest.Turn{Text: "Port 80."}, nil
+		}
+		return agenttest.Turn{}, fmt.Errorf("turn %d", conv.Turn)
+	}, board.DeepCopy(), askTask("Which version runs?"))
+	c.once(t)
+	if got, _ := c.task(t, "board-ask-1"); got.Status.Phase != cellv1.RunSucceeded || got.Status.Result != "Version 1.0." {
+		t.Fatalf("task %+v", got.Status)
+	}
+	c.reply(t, "board-ask-1", "alice", "And its port?")
+	c.once(t)
+	got, calls := c.task(t, "board-ask-1")
+	if got.Status.Phase != cellv1.RunSucceeded || got.Status.Result != "Port 80." || !slices.Equal(calls, []string{"GET /v0/apps/board"}) {
+		t.Errorf("task %+v, steps %q", got.Status, calls)
+	}
+	if got, want := c.transcript(t, "board-ask-1"), []string{"message:user", "reasoning:sig-0", "function_call:getApp", "function_call_output:call_1_0",
+		"reasoning:sig-1", "message:assistant", "message:user", "reasoning:sig-2", "message:assistant"}; !slices.Equal(got, want) {
+		t.Errorf("transcript %q, want %q", got, want)
+	}
+	items, _ := c.items.Items(context.Background(), "uid-board-ask-1")
+	if len(items) < 7 || !strings.Contains(string(items[6].Item), `"name":"alice"`) {
+		t.Errorf("reply item %s", items[min(6, len(items)-1)].Item)
+	}
+}
+
+// The model asks the person (E-99): the other calls of its turn run, an
+// empty question goes back as an error, and the task waits with the
+// question until the reply comes.
+func TestAsk(t *testing.T) {
+	c := newCell(t, func(conv agenttest.Conversation) (agenttest.Turn, error) {
+		switch conv.Turn {
+		case 0:
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "ask", Input: map[string]any{"question": " "}},
+				{Tool: "ask", Input: map[string]any{"question": "To which version?"}}, {Tool: "getApp", Input: map[string]any{"name": "board"}}}}, nil
+		case 1:
+			if err := want(len(conv.Results) == 3 && conv.Results[0] == "ERROR ask needs a question" &&
+				conv.Results[1] == "Asked; the reply comes as the next message." && strings.Contains(conv.Results[2], `"board"`) &&
+				slices.Equal(conv.Notes, []string{"2.0"}), "results %q, notes %q", conv.Results, conv.Notes); err != nil {
+				return agenttest.Turn{}, err
+			}
+			return agenttest.Turn{Text: "Proposed nothing: 2.0 is not out."}, nil
+		}
+		return agenttest.Turn{}, fmt.Errorf("turn %d", conv.Turn)
+	}, board.DeepCopy(), askTask("Update board."))
+	c.once(t)
+	got, calls := c.task(t, "board-ask-1")
+	if got.Status.Phase != cellv1.RunWaitingForInput || got.Status.Result != "To which version?" || !slices.Equal(calls, []string{"GET /v0/apps/board"}) {
+		t.Fatalf("task %+v, steps %q", got.Status, calls)
+	}
+	c.reply(t, "board-ask-1", "alice", "2.0")
+	c.once(t)
+	if got, _ := c.task(t, "board-ask-1"); got.Status.Phase != cellv1.RunSucceeded || got.Status.Result != "Proposed nothing: 2.0 is not out." {
+		t.Errorf("task %+v", got.Status)
+	}
+}
+
+// A call that a restart of the agent cut off goes back as interrupted, so
+// the model checks before it repeats it; a reply to another agent's task
+// stays for that agent.
+func TestReplyAfterRestart(t *testing.T) {
+	task := askTask("Update board.")
+	task.Status = cellv1.TaskStatus{Phase: cellv1.RunPending, Assignee: opsAccount, Reply: &cellv1.TaskReply{By: "alice", Text: "Go on."}}
+	other := askTask("Update board.")
+	other.Name = "board-ask-2"
+	other.Status = cellv1.TaskStatus{Phase: cellv1.RunPending, Assignee: "cell-agent-packer.p-1", Reply: &cellv1.TaskReply{By: "alice", Text: "Go on."}}
+	c := newCell(t, func(conv agenttest.Conversation) (agenttest.Turn, error) {
+		if err := want(conv.Turn == 1 && slices.Equal(conv.Results, []string{interruptedCall}) && slices.Equal(conv.Notes, []string{"Go on."}),
+			"turn %d, results %q, notes %q", conv.Turn, conv.Results, conv.Notes); err != nil {
+			return agenttest.Turn{}, err
+		}
+		return agenttest.Turn{Text: "Done."}, nil
+	}, board.DeepCopy(), task, other)
+	// What the agent recorded before it restarted: the brief and a turn
+	// whose call has no output.
+	var raw []json.RawMessage
+	for _, it := range []item{{Type: "message", Role: "user", Parts: []part{{MediaType: "text/plain", Text: "Task board-ask-1: update board."}}},
+		{Type: "reasoning", Text: "thinking on turn 0", Signature: "sig-0"},
+		{Type: "function_call", CallID: "call_x", Name: "updateApp", Arguments: `{"name":"board"}`}} {
+		b, err := json.Marshal(it)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw = append(raw, b)
+	}
+	if err := c.items.Append(context.Background(), "uid-board-ask-1", 0, raw); err != nil {
+		t.Fatal(err)
+	}
+	c.once(t)
+	if got, _ := c.task(t, "board-ask-1"); got.Status.Phase != cellv1.RunSucceeded || got.Status.Result != "Done." {
+		t.Errorf("task %+v", got.Status)
+	}
+	if got := c.transcript(t, "board-ask-1"); len(got) != 7 || !slices.Equal(got[3:], []string{"function_call_output:call_x", "message:user", "reasoning:sig-1", "message:assistant"}) {
+		t.Errorf("transcript %q", got)
+	}
+	if got, _ := c.task(t, "board-ask-2"); got.Status.Phase != cellv1.RunPending {
+		t.Errorf("another agent's task %+v", got.Status)
+	}
+}

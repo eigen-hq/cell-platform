@@ -114,10 +114,12 @@ spec:
               phase:
                 description: |-
                   Pending until an agent claims it, Running while it works, then
-                  Succeeded or Failed.
+                  Succeeded, Failed, or WaitingForInput when the agent asked the person
+                  something. A reply makes it Pending again, for the same agent (E-99).
                 enum:
                 - Pending
                 - WaitingForApproval
+                - WaitingForInput
                 - Running
                 - Completed
                 - Failed
@@ -125,6 +127,25 @@ spec:
                 - RolledBack
                 - Rejected
                 type: string
+              reply:
+                description: |-
+                  Reply is a person's last reply: the answer to the agent's question or
+                  a follow-up. The agent adds it to the task's transcript, which keeps
+                  every reply, and goes on (E-99).
+                properties:
+                  at:
+                    format: date-time
+                    type: string
+                  by:
+                    type: string
+                  text:
+                    maxLength: 16384
+                    type: string
+                required:
+                - at
+                - by
+                - text
+                type: object
               result:
                 description: |-
                   Result is the agent's answer: the cause it found and what it

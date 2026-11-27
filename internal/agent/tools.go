@@ -237,7 +237,8 @@ func (op operation) request(args json.RawMessage) (string, any, error) {
 
 // tools are the agent's tools in task, the ones its Agent names (* for
 // all, E-97): each is one call of the platform API, which records it as a
-// step of the task and decides whether the agent may make it.
+// step of the task and decides whether the agent may make it. ask comes
+// last, for every agent.
 func (a *Agent) tools(task string, names []string) ([]tool, error) {
 	ops, err := operations()
 	if err != nil {
@@ -262,7 +263,7 @@ func (a *Agent) tools(task string, names []string) ([]tool, error) {
 				return a.call(ctx, op.Method, path, task, body)
 			}})
 	}
-	return tools, nil
+	return append(tools, ask), nil
 }
 
 // call makes one API call in task and returns its body for the model.

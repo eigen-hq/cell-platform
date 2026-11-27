@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 //go:embed prompt.md
@@ -42,7 +43,23 @@ type task struct {
 	Phase     string    `json:"phase"`
 	Assignee  string    `json:"assignee"`
 	CreatedAt time.Time `json:"createdAt"`
+	// Reply is a person's reply to the agent's answer or question: the
+	// agent goes on from the task's transcript (E-99).
+	Reply *struct {
+		By   string `json:"by"`
+		Text string `json:"text"`
+	} `json:"reply"`
 }
+
+// answer ends a task: the model's answer, why the task failed, or the
+// model's question to the person, whose reply it needs to go on (E-99).
+type answer struct {
+	Result  string `json:"result"`
+	Failed  bool   `json:"failed"`
+	Waiting bool   `json:"waiting"`
+}
+
+func failed(why string) answer { return answer{Result: why, Failed: true} }
 
 // Run works on tasks until ctx ends.
 func (a *Agent) Run(ctx context.Context) error {
@@ -92,7 +109,8 @@ func (a *Agent) ready(ctx context.Context) (bool, error) {
 
 // abandon ends the tasks of this agent that are still running between two
 // polls: an earlier run of the agent left them, or the answer to a claim
-// got lost. The conversation with the model is gone; an admin can ask again.
+// got lost. The transcript keeps what was said; an admin can reply to go
+// on from there.
 func (a *Agent) abandon(ctx context.Context) error {
 	var running []task
 	if err := a.API.JSON(ctx, http.MethodGet, "/v0/tasks?phase=Running", "", nil, &running); err != nil {
@@ -100,7 +118,7 @@ func (a *Agent) abandon(ctx context.Context) error {
 	}
 	for _, t := range running {
 		if t.Assignee == a.API.Username {
-			if err := a.finish(ctx, t.Name, "interrupted: the agent lost the task (restart or lost answer of the API); ask again", true); err != nil {
+			if err := a.finish(ctx, t.Name, failed("interrupted: the agent lost the task (restart or lost answer of the API); reply to go on or ask again")); err != nil {
 				return err
 			}
 		}
@@ -108,7 +126,8 @@ func (a *Agent) abandon(ctx context.Context) error {
 	return nil
 }
 
-// Once works on every pending task, oldest first.
+// Once works on every pending task, oldest first, but for replies to
+// another agent.
 func (a *Agent) Once(ctx context.Context) error {
 	var pending []task
 	if err := a.API.JSON(ctx, http.MethodGet, "/v0/tasks?phase=Pending", "", nil, &pending); err != nil {
@@ -116,6 +135,9 @@ func (a *Agent) Once(ctx context.Context) error {
 	}
 	slices.SortFunc(pending, func(x, y task) int { return x.CreatedAt.Compare(y.CreatedAt) })
 	for _, t := range pending {
+		if t.Assignee != "" && t.Assignee != a.API.Username {
+			continue
+		}
 		if err := a.Take(ctx, t.Name); err != nil && !errors.Is(err, errTaken) {
 			return err
 		}
@@ -142,22 +164,22 @@ func (a *Agent) Take(ctx context.Context, name string) error {
 		return fmt.Errorf("claim task %s: %w", name, err)
 	}
 	a.Log.Info("working", "task", t.Name, "kind", t.Kind, "app", t.App)
-	result, failed := a.work(ctx, t)
-	if err := a.finish(ctx, t.Name, result, failed); err != nil {
+	ans := a.work(ctx, t)
+	if err := a.finish(ctx, t.Name, ans); err != nil {
 		return err
 	}
-	a.Log.Info("done", "task", t.Name, "failed", failed)
+	a.Log.Info("done", "task", t.Name, "failed", ans.Failed, "waiting", ans.Waiting)
 	return nil
 }
 
 // finish ends a task. It retries while the API is unreachable or failing,
 // to keep the answer; abandon ends the task otherwise.
-func (a *Agent) finish(ctx context.Context, name, result string, failed bool) error {
-	return a.send(ctx, "/v0/tasks/"+url.PathEscape(name)+"/finish", map[string]any{"result": result, "failed": failed}, http.StatusOK, 0)
+func (a *Agent) finish(ctx context.Context, name string, ans answer) error {
+	return a.send(ctx, "/v0/tasks/"+url.PathEscape(name)+"/finish", ans, http.StatusOK, 0)
 }
 
 // work lets the model work on a claimed task and returns its answer.
-func (a *Agent) work(ctx context.Context, t task) (string, bool) {
+func (a *Agent) work(ctx context.Context, t task) answer {
 	// Read for every task: a change to the Agent counts from the next one.
 	var me struct {
 		Agent *struct {
@@ -166,32 +188,33 @@ func (a *Agent) work(ctx context.Context, t task) (string, bool) {
 		} `json:"agent"`
 	}
 	if err := a.API.JSON(ctx, http.MethodGet, "/v0/whoami", "", nil, &me); err != nil {
-		return "whoami: " + err.Error(), true
+		return failed("whoami: " + err.Error())
 	}
 	if me.Agent == nil {
-		return "whoami: the API names no Agent for this account", true
+		return failed("whoami: the API names no Agent for this account")
 	}
 	tools, err := a.tools(t.Name, me.Agent.Tools)
 	if err != nil {
-		return "tools: " + err.Error(), true
+		return failed("tools: " + err.Error())
 	}
 	prompt := systemPrompt
 	if me.Agent.Instructions != "" {
 		prompt = strings.TrimRight(prompt, "\n") + "\n\n## Instructions of this cell\n\n" + me.Agent.Instructions + "\n"
 	}
-	msgs := []message{{Role: "system", Text: prompt}, {Role: "user", Text: brief(t)}}
 	tr := &transcript{a: a, path: "/v0/tasks/" + url.PathEscape(t.Name) + "/items"}
-	if err := tr.add(ctx, msgs[1]); err != nil {
-		return err.Error(), true
+	said, err := a.conversation(ctx, t, tr)
+	if err != nil {
+		return failed(err.Error())
 	}
+	msgs := append([]message{{Role: "system", Text: prompt}}, said...)
 	cuts := 0
 	// ponytail: a fixed turn limit, a token budget per task if costs need a cap
 	for range 40 {
 		reply, stop, err := a.Model.complete(ctx, msgs, tools)
 		if err != nil {
-			return "model: " + modelError(err), true
+			return failed("model: " + modelError(err))
 		}
-		answer := strings.TrimSpace(reply.Text)
+		text := strings.TrimSpace(reply.Text)
 		// A turn cut at the token limit or by a filter may hold half a call,
 		// half an answer, or reasoning without its signature: it is dropped
 		// and the model, told so, does it again. A second cut in a row would
@@ -199,22 +222,22 @@ func (a *Agent) work(ctx context.Context, t task) (string, bool) {
 		// OpenAI-compatible servers end every turn so.
 		if stop != "stop" && (stop != "tool_calls" || len(reply.Calls) == 0) {
 			if cuts++; cuts == 2 {
-				return fmt.Sprintf("stopped before an answer (%s, twice in a row). %s", stop, answer), true
+				return failed(fmt.Sprintf("stopped before an answer (%s, twice in a row). %s", stop, text))
 			}
 			note := message{Role: "user", Text: fmt.Sprintf(cutNote, stop)}
 			msgs = append(msgs, note)
 			if err := tr.add(ctx, note); err != nil {
-				return err.Error(), true
+				return failed(err.Error())
 			}
 			continue
 		}
 		cuts = 0
 		msgs = append(msgs, reply)
 		if err := tr.add(ctx, reply); err != nil {
-			return err.Error(), true
+			return failed(err.Error())
 		}
 		if len(reply.Calls) == 0 {
-			return answer, false
+			return answer{Result: text}
 		}
 		// The calls of one turn are independent: the model made them before
 		// it saw any result. Their results go back in the order of the calls.
@@ -225,15 +248,105 @@ func (a *Agent) work(ctx context.Context, t task) (string, bool) {
 		}
 		wg.Wait()
 		outputs := make([]message, len(reply.Calls))
+		var asked []string
 		for i, c := range reply.Calls {
 			outputs[i] = message{Role: "tool", CallID: c.ID, Text: results[i]}
+			if q, err := question(c.Args); c.Name == ask.Name && err == nil {
+				asked = append(asked, q)
+			}
 		}
 		msgs = append(msgs, outputs...)
 		if err := tr.add(ctx, outputs...); err != nil {
-			return err.Error(), true
+			return failed(err.Error())
+		}
+		// The task waits for the person's reply, after the other calls of
+		// the turn ran.
+		if len(asked) > 0 {
+			return answer{Result: strings.Join(asked, "\n\n"), Waiting: true}
 		}
 	}
-	return "stopped before an answer (40 model calls)", true
+	return failed("stopped before an answer (40 model calls)")
+}
+
+// conversation is what was said in task before the model's next turn: the
+// brief of a new task, or the transcript and the person's reply (E-99).
+// The transcript holds what was said; tr goes on after it.
+func (a *Agent) conversation(ctx context.Context, t task, tr *transcript) ([]message, error) {
+	if t.Reply == nil {
+		first := message{Role: "user", Text: brief(t)}
+		return []message{first}, tr.add(ctx, first)
+	}
+	var items []struct {
+		Item item `json:"item"`
+	}
+	if err := a.API.JSON(ctx, http.MethodGet, tr.path, "", nil, &items); err != nil {
+		return nil, fmt.Errorf("transcript: %w", err)
+	}
+	if len(items) == 0 {
+		return nil, errors.New("transcript: empty, nothing to go on from; ask again")
+	}
+	said := make([]item, len(items))
+	for i, it := range items {
+		said[i] = it.Item
+	}
+	msgs := messagesOf(said)
+	// A call without its output was cut off by a restart of the agent:
+	// providers refuse a call without a result.
+	// ponytail: the outputs go last, where a cut leaves them; a gap further
+	// up would need the transcript rewritten
+	answered := map[string]bool{}
+	for _, m := range msgs {
+		answered[m.CallID] = true
+	}
+	var more []message
+	for _, m := range msgs {
+		for _, c := range m.Calls {
+			if !answered[c.ID] {
+				more = append(more, message{Role: "tool", CallID: c.ID, Text: interruptedCall})
+			}
+		}
+	}
+	more = append(more, message{Role: "user", Name: t.Reply.By, Text: t.Reply.Text})
+	tr.next = len(items)
+	return append(msgs, more...), tr.add(ctx, more...)
+}
+
+// interruptedCall is the output of a call that a restart cut off.
+const interruptedCall = "ERROR interrupted: this call may or may not have run; check before you repeat it"
+
+// ask is the model's way to ask the person a question it cannot go on
+// without (E-99). Every agent has it: it reaches nothing but the person.
+var ask = tool{
+	Name: "ask",
+	Description: "Ask the person who gave you the task one question you cannot go on without: information or a decision only they have. " +
+		"Your turn ends after this call's turn and the task waits for their reply, which comes as the next message. " +
+		"Never ask to approve a change: propose it, an admin approves it.",
+	Params: map[string]any{"type": "object", "required": []string{"question"}, "properties": map[string]any{
+		"question": map[string]any{"type": "string", "description": "The question, in plain text, at most 2000 characters."}}},
+	Run: func(_ context.Context, args json.RawMessage) (string, error) {
+		if _, err := question(args); err != nil {
+			return "", err
+		}
+		return "Asked; the reply comes as the next message.", nil
+	},
+}
+
+// question is the question of a call of ask.
+func question(args json.RawMessage) (string, error) {
+	var in struct {
+		Question string `json:"question"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return "", fmt.Errorf("arguments: %w", err)
+	}
+	q := strings.TrimSpace(in.Question)
+	if q == "" {
+		return "", errors.New("ask needs a question")
+	}
+	if n := utf8.RuneCountInString(q); n > 2000 {
+		return "", fmt.Errorf("the question has %d characters, at most 2000", n)
+	}
+	return q, nil
 }
 
 // cutNote tells the model that its last turn was cut.

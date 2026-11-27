@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -35,7 +36,9 @@ func itemsOf(m message) []item {
 	}
 	switch m.Role {
 	case "user":
-		return []item{text("user")}
+		it := text("user")
+		it.Name = m.Name
+		return []item{it}
 	case "tool":
 		return []item{{Type: "function_call_output", CallID: m.CallID, Output: m.Text}}
 	case "assistant":
@@ -52,6 +55,47 @@ func itemsOf(m message) []item {
 		return out
 	}
 	return nil
+}
+
+// messagesOf is the conversation that items hold, as itemsOf made them:
+// an assistant's turn starts at its reasoning, or at its text or first call
+// after another message. A last turn with neither text nor calls stays out:
+// providers refuse an empty assistant message.
+func messagesOf(items []item) []message {
+	var out []message
+	for _, it := range items {
+		last := len(out) - 1
+		turn := last >= 0 && out[last].Role == "assistant"
+		switch it.Type {
+		case "reasoning":
+			out = append(out, message{Role: "assistant", Reasoning: it.Text, Signature: it.Signature})
+		case "function_call":
+			if !turn {
+				out = append(out, message{Role: "assistant"})
+			}
+			m := &out[len(out)-1]
+			m.Calls = append(m.Calls, toolCall{ID: it.CallID, Name: it.Name, Args: json.RawMessage(it.Arguments)})
+		case "function_call_output":
+			out = append(out, message{Role: "tool", CallID: it.CallID, Text: it.Output})
+		case "message":
+			var text strings.Builder
+			for _, p := range it.Parts {
+				text.WriteString(p.Text)
+			}
+			if it.Role != "assistant" {
+				out = append(out, message{Role: "user", Name: it.Name, Text: text.String()})
+				continue
+			}
+			if !turn || out[last].Text != "" || len(out[last].Calls) > 0 {
+				out = append(out, message{Role: "assistant"})
+			}
+			out[len(out)-1].Text = text.String()
+		}
+	}
+	if n := len(out); n > 0 && out[n-1].Role == "assistant" && out[n-1].Text == "" && len(out[n-1].Calls) == 0 {
+		out = out[:n-1]
+	}
+	return out
 }
 
 // transcript records a task's conversation as it goes. The system prompt is

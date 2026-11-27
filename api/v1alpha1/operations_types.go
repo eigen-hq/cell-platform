@@ -5,13 +5,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// Lifecycle of Backup, Restore and ChangeRequest.
-// +kubebuilder:validation:Enum=Pending;WaitingForApproval;Running;Completed;Failed;Succeeded;RolledBack;Rejected
+// Lifecycle of Backup, Restore, ChangeRequest and Task.
+// +kubebuilder:validation:Enum=Pending;WaitingForApproval;WaitingForInput;Running;Completed;Failed;Succeeded;RolledBack;Rejected
 type RunPhase string
 
 const (
 	RunPending            RunPhase = "Pending"
 	RunWaitingForApproval RunPhase = "WaitingForApproval"
+	RunWaitingForInput    RunPhase = "WaitingForInput"
 	RunRunning            RunPhase = "Running"
 	RunCompleted          RunPhase = "Completed"
 	RunFailed             RunPhase = "Failed"

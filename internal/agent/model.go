@@ -39,6 +39,9 @@ type message struct {
 	Calls []toolCall
 	// CallID is the call a tool message answers.
 	CallID string
+	// Name is the person who wrote a user message, a reply (E-99): the
+	// transcript keeps it, the model does not get it.
+	Name string
 	// Reasoning and Signature are the provider's reasoning on an assistant
 	// turn; they go back unchanged, since a provider may need them to go on.
 	Reasoning, Signature string

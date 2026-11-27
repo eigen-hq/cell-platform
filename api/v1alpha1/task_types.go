@@ -47,7 +47,8 @@ type TaskSpec struct {
 
 type TaskStatus struct {
 	// Pending until an agent claims it, Running while it works, then
-	// Succeeded or Failed.
+	// Succeeded, Failed, or WaitingForInput when the agent asked the person
+	// something. A reply makes it Pending again, for the same agent (E-99).
 	Phase      RunPhase     `json:"phase,omitempty"`
 	Assignee   string       `json:"assignee,omitempty"`
 	StartedAt  *metav1.Time `json:"startedAt,omitempty"`
@@ -60,6 +61,17 @@ type TaskStatus struct {
 	// proposed, or why it could not.
 	// +kubebuilder:validation:MaxLength=16384
 	Result string `json:"result,omitempty"`
+	// Reply is a person's last reply: the answer to the agent's question or
+	// a follow-up. The agent adds it to the task's transcript, which keeps
+	// every reply, and goes on (E-99).
+	Reply *TaskReply `json:"reply,omitempty"`
+}
+
+type TaskReply struct {
+	By string      `json:"by"`
+	At metav1.Time `json:"at"`
+	// +kubebuilder:validation:MaxLength=16384
+	Text string `json:"text"`
 }
 
 type TaskStep struct {
