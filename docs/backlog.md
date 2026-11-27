@@ -82,7 +82,7 @@ What is wanted and tried out happens in the office UI; the platform builds, oper
 |---|---|---|
 | Diagnosis of an app: pods, logs, events | running | |
 | Diagnosis by the ops agent | running | |
-| Metrics: CPU, RAM, disk per app and cell, history | current CPU and memory per container and machine running; disk and history open | Metrics component |
+| Metrics: CPU, RAM, disk per app and cell, history | CPU and memory per container and machine, now and over 1 h, 24 h or 7 d, running (E-87); disk history open | Metrics component |
 | Availability and response times per app | open | |
 | Map: wiring, traffic, outbound connections, agents | open | Metrics |
 | Findings with an agent action (e.g. unused or duplicate apps) | open | Usage numbers |

@@ -97,8 +97,9 @@ mkdir -p /etc/rancher/k3s
 config=/etc/rancher/k3s/config.yaml
 if [ "$role" = server ]; then
   # No ServiceLB: it takes 80 and 443 on every address of every machine;
-  # the ingress takes them on CELL_INGRESS_IP alone (E-53).
-  want=$(printf 'write-kubeconfig-mode: "600"\nnode-ip: %s\nflannel-iface: %s\nflannel-backend: wireguard-native\nembedded-registry: true\ndisable:\n  - servicelb\n' "$CELL_NODE_IP" "$iface")
+  # the ingress takes them on CELL_INGRESS_IP alone (E-53). No metrics
+  # server: it dials every machine's kubelet; the collectors of E-87 send.
+  want=$(printf 'write-kubeconfig-mode: "600"\nnode-ip: %s\nflannel-iface: %s\nflannel-backend: wireguard-native\nembedded-registry: true\ndisable:\n  - servicelb\n  - metrics-server\n' "$CELL_NODE_IP" "$iface")
 else
   want=$(printf 'node-ip: %s\nflannel-iface: %s\n' "$CELL_NODE_IP" "$iface")
 fi

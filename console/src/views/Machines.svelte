@@ -15,7 +15,10 @@
   import type { IconName } from "../lib/ui/icons";
   import Logo from "../lib/ui/Logo.svelte";
   import Tag from "../lib/ui/Tag.svelte";
+  import Spans from "../lib/ui/Spans.svelte";
   import Tile from "../lib/ui/Tile.svelte";
+  import UsageChart from "../lib/ui/UsageChart.svelte";
+  import { series, spanMs, type Span, type Usage } from "../lib/usage";
 
   type App = components["schemas"]["App"];
   type Node = components["schemas"]["Node"];
@@ -75,6 +78,35 @@
     timer = setInterval(load, 5000);
   });
   onDestroy(() => clearInterval(timer));
+
+  // What each machine used over the span, read again every minute.
+  let span = $state<Span>("24h");
+  let history = $state<Map<string, { end: number; usage?: Usage; failed?: string }>>(new Map());
+  const names = $derived(nodes?.map((m) => m.name).join(" ") ?? "");
+  $effect(() => {
+    const list = names ? names.split(" ") : [];
+    const range = span;
+    let gone = false;
+    async function read() {
+      const end = Date.now();
+      const got = await Promise.all(
+        list.map(async (name): Promise<[string, { end: number; usage?: Usage; failed?: string }]> => {
+          try {
+            return [name, { end, usage: must(await api.GET("/v0/nodes/{name}/usage", { params: { path: { name }, query: { range } } })) }];
+          } catch (e) {
+            return [name, { end, failed: e instanceof Error ? e.message : String(e) }];
+          }
+        }),
+      );
+      if (!gone) history = new Map(got);
+    }
+    read();
+    const t = setInterval(read, 60000);
+    return () => {
+      gone = true;
+      clearInterval(t);
+    };
+  });
 
   const gb = (b: number) => {
     const v = b / 2 ** 30;
@@ -148,6 +180,7 @@
     <div class="sec-head">
       <h2 id="h-where">What runs where</h2>
       <span>Each machine, its load and its apps.</span>
+      <span class="end"><Spans bind:value={span} /></span>
     </div>
     <div class="board">
       <div class="map">
@@ -180,9 +213,21 @@
               {/each}
             </div>
 
+            {#if history.get(m.name)}
+              {@const h = history.get(m.name)!}
+              {#if h.usage}
+                <div class="history">
+                  <UsageChart label="Processor" points={series(h.usage, "cpu")} step={h.usage.step} end={h.end} span={spanMs(span)} max={m.cpu} format={(v) => `${num(v)} cores`} />
+                  <UsageChart label="Memory" points={series(h.usage, "memory")} step={h.usage.step} end={h.end} span={spanMs(span)} max={m.memory} format={gb} />
+                </div>
+              {:else}
+                <p class="quiet-note">No history: {h.failed}</p>
+              {/if}
+            {/if}
+
             {#if m.unmeasured}
               <p class="hint">
-                No load from this machine: {server ? short(server.name) : "the server"} cannot reach it on TCP 10250. Open TCP 6443, 10250, 5001 and UDP 51820 on {short(m.name)} for the other machines, in its own firewall and in the provider's.
+                No load from this machine: its collector sends nothing to the cell's store. It starts with the machine; if it does not run, the machine lacks room or cannot reach {server ? short(server.name) : "the server"}.
               </p>
             {/if}
 
@@ -383,6 +428,16 @@
   }
   .track span.hot {
     background: var(--color-warn);
+  }
+  .history {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 14px 18px;
+  }
+  .quiet-note {
+    margin: 0;
+    font-size: 12.5px;
+    color: var(--color-muted);
   }
   .hint {
     margin: 0;

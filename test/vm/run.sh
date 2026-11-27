@@ -203,8 +203,9 @@ echo "ok: snapshot ready"
 kc delete pod/snap-test volumesnapshot/snap-test pvc/snap-test --wait >/dev/null
 
 log "resources of the empty cell"
-sleep 60 # let metrics-server collect
-kc top node
-kc top pods -A --sort-by=memory | head -25
+sleep 60 # let the collectors send (E-87)
+store() { kc -n cell-system exec deploy/cell-metrics -- wget -qO- --post-data "query=$1" http://127.0.0.1:8428/api/v1/query; echo; }
+store 'max by (node) (last_over_time(node_memory_working_set_bytes[1m]))'
+store 'topk(25, sum by (namespace, pod) (last_over_time(container_memory_working_set_bytes[1m])))'
 
 [ "${1:-}" = keep ] || "$limactl" delete -f "$vm1" "$vm2" >/dev/null

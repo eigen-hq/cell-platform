@@ -17,7 +17,10 @@
   import Icon from "../lib/ui/Icon.svelte";
   import Logo from "../lib/ui/Logo.svelte";
   import Tag from "../lib/ui/Tag.svelte";
+  import Spans from "../lib/ui/Spans.svelte";
   import Tile from "../lib/ui/Tile.svelte";
+  import UsageChart from "../lib/ui/UsageChart.svelte";
+  import { series, spanMs, type Span, type Usage } from "../lib/usage";
   import Composer from "./Composer.svelte";
   import Slip from "./Slip.svelte";
 
@@ -75,6 +78,35 @@
     const t = setInterval(load, 5000);
     return () => clearInterval(t);
   });
+
+  // What all of the app's containers used over the span, for admins,
+  // read again every minute.
+  let span = $state<Span>("24h");
+  let history = $state<{ end: number; usage?: Usage; failed?: string } | null>(null);
+  $effect(() => {
+    if (!admin) return;
+    const name = app.name;
+    const range = span;
+    let gone = false;
+    async function read() {
+      const end = Date.now();
+      let h: { end: number; usage?: Usage; failed?: string };
+      try {
+        h = { end, usage: must(await api.GET("/v0/apps/{name}/usage", { params: { path: { name }, query: { range } } })) };
+      } catch (e) {
+        h = { end, failed: why(e) };
+      }
+      if (!gone) history = h;
+    }
+    read();
+    const t = setInterval(read, 60000);
+    return () => {
+      gone = true;
+      clearInterval(t);
+    };
+  });
+  // An app has no fixed size: its axis reaches a little past its peak.
+  const roof = (pts: { v: number }[]) => 1.15 * pts.reduce((m, p) => Math.max(m, p.v), 0) || 1;
 
   const why = (e: unknown) => (e instanceof Error ? e.message : String(e));
   // Runs an action, then says what became of it.
@@ -369,7 +401,18 @@
     <div class="sec-head">
       <h2 id="h-runs">What runs</h2>
       <span>pods and their containers</span>
+      <span class="end"><Spans bind:value={span} /></span>
     </div>
+    {#if history?.usage}
+      {@const cpu = series(history.usage, "cpu")}
+      {@const memory = series(history.usage, "memory")}
+      <div class="history">
+        <UsageChart label="Processor, all containers" points={cpu} step={history.usage.step} end={history.end} span={spanMs(span)} max={roof(cpu)} format={(v) => `${cores(v)} cores`} />
+        <UsageChart label="Memory, all containers" points={memory} step={history.usage.step} end={history.end} span={spanMs(span)} max={roof(memory)} format={mb} />
+      </div>
+    {:else if history?.failed}
+      <p class="quiet-note">No history: {history.failed}</p>
+    {/if}
     {#if pods}
       {#if pods.length}
         <ul class="list">
@@ -832,5 +875,16 @@
       grid-column: 2;
       justify-content: start;
     }
+  }
+  .history {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px 28px;
+    margin-bottom: 18px;
+  }
+  .quiet-note {
+    margin: 0 0 14px;
+    font-size: 12.5px;
+    color: var(--color-muted);
   }
 </style>

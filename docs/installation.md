@@ -123,7 +123,7 @@ Any mail service with SMTP works, for example your company's mail server or a ma
 
 ## Add more machines
 
-Prerequisite: the new machine meets the [requirements](#requirements) (x86_64 or arm64). In the same private network as the first one, it needs no open ports. Without a private network, the machines talk over their public addresses; then open TCP 6443, 10250, 5001 and UDP 51820 on every machine, **only for the addresses of the other machines**. Open them in the machine's own firewall and in the provider's network firewall, if it has one (cloud firewall, security group): the join itself works without them, but the cell then cannot measure the machine's load or share images with it. The console's Machines page says so on the machine's card.
+Prerequisite: the new machine meets the [requirements](#requirements) (x86_64 or arm64). In the same private network as the first one, it needs no open ports. Without a private network, the machines talk over their public addresses; then open TCP 6443, 5001 and UDP 51820 on every machine, **only for the addresses of the other machines**. Open them in the machine's own firewall and in the provider's network firewall, if it has one (cloud firewall, security group): the join itself works without them, but the machines then cannot share images. The machine's load needs no open port: its collector sends it to the cell.
 
 1. In the console: *Machines*, *Add machine*.
 2. Run the command shown on the new machine.
@@ -188,7 +188,7 @@ You can run the installation again at any time; it changes only what is missing.
 | 443/TCP | Internet | Console, sign-in, API, all apps, mesh |
 | 3478/UDP | Internet | Mesh: direct connections between devices and cell |
 | 25/TCP outbound | The cell to the internet | The cell's own mail server delivers mail; many providers open it only on request |
-| 6443, 10250, 5001/TCP, 51820/UDP | Other machines of the cell only | Traffic between the machines (private network or public addresses). Never open to the internet. |
+| 6443, 5001/TCP, 51820/UDP | Other machines of the cell only | Traffic between the machines (private network or public addresses). Never open to the internet. |
 
 ### Settings
 

@@ -51,7 +51,7 @@ source "$here/versions.env"
 export BRIDGE_IMAGE=${BRIDGE_IMAGE:-}
 case $CELL_DOMAIN in *.localhost | localhost) [ -n "$BRIDGE_IMAGE" ] || die "BRIDGE_IMAGE must be set for *.localhost cells" ;; esac
 export CELL_JOIN_SERVER=${CELL_JOIN_SERVER:-}
-export CELL_DOMAIN AUTHENTIK_CHART_VERSION LONGHORN_VERSION OPERATOR_IMAGE RESTIC_VERSION RCLONE_VERSION AGENTGATEWAY_VERSION POSTGRES_VERSION AUTHENTIK_DIGEST POSTFIX_VERSION
+export CELL_DOMAIN AUTHENTIK_CHART_VERSION LONGHORN_VERSION OPERATOR_IMAGE RESTIC_VERSION RCLONE_VERSION AGENTGATEWAY_VERSION POSTGRES_VERSION AUTHENTIK_DIGEST POSTFIX_VERSION VICTORIAMETRICS_VERSION
 export CELL_TLS=${CELL_TLS:-selfsigned}
 export CELL_ACME_EMAIL=${CELL_ACME_EMAIL:-}
 export CELL_ACME_SERVER=${CELL_ACME_SERVER:-https://acme-v02.api.letsencrypt.org/directory}
@@ -370,6 +370,15 @@ else
   apply mail.yaml
   kubectl -n cell-system rollout status deploy/mail --timeout=5m >/dev/null
 fi
+
+# Every machine sends its load to the store; nothing dials the machines
+# (E-87). node.sh turns off the metrics server k3s brings; a cell from
+# before may still hold its API registration.
+step "Metrics (VictoriaMetrics $VICTORIAMETRICS_VERSION)"
+kubectl delete apiservice v1beta1.metrics.k8s.io --ignore-not-found >/dev/null
+apply metrics.yaml
+kubectl -n cell-system rollout status deploy/cell-metrics --timeout=5m >/dev/null
+kubectl -n cell-system rollout status ds/cell-metrics-collector --timeout=5m >/dev/null
 
 step "Platform API"
 apply change-approval.yaml

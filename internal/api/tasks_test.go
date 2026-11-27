@@ -13,7 +13,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	fieldpath "k8s.io/apimachinery/pkg/util/validation/field"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -232,21 +231,15 @@ func TestCreateTask(t *testing.T) {
 // The metrics API's usage lands on the container of the same pod and name.
 func TestPodUsage(t *testing.T) {
 	pods := []podView{{Name: "notes-0", Containers: []containerView{{Name: "notes"}, {Name: "proxy"}}}}
-	metrics := []unstructured.Unstructured{
-		{Object: map[string]any{"metadata": map[string]any{"name": "notes-0"}, "containers": []any{
-			map[string]any{"name": "notes", "usage": map[string]any{"cpu": "250m", "memory": "100Mi"}},
-		}}},
-		{Object: map[string]any{"metadata": map[string]any{"name": "gone-0"}, "containers": []any{
-			map[string]any{"name": "notes", "usage": map[string]any{"cpu": "1", "memory": "1Gi"}},
-		}}},
-	}
-	podUsage(pods, metrics)
+	cpu := map[string]float64{"notes-0/notes": 0.25, "notes-0/proxy": 0.1, "gone-0/notes": 1}
+	mem := map[string]float64{"notes-0/notes": 100 << 20, "gone-0/notes": 1 << 30}
+	podUsage(pods, cpu, mem)
 	c := pods[0].Containers
 	if c[0].CPUUsed == nil || *c[0].CPUUsed != 0.25 || c[0].MemoryUsed == nil || *c[0].MemoryUsed != 100<<20 {
 		t.Errorf("notes: %+v", c[0])
 	}
 	if c[1].CPUUsed != nil || c[1].MemoryUsed != nil {
-		t.Errorf("unmeasured proxy: %+v", c[1])
+		t.Errorf("half-measured proxy: %+v", c[1])
 	}
 }
 

@@ -40,8 +40,10 @@ var clusterWide = map[string][]string{
 		"cell.internal/restores:get,list,watch",
 		"cell.internal/changerequests:get,list,watch,create,update",
 		"cell.internal/tasks:get,list,watch,create", "cell.internal/tasks/status:update",
-		"/namespaces:get", "/nodes:list", "metrics.k8s.io/nodes:list",
+		"/namespaces:get", "/nodes:get,list",
 	},
+	// The kubelet's /metrics/* on every machine (E-87).
+	"cell-metrics-collector": {"/nodes/metrics:get"},
 }
 
 // The namespaces an account holds a Role in.

@@ -68,6 +68,7 @@ A cell is a k3s cluster with everything a customer needs, on one or more machine
 | Identity | One account for all apps, groups, agent accounts | authentik (assumption) |
 | Databases | One Postgres database per app, continuous backup | CloudNativePG (assumption) |
 | Volumes | Files of the apps, snapshots before changes | Longhorn (assumption, checked on a real VM) |
+| Metrics | Processor and memory of every machine and container, 30 days | VictoriaMetrics: a collector per machine sends to one store (E-87) |
 | Object storage | S3 for apps that need it | Open, only on demand |
 | Backup | Daily backup outside the cell, restore | Volume backups and database archive into an S3 bucket |
 | Platform API | The only door for UI, CLI and agents | Own development, thin layer over the resources |
@@ -164,7 +165,7 @@ In addition there is the one MCP endpoint of the gateway for the agents in the U
 - Credentials are created in the cell and stay there as secrets.
 - The agent service has no cluster permissions, only an API account.
 - Join keys are valid for one hour. The API may create only such keys in `kube-system` and may not read secrets (role `cell-api-join-keys` and the admission policy of the same name).
-- Only 80 and 443 (TCP) and 3478 (UDP) on the address of the cell are reachable from the internet (E-57). The machines use the ports between machines (6443, 10250, 5001 TCP, 51820 UDP) only in their shared network; the firewall blocks them from outside. They still listen on all addresses of the machine: without a firewall they would be open (6443 and 10250 require certificates, WireGuard requires keys, the mirror on 5001 is unchecked).
+- Only 80 and 443 (TCP) and 3478 (UDP) on the address of the cell are reachable from the internet (E-57). The machines use the ports between machines (6443, 5001 TCP, 51820 UDP) only in their shared network; the load of each machine goes out from the machine itself (E-87); the firewall blocks them from outside. They still listen on all addresses of the machine: without a firewall they would be open (6443 and 10250 require certificates, WireGuard requires keys, the mirror on 5001 is unchecked).
 - The mesh is running (E-56); "apps reachable only in the mesh" is not built yet.
 
 ## Not built yet

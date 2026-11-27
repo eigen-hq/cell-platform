@@ -38,14 +38,12 @@ rules:
   - apiGroups: [cell.internal]
     resources: [apps]
     verbs: [create]
-  # The machines of the cell (E-44) and what they use; their disks come
-  # from Longhorn (Role in storage-longhorn-classes.yaml).
+  # The machines of the cell (E-44). What they use comes from the metrics
+  # store (E-87), their disks from Longhorn (Role in
+  # storage-longhorn-classes.yaml).
   - apiGroups: [""]
     resources: [nodes]
-    verbs: [list]
-  - apiGroups: [metrics.k8s.io]
-    resources: [nodes]
-    verbs: [list]
+    verbs: [get, list]
 ---
 # What admins and agents read when an app is in trouble, in the app's
 # namespace only: the operator binds it there (RoleBinding cell-api, E-70).
@@ -60,10 +58,6 @@ rules:
   - apiGroups: [""]
     resources: [pods/log]
     verbs: [get]
-  # What the containers use, next to what their spec allows.
-  - apiGroups: [metrics.k8s.io]
-    resources: [pods]
-    verbs: [list]
 ---
 # Which machines the cell's own services run on.
 apiVersion: rbac.authorization.k8s.io/v1

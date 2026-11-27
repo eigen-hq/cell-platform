@@ -105,8 +105,11 @@ type Server struct {
 	// ModelsMetrics is the model gateway's metrics address; empty means the
 	// one in the cell.
 	ModelsMetrics string
-	Now           func() time.Time
-	Log           *slog.Logger
+	// Metrics is the metrics store's address; empty means the one in the
+	// cell.
+	Metrics string
+	Now     func() time.Time
+	Log     *slog.Logger
 }
 
 // route is one operation of the API; the tests check the table against
@@ -160,12 +163,14 @@ func (s *Server) routes() []route {
 		{"GET", "/v0/apps/{name}/pods", RoleAgent, s.listPods},
 		{"GET", "/v0/apps/{name}/logs", RoleAgent, s.appLogs},
 		{"GET", "/v0/apps/{name}/events", RoleAgent, s.appEvents},
+		{"GET", "/v0/apps/{name}/usage", RoleAgent, s.appUsage},
 		{"GET", "/v0/tasks", RoleAgent, s.listTasks},
 		{"POST", "/v0/tasks", RoleAdmin, s.createTask},
 		{"GET", "/v0/tasks/{name}", RoleAgent, s.getTask},
 		{"POST", "/v0/tasks/{name}/claim", RoleAgent, s.claimTask},
 		{"POST", "/v0/tasks/{name}/finish", RoleAgent, s.finishTask},
 		{"GET", "/v0/nodes", RoleViewer, s.listNodes},
+		{"GET", "/v0/nodes/{name}/usage", RoleViewer, s.nodeHistory},
 		{"POST", "/v0/nodes/joins", RoleAdmin, s.createJoin},
 		{"GET", "/v0/nodes/join.sh", "", s.joinScript},
 		{"GET", "/v0/backup-target", RoleViewer, s.getBackupTarget},

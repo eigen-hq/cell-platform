@@ -58,6 +58,10 @@ func TestNodes(t *testing.T) {
 		installed("notes", "oidc"), installed("files", "oidc"), installed("fresh", "oidc"),
 		pod("app-notes", "notes-0", "b-worker"), pod("app-notes", "notes-1", "b-worker"), pod("app-files", "files-0", "z-server"),
 		pod("cell-system", "cell-api-0", "z-server"), pod("kube-system", "coredns-0", "b-worker"))
+	_, h.server.Metrics = newFakeStore(t, map[string]string{
+		"node_cpu_usage_seconds_total":  `[{"metric":{"node":"z-server"},"value":[1795000000,"0.5"]},{"metric":{"node":"gone"},"value":[1795000000,"1"]}]`,
+		"node_memory_working_set_bytes": `[{"metric":{"node":"z-server"},"value":[1795000000,"1073741824"]}]`,
+	})
 	code, body := h.do("GET", "/v0/nodes", "agent", nil)
 	list, _ := body.([]any)
 	if code != 200 || len(list) != 2 {
@@ -68,6 +72,9 @@ func TestNodes(t *testing.T) {
 		first["cpu"] != 4.0 || first["memory"] != float64(8<<30) || second["role"] != "agent" || second["ready"] != false ||
 		fmt.Sprint(first["apps"]) != "[files]" || first["system"] != true || fmt.Sprint(second["apps"]) != "[notes]" || second["system"] != false {
 		t.Errorf("nodes: %v", list)
+	}
+	if first["cpuUsed"] != 0.5 || first["memoryUsed"] != float64(1<<30) || second["cpuUsed"] != nil || second["memoryUsed"] != nil {
+		t.Errorf("usage: %v", list)
 	}
 	if code, _ := h.do("GET", "/v0/nodes", "none", nil); code != 403 {
 		t.Errorf("no role lists nodes: %d", code)

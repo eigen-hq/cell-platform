@@ -10,9 +10,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -101,33 +98,17 @@ func memory(l corev1.ResourceList) *int64 {
 	return &b
 }
 
-// podUsage adds what each container uses from the metrics API's PodMetrics.
-func podUsage(pods []podView, metrics []unstructured.Unstructured) {
-	byPod := map[string]*podView{}
+// podUsage adds what each container uses, keyed by pod/container.
+func podUsage(pods []podView, cpu, mem map[string]float64) {
 	for i := range pods {
-		byPod[pods[i].Name] = &pods[i]
-	}
-	for _, m := range metrics {
-		p := byPod[m.GetName()]
-		if p == nil {
-			continue
-		}
-		list, _, _ := unstructured.NestedSlice(m.Object, "containers")
-		for _, item := range list {
-			mc, _ := item.(map[string]any)
-			name, _, _ := unstructured.NestedString(mc, "name")
-			cpu, _, _ := unstructured.NestedString(mc, "usage", "cpu")
-			mem, _, _ := unstructured.NestedString(mc, "usage", "memory")
-			c, errC := resource.ParseQuantity(cpu)
-			b, errM := resource.ParseQuantity(mem)
-			if errC != nil || errM != nil {
-				continue
-			}
-			for j := range p.Containers {
-				if p.Containers[j].Name == name {
-					used, bytes := float64(c.MilliValue())/1000, b.Value()
-					p.Containers[j].CPUUsed, p.Containers[j].MemoryUsed = &used, &bytes
-				}
+		for j := range pods[i].Containers {
+			c := &pods[i].Containers[j]
+			key := pods[i].Name + "/" + c.Name
+			used, okC := cpu[key]
+			m, okM := mem[key]
+			if okC && okM {
+				bytes := int64(m)
+				c.CPUUsed, c.MemoryUsed = &used, &bytes
 			}
 		}
 	}
@@ -173,13 +154,12 @@ func (s *Server) listPods(w http.ResponseWriter, r *http.Request, _ *Caller) err
 	for i := range pods {
 		out = append(out, viewPod(&pods[i]))
 	}
-	// The usage is optional: without the metrics API the pods come without.
-	metrics := &unstructured.UnstructuredList{}
-	metrics.SetGroupVersionKind(schema.GroupVersionKind{Group: "metrics.k8s.io", Version: "v1beta1", Kind: "PodMetricsList"})
-	if err := s.Kube.List(r.Context(), metrics, client.InNamespace(ns)); err != nil {
-		s.log().Debug("no pod metrics", "namespace", ns, "error", err)
+	// The usage is optional: without the metrics store the pods come without.
+	cpu, mem, err := s.containersNow(r.Context(), ns)
+	if err != nil {
+		s.log().Warn("no container usage from the metrics store", "namespace", ns, "error", err)
 	}
-	podUsage(out, metrics.Items)
+	podUsage(out, cpu, mem)
 	writeJSON(w, http.StatusOK, out)
 	return nil
 }

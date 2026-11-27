@@ -464,6 +464,23 @@ paths:
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
+  /v0/apps/{name}/usage:
+    parameters: [{$ref: "#/components/parameters/name"}]
+    get:
+      operationId: appUsage
+      description: What all containers of the app used over a span, from the cell's metrics store (E-87).
+      parameters:
+        - {name: range, in: query, schema: {type: string, enum: [1h, 24h, 7d], default: 24h}}
+      responses:
+        default: {$ref: "#/components/responses/Error"}
+        "200":
+          description: The span in 120 steps.
+          content: {application/json: {schema: {$ref: "#/components/schemas/Usage"}}}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
   /v0/tasks:
     get:
       operationId: listTasks
@@ -596,6 +613,23 @@ paths:
           content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/Node"}}}}
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
+  /v0/nodes/{name}/usage:
+    parameters: [{$ref: "#/components/parameters/name"}]
+    get:
+      operationId: nodeUsage
+      description: What the machine used over a span, from the cell's metrics store (E-87).
+      parameters:
+        - {name: range, in: query, schema: {type: string, enum: [1h, 24h, 7d], default: 24h}}
+      responses:
+        default: {$ref: "#/components/responses/Error"}
+        "200":
+          description: The span in 120 steps.
+          content: {application/json: {schema: {$ref: "#/components/schemas/Usage"}}}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
   /v0/nodes/joins:
     post:
       operationId: createJoin
@@ -938,8 +972,8 @@ components:
                   exitCode: {type: integer}
                   message: {type: string}
                   at: {type: string, format: date-time}
-              cpuUsed: {type: number, description: "Cores in use now, from the metrics API; absent when the machine sends no load."}
-              memoryUsed: {type: integer, format: int64, description: "Bytes in use now (working set), from the metrics API."}
+              cpuUsed: {type: number, description: "Cores in use now, from the metrics store; absent when the machine sends no load."}
+              memoryUsed: {type: integer, format: int64, description: "Bytes in use now (working set), from the metrics store."}
               cpuRequest: {type: number, description: "Cores the spec reserves on the machine."}
               cpuLimit: {type: number, description: "Cores the container may use at most; more is throttled."}
               memoryRequest: {type: integer, format: int64, description: "Bytes the spec reserves on the machine."}
@@ -1019,12 +1053,29 @@ components:
         cpuUsed: {type: number, description: Cores in use; absent without a measurement.}
         memoryUsed: {type: integer, format: int64, description: Bytes in use; absent without a measurement.}
         diskUsed: {type: integer, format: int64, description: Bytes of `disk` in use; absent without Longhorn.}
-        unmeasured: {type: boolean, description: "Ready for minutes, yet without the usage the other machines report: the server reads it over TCP 10250, so a firewall likely closes that port to the server."}
+        unmeasured: {type: boolean, description: "Ready for minutes, yet without the usage the other machines report: the collector on the machine sends nothing."}
         apps: {type: array, items: {type: string}, description: Apps with a pod on the machine.}
         system: {type: boolean, description: The cell's own services run here.}
         os: {type: string}
         version: {type: string, description: Kubernetes version of the machine.}
         joined: {type: string, format: date-time}
+    Usage:
+      type: object
+      additionalProperties: false
+      required: [step, points]
+      properties:
+        step: {type: integer, description: Seconds per point; each point averages its step.}
+        points:
+          type: array
+          description: Oldest first. A point lacks a figure that was not measured then.
+          items:
+            type: object
+            additionalProperties: false
+            required: [at]
+            properties:
+              at: {type: string, format: date-time}
+              cpu: {type: number, description: Cores in use.}
+              memory: {type: integer, format: int64, description: Bytes in use (working set).}
     Join:
       type: object
       additionalProperties: false

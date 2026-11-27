@@ -13,6 +13,7 @@ if ! k3d cluster get "$CELL_NAME" >/dev/null 2>&1; then
     --image "rancher/k3s:${K3S_VERSION/+/-}" \
     -p "127.0.0.1:80:80@loadbalancer" -p "127.0.0.1:443:443@loadbalancer" \
     --api-port 127.0.0.1:6550 \
+    --k3s-arg "--disable=metrics-server@server:*" \
     --kubeconfig-update-default=false --kubeconfig-switch-context=false \
     --wait
 fi

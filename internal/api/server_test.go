@@ -245,6 +245,7 @@ func newHarnessWith(t *testing.T, funcs interceptor.Funcs, objs ...client.Object
 		OpenAPI: spec,
 		Now:     func() time.Time { return time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC) },
 	}
+	_, s.Metrics = newFakeStore(t, nil) // an empty store, not the cell's address
 	loader := openapi3.NewLoader()
 	doc, err := loader.LoadFromData(spec)
 	if err != nil {

@@ -1,0 +1,222 @@
+# The cell's metrics (E-87): a collector on every machine reads its own
+# machine's kubelet (processor and memory of the machine and of every
+# container) and sends the figures to the store on the server. Every
+# connection starts on the machine, so a firewall in front of it needs no
+# port open. The store keeps 30 days; the API reads it, nobody else.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cell-metrics-collector
+  namespace: cell-system
+---
+# The kubelet's /metrics/* and nothing else: no /stats, logs or exec.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cell-metrics-collector
+rules:
+  - apiGroups: [""]
+    resources: [nodes/metrics]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cell-metrics-collector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cell-metrics-collector
+subjects:
+  - kind: ServiceAccount
+    name: cell-metrics-collector
+    namespace: cell-system
+---
+# %{...} is filled in by the collector from its environment. The kubelet
+# stamps its samples itself; its stamps make the rates exact.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cell-metrics-collector
+  namespace: cell-system
+data:
+  scrape.yaml: |
+    scrape_configs:
+      - job_name: kubelet
+        scrape_interval: 15s
+        scheme: https
+        metrics_path: /metrics/resource
+        honor_timestamps: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        static_configs:
+          - targets: ["%{NODE_IP}:10250"]
+            labels:
+              node: "%{NODE_NAME}"
+        metric_relabel_configs:
+          - action: keep
+            source_labels: [__name__]
+            regex: (node|container)_(cpu_usage_seconds_total|memory_working_set_bytes)
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: cell-metrics-collector
+  namespace: cell-system
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cell-metrics-collector
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cell-metrics-collector
+    spec:
+      serviceAccountName: cell-metrics-collector
+      automountServiceAccountToken: true
+      # Every machine, whatever it is marked for.
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: collector
+          image: victoriametrics/vmagent:${VICTORIAMETRICS_VERSION}
+          args:
+            - -promscrape.config=/config/scrape.yaml
+            - -remoteWrite.url=http://cell-metrics.cell-system.svc.cluster.local:8428/api/v1/write
+            # While the store is away the figures wait here, up to this much.
+            - -remoteWrite.tmpDataPath=/queue
+            - -remoteWrite.maxDiskUsagePerURL=64MiB
+            # Its own HTTP side stays inside the pod: nobody else pushes
+            # figures through it.
+            - -httpListenAddr=127.0.0.1:8429
+          env:
+            - name: NODE_IP
+              valueFrom:
+                fieldRef: {fieldPath: status.hostIP}
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef: {fieldPath: spec.nodeName}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: queue
+              mountPath: /queue
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 128Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities: {drop: [ALL]}
+      volumes:
+        - name: config
+          configMap:
+            name: cell-metrics-collector
+        # The queue writes files of up to 528 MiB and drops the oldest figures
+        # past 64 MiB only by moving its reader, so a long outage of the store
+        # needs room for one whole file. Nothing is reserved up front.
+        - name: queue
+          emptyDir:
+            sizeLimit: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cell-metrics
+  namespace: cell-system
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cell-metrics
+  namespace: cell-system
+spec:
+  replicas: 1
+  # One writer per volume: the old store stops before the new one starts.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cell-metrics
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cell-metrics
+    spec:
+      automountServiceAccountToken: false
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: "true"
+      securityContext:
+        fsGroup: 65534
+      containers:
+        - name: store
+          image: victoriametrics/victoria-metrics:${VICTORIAMETRICS_VERSION}
+          args:
+            - -storageDataPath=/storage
+            - -retentionPeriod=30d
+            - -httpListenAddr=:8428
+          ports:
+            - name: http
+              containerPort: 8428
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+          volumeMounts:
+            - name: storage
+              mountPath: /storage
+          resources:
+            requests: {cpu: 20m, memory: 64Mi}
+            limits: {memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities: {drop: [ALL]}
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: cell-metrics
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cell-metrics
+  namespace: cell-system
+spec:
+  selector:
+    app.kubernetes.io/name: cell-metrics
+  ports:
+    - name: http
+      port: 8428
+      targetPort: http
+---
+# The store has no login: only the collectors write and only the API reads.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cell-metrics
+  namespace: cell-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cell-metrics
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cell-metrics-collector
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cell-api
+      ports:
+        - port: 8428

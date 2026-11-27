@@ -20,7 +20,7 @@ import (
 var viewerRoutes = []string{
 	"GET /v0/catalog", "GET /v0/catalog/{name}", "GET /v0/apps", "GET /v0/apps/{name}",
 	"GET /v0/apps/{name}/backups", "GET /v0/apps/{name}/access", "GET /v0/changes", "GET /v0/changes/{name}",
-	"GET /v0/events", "GET /v0/nodes", "GET /v0/backup-target",
+	"GET /v0/events", "GET /v0/nodes", "GET /v0/nodes/{name}/usage", "GET /v0/backup-target",
 }
 
 // Every read open to viewers, with the fixtures of TestViewerRedaction.

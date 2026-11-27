@@ -10,7 +10,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -53,8 +52,7 @@ type nodeView struct {
 	MemoryUsed *int64   `json:"memoryUsed,omitempty"` // bytes
 	DiskUsed   *int64   `json:"diskUsed,omitempty"`   // bytes, of Disk
 	// Unmeasured: ready for a while, yet without the usage the other
-	// machines report. The metrics come from the server's side over
-	// TCP 10250; a firewall that closes it to the server is the usual cause.
+	// machines report: the machine's collector sends nothing (E-87).
 	Unmeasured bool `json:"unmeasured,omitempty"`
 	// Apps with a pod on the machine; System: the cell's own services run there.
 	Apps    []string  `json:"apps"`
@@ -150,29 +148,21 @@ func (s *Server) listNodes(w http.ResponseWriter, r *http.Request, _ *Caller) er
 }
 
 // nodeUsage adds what the machines use: processor and memory from the
-// metrics API, disk from Longhorn (cells on one's own machines). Either may
+// metrics store, disk from Longhorn (cells on one's own machines). Either may
 // be missing, a local cell has no Longhorn; then the view leaves it out.
 func (s *Server) nodeUsage(r *http.Request, nodes map[string]*nodeView) {
 	ctx := r.Context()
-	metrics := &unstructured.UnstructuredList{}
-	metrics.SetGroupVersionKind(schema.GroupVersionKind{Group: "metrics.k8s.io", Version: "v1beta1", Kind: "NodeMetricsList"})
-	if err := s.Kube.List(ctx, metrics); err != nil {
-		s.log().Debug("no node metrics", "error", err)
+	cpu, mem, err := s.nodesNow(ctx)
+	if err != nil {
+		s.log().Warn("no machine usage from the metrics store", "error", err)
 	}
-	for _, m := range metrics.Items {
-		v := nodes[m.GetName()]
-		cpu, _, _ := unstructured.NestedString(m.Object, "usage", "cpu")
-		mem, _, _ := unstructured.NestedString(m.Object, "usage", "memory")
-		if v == nil || cpu == "" || mem == "" {
-			continue
+	for name, v := range nodes {
+		c, okC := cpu[name]
+		m, okM := mem[name]
+		if okC && okM {
+			b := int64(m)
+			v.CPUUsed, v.MemoryUsed = &c, &b
 		}
-		c, errC := resource.ParseQuantity(cpu)
-		b, errM := resource.ParseQuantity(mem)
-		if errC != nil || errM != nil {
-			continue
-		}
-		cores, bytes := float64(c.MilliValue())/1000, b.Value()
-		v.CPUUsed, v.MemoryUsed = &cores, &bytes
 	}
 	disks := &unstructured.UnstructuredList{}
 	disks.SetGroupVersionKind(schema.GroupVersionKind{Group: "longhorn.io", Version: "v1beta2", Kind: "NodeList"})
@@ -199,11 +189,12 @@ func (s *Server) nodeUsage(r *http.Request, nodes map[string]*nodeView) {
 }
 
 // metricsGrace is how long a machine may be ready without a measurement:
-// the metrics server scrapes every 15 s and needs two scrapes.
+// its collector starts with the machine, reads every 15 s and the processor
+// needs two readings.
 const metricsGrace = 2 * time.Minute
 
 // markUnmeasured flags ready machines without a measurement while others
-// have one; without any, the metrics server itself is away.
+// have one; without any, the metrics store itself is away.
 func markUnmeasured(nodes []nodeView, now time.Time) {
 	if !slices.ContainsFunc(nodes, func(v nodeView) bool { return v.CPUUsed != nil }) {
 		return
