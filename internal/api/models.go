@@ -91,7 +91,14 @@ func (s *Server) setModels(w http.ResponseWriter, r *http.Request, _ *Caller) er
 	// new address would go wherever an admin points it. The status may lag
 	// behind the settings, so the key is kept only on top of the version the
 	// status was made from.
-	keep := p.APIKey == "" && before.Provider == p.Provider && before.BaseURL == p.BaseURL && version != ""
+	// No address is Anthropic's own.
+	address := func(u string) string {
+		if u == "" && p.Provider == cell.ProviderAnthropic {
+			return anthropicURL
+		}
+		return u
+	}
+	keep := p.APIKey == "" && before.Provider == p.Provider && address(before.BaseURL) == address(p.BaseURL) && version != ""
 	if p.APIKey == "" && p.Provider == cell.ProviderAnthropic && (!keep || !before.Configured) {
 		return errorf(http.StatusBadRequest, "apiKey: the provider's key")
 	}
@@ -248,12 +255,14 @@ func tokenUsage(in io.Reader) ([]AccountUsage, error) {
 
 // checkModels lists the provider's models with the key. Only the status
 // goes back: the provider's answer could hold the key.
+const anthropicURL = "https://api.anthropic.com"
+
 func checkModels(ctx context.Context, p cell.ModelProvider) error {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	base := p.BaseURL
 	if base == "" {
-		base = "https://api.anthropic.com"
+		base = anthropicURL
 	}
 	path := "/models"
 	if p.Provider == cell.ProviderAnthropic {

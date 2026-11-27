@@ -58,6 +58,14 @@ func TestSetModels(t *testing.T) {
 	if d := settings(); string(d["apiKey"]) != "k1" || string(d["model"]) != "claude-sonnet-5-5" {
 		t.Errorf("kept %v", d)
 	}
+	// No address is Anthropic's own: a limit alone keeps the key.
+	status.Data = map[string]string{cell.ModelsStatusKey: `{"configured":true,"provider":"anthropic","baseUrl":"https://api.anthropic.com","model":"claude-sonnet-5-5"}`, cell.ModelsVersionKey: secret().ResourceVersion}
+	if err := h.kube.Update(ctx, status); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := h.do("PUT", "/v0/models", "admin", map[string]any{"model": "claude-sonnet-5-5", "tokensPerHour": 30}); code != 200 || checks != 1 || string(settings()["apiKey"]) != "k1" {
+		t.Errorf("limit only: %d %v, %d checks", code, body, checks)
+	}
 	// The status lags behind: another provider was set since. Its key must
 	// not go to the one the status still tells.
 	other := secret()
