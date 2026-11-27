@@ -51,8 +51,8 @@ func (tc *testCell) cellAgent(t *testing.T, name string, script agenttest.Script
 }
 
 // agentAccount makes Agent name and returns a client with the account the
-// operator makes for it (E-97). The Agent goes at the end of the test; its
-// account stays in the identity.
+// operator makes for it (E-97). The Agent goes at the end of the test, and
+// its account with it.
 func (tc *testCell) agentAccount(t *testing.T, name string, spec cellv1.AgentSpec) *apiClient {
 	t.Helper()
 	ctx := context.Background()
@@ -214,7 +214,7 @@ func TestAgentRepairsApp(t *testing.T) {
 	t.Logf("agent (scripted model) read %v and answered: %v", calls(done), field(done, "result"))
 	got := calls(done)
 	slices.Sort(got[:min(2, len(got))])
-	if field(done, "phase") != "Succeeded" || field(done, "assignee") != "cell-agent-ops" ||
+	if field(done, "phase") != "Succeeded" || field(done, "assignee") != a.API.Username ||
 		!slices.Equal(got, []string{"GET /v0/apps/ailing", "GET /v0/apps/ailing/pods", "GET /v0/apps/ailing/logs", "PATCH /v0/apps/ailing"}) ||
 		!slices.Equal(field(done, "changes").([]any), []any{change}) || !strings.Contains(field(done, "result").(string), change) {
 		t.Fatalf("task %v", done)

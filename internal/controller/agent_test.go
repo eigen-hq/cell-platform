@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -17,6 +18,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	cellv1 "github.com/eigen-hq/cell-platform/api/v1alpha1"
 )
@@ -113,6 +116,14 @@ func (f *fakeAgentIdentity) RevokeAppPasswords(_ context.Context, username strin
 	return nil
 }
 
+func (f *fakeAgentIdentity) RemoveServiceAccount(_ context.Context, username string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.accounts, username)
+	delete(f.valid, username)
+	return nil
+}
+
 func (f *fakeAgentIdentity) loginsOf(username string) []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -129,6 +140,42 @@ func (f *fakeAgentIdentity) groups(username string) []string {
 // runs it with them, under the operator's real rights (E-97).
 func TestAgent(t *testing.T) {
 	ctx := context.Background()
+	// Running tasks of agents; nobody else's is touched.
+	running := func(name, assignee string) *cellv1.Task {
+		t.Helper()
+		task := &cellv1.Task{ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec: cellv1.TaskSpec{Kind: "ask", Input: "x", Requester: cellv1.Requester{Kind: "Human", Name: "alice"}}}
+		if err := k8s.Create(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+		task.Status = cellv1.TaskStatus{Phase: cellv1.RunRunning, Assignee: assignee}
+		if err := k8s.Status().Update(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = k8s.Delete(ctx, task) })
+		return task
+	}
+	phase := func(task *cellv1.Task) cellv1.RunPhase {
+		t.Helper()
+		var got cellv1.Task
+		if err := k8s.Get(ctx, client.ObjectKeyFromObject(task), &got); err != nil {
+			t.Fatal(err)
+		}
+		return got.Status.Phase
+	}
+	failed := func(task *cellv1.Task) {
+		t.Helper()
+		eventually(t, func() error {
+			if p := phase(task); p != cellv1.RunFailed {
+				return fmt.Errorf("task %s %s", task.Name, p)
+			}
+			return nil
+		})
+	}
+	// One of an Agent probe lost without its finalizer, one of no agent.
+	failed(running("probe-earlier", "cell-agent-probe.earlier-uid"))
+	person := running("person-work", "alice")
+
 	a := &cellv1.Agent{ObjectMeta: metav1.ObjectMeta{Name: "probe"},
 		Spec: cellv1.AgentSpec{Kinds: []string{"diagnose"}, Apps: []string{"*"}, Tools: []string{"*"}}}
 	if err := k8s.Create(ctx, a); err != nil {
@@ -149,12 +196,17 @@ func TestAgent(t *testing.T) {
 		return k8s.Get(ctx, key, &d)
 	})
 	password := string(s.Data["password"])
-	if string(s.Data["username"]) != "cell-agent-probe" || !strings.HasPrefix(password, "pw-") || len(s.Data["modelKey"]) != 64 || !metav1.IsControlledBy(&s, a) {
+	account := "cell-agent-probe." + string(a.UID)
+	if a.UID == "" || string(s.Data["username"]) != account || !strings.HasPrefix(password, "pw-") || len(s.Data["modelKey"]) != 64 || !metav1.IsControlledBy(&s, a) {
 		t.Errorf("secret %v, owners %v", s.Data, s.OwnerReferences)
 	}
-	if g := agentIdent.groups("cell-agent-probe"); !slices.Equal(g, []string{"cell-agents"}) {
+	if g := agentIdent.groups(account); !slices.Equal(g, []string{"cell-agents"}) {
 		t.Errorf("account groups %v", g)
 	}
+	// The current Agent's task, and one of an earlier probe claimed now,
+	// as if its claim had raced the deletion.
+	work := running("probe-work", account)
+	failed(running("probe-late", "cell-agent-probe.earlier-uid"))
 	c := d.Spec.Template.Spec.Containers[0]
 	if c.Image != "agent:test" || *d.Spec.Replicas != 1 || !metav1.IsControlledBy(&d, a) || *d.Spec.Template.Spec.AutomountServiceAccountToken ||
 		len(c.Env) != 3 || c.Env[1].ValueFrom.SecretKeyRef.Name != "cell-agent-probe" {
@@ -177,7 +229,17 @@ func TestAgent(t *testing.T) {
 		t.Errorf("password %q after pause: %v", s.Data["password"], err)
 	}
 
-	// New credentials, as for a later Agent of the same name, end the old.
+	// Credentials of another account are refused, and the error says what
+	// to do.
+	if err := k8s.Patch(ctx, &s, client.RawPatch(types.MergePatchType, []byte(`{"stringData":{"username":"cell-agent-probe"}}`))); err != nil {
+		t.Fatal(err)
+	}
+	r := &AgentReconciler{Client: k8s, Identity: agentIdent, Image: "agent:test"}
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(a)}); err == nil || !strings.Contains(err.Error(), "delete it for new ones") {
+		t.Errorf("credentials of another account: %v", err)
+	}
+
+	// New credentials end the old.
 	if err := k8s.Delete(ctx, &s); err != nil {
 		t.Fatal(err)
 	}
@@ -186,12 +248,12 @@ func TestAgent(t *testing.T) {
 		if err := k8s.Get(ctx, key, &s); err != nil {
 			return err
 		}
-		if string(s.Data["password"]) == password {
-			return fmt.Errorf("still the old password")
+		if string(s.Data["password"]) == password || string(s.Data["username"]) != account {
+			return fmt.Errorf("still the old credentials")
 		}
 		return nil
 	})
-	if l := agentIdent.loginsOf("cell-agent-probe"); !slices.Equal(l, []string{string(s.Data["password"])}) {
+	if l := agentIdent.loginsOf(account); !slices.Equal(l, []string{string(s.Data["password"])}) {
 		t.Errorf("passwords that log in %v, want only %q", l, s.Data["password"])
 	}
 	// and restart its pod with them.
@@ -205,7 +267,11 @@ func TestAgent(t *testing.T) {
 		return nil
 	})
 
-	// A deleted Agent's passwords stop logging in before its name is free.
+	// A deleted Agent's account goes before the Agent: none of its
+	// passwords and tokens logs in again, and what it was working on fails.
+	if p := phase(work); p != cellv1.RunRunning {
+		t.Errorf("task of the current probe %s", p)
+	}
 	if err := k8s.Delete(ctx, a); err != nil {
 		t.Fatal(err)
 	}
@@ -215,8 +281,13 @@ func TestAgent(t *testing.T) {
 		}
 		return nil
 	})
-	if l := agentIdent.loginsOf("cell-agent-probe"); len(l) != 0 {
-		t.Errorf("passwords of a deleted agent %v", l)
+	if l, g := agentIdent.loginsOf(account), agentIdent.groups(account); len(l) != 0 || g != nil {
+		t.Errorf("a deleted agent's account: passwords %v, groups %v", l, g)
+	}
+	failed(work)
+	failed(running("probe-after", account))
+	if p := phase(person); p != cellv1.RunRunning {
+		t.Errorf("task of a person %s", p)
 	}
 
 	// A Secret of that name the Agent does not own stays as it is.
@@ -228,7 +299,6 @@ func TestAgent(t *testing.T) {
 	if err := k8s.Create(ctx, sa); err != nil {
 		t.Fatal(err)
 	}
-	r := &AgentReconciler{Client: k8s, Identity: agentIdent, Image: "agent:test"}
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKey{Name: "stray"}}); err == nil || !strings.Contains(err.Error(), "is not agent stray's") {
 		t.Errorf("foreign secret: %v", err)
 	}
@@ -239,5 +309,74 @@ func TestAgent(t *testing.T) {
 	// Secret cell-agent-llm holds the model settings.
 	if err := k8s.Create(ctx, &cellv1.Agent{ObjectMeta: metav1.ObjectMeta{Name: "llm"}, Spec: a.Spec}); !apierrors.IsInvalid(err) {
 		t.Errorf("agent llm: %v", err)
+	}
+}
+
+// A task its agent finishes while the operator fails it keeps the agent's
+// answer.
+func TestAgentTaskFinishedMeanwhile(t *testing.T) {
+	ctx := context.Background()
+	task := &cellv1.Task{ObjectMeta: metav1.ObjectMeta{Name: "work"},
+		Spec:   cellv1.TaskSpec{Kind: "ask", Requester: cellv1.Requester{Kind: "Human", Name: "alice"}},
+		Status: cellv1.TaskStatus{Phase: cellv1.RunRunning, Assignee: "cell-agent-gone.g-1"}}
+	base := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithObjects(task).WithStatusSubresource(&cellv1.Task{}).Build()
+	finished := false
+	c := interceptor.NewClient(base.(client.WithWatch), interceptor.Funcs{
+		SubResourceUpdate: func(ctx context.Context, c client.Client, sub string, o client.Object, opts ...client.SubResourceUpdateOption) error {
+			if !finished {
+				finished = true
+				var done cellv1.Task
+				if err := c.Get(ctx, client.ObjectKeyFromObject(o), &done); err != nil {
+					return err
+				}
+				done.Status.Phase, done.Status.Result = cellv1.RunSucceeded, "the answer"
+				if err := c.Status().Update(ctx, &done); err != nil {
+					return err
+				}
+			}
+			return c.SubResource(sub).Update(ctx, o, opts...)
+		},
+	})
+	r := &AgentTaskReconciler{Client: c}
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(task)}); err != nil {
+		t.Fatal(err)
+	}
+	var got cellv1.Task
+	if err := base.Get(ctx, client.ObjectKeyFromObject(task), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !finished || got.Status.Phase != cellv1.RunSucceeded || got.Status.Result != "the answer" {
+		t.Errorf("task %+v", got.Status)
+	}
+}
+
+// Tasks of a deleted Agent fail even if listing them failed at first: the
+// error goes back through the queue.
+func TestAgentTasksAfterListFailure(t *testing.T) {
+	ctx := context.Background()
+	task := &cellv1.Task{ObjectMeta: metav1.ObjectMeta{Name: "work"},
+		Spec:   cellv1.TaskSpec{Kind: "ask", Requester: cellv1.Requester{Kind: "Human", Name: "alice"}},
+		Status: cellv1.TaskStatus{Phase: cellv1.RunRunning, Assignee: "cell-agent-gone.g-1"}}
+	base := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithObjects(task).WithStatusSubresource(&cellv1.Task{}).Build()
+	lists := 0
+	c := interceptor.NewClient(base.(client.WithWatch), interceptor.Funcs{
+		List: func(ctx context.Context, c client.WithWatch, l client.ObjectList, opts ...client.ListOption) error {
+			if lists++; lists == 1 {
+				return errors.New("connection refused")
+			}
+			return c.List(ctx, l, opts...)
+		},
+	})
+	r := &AgentReconciler{Client: c, Identity: agentIdent, Image: "agent:test"}
+	req := ctrl.Request{NamespacedName: client.ObjectKey{Name: "gone"}}
+	if _, err := r.Reconcile(ctx, req); err == nil {
+		t.Fatal("no error from a failed list")
+	}
+	if _, err := r.Reconcile(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	var got cellv1.Task
+	if err := base.Get(ctx, client.ObjectKeyFromObject(task), &got); err != nil || got.Status.Phase != cellv1.RunFailed {
+		t.Errorf("task %+v: %v", got.Status, err)
 	}
 }

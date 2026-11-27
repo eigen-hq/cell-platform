@@ -44,8 +44,6 @@ type Caller struct {
 	Username string   `json:"username"`
 	Role     string   `json:"role"`
 	Groups   []string `json:"groups"`
-	// IssuedAt is when the identity issued the caller's token.
-	IssuedAt time.Time `json:"-"`
 }
 
 // RoleOf maps identity groups to an API role: admins may do everything,

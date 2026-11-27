@@ -682,6 +682,38 @@ func TestInviteReplacesTheLastLink(t *testing.T) {
 
 // Only people are removed: no superuser, no service account, no hidden
 // account reaches a DELETE.
+// Deleting an Agent deletes its machine account (E-97), never a person's.
+func TestRemoveServiceAccount(t *testing.T) {
+	api := newFakeAPI()
+	api.objects["core/users/"] = []map[string]any{
+		{"pk": 2, "username": "cell-agent-ops.u1", "type": "service_account"},
+		{"pk": 7, "username": PlatformAccount, "type": "service_account"},
+		{"pk": 9, "username": "alice", "type": "internal"},
+	}
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+	c := &Client{BaseURL: srv.URL, Token: "t", HTTP: srv.Client()}
+	ctx := context.Background()
+	for _, name := range []string{"alice", PlatformAccount} {
+		if err := c.RemoveServiceAccount(ctx, name); err == nil {
+			t.Errorf("removed %s", name)
+		}
+	}
+	for _, call := range api.calls {
+		if strings.HasPrefix(call, "DELETE ") {
+			t.Errorf("call reached authentik: %s", call)
+		}
+	}
+	for range 2 { // the second time it is gone already
+		if err := c.RemoveServiceAccount(ctx, "cell-agent-ops.u1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if u, _ := c.find(ctx, "core/users/", url.Values{"username": {"cell-agent-ops.u1"}}); u != nil {
+		t.Errorf("account is still there: %v", u)
+	}
+}
+
 func TestRemoveUser(t *testing.T) {
 	api := newFakeAPI()
 	api.objects["core/users/"] = []map[string]any{

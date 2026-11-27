@@ -70,6 +70,9 @@ func run() error {
 	if agentImage == "" {
 		return fmt.Errorf("AGENT_IMAGE is not set")
 	}
+	if err := (&controller.AgentTaskReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
+		return err
+	}
 	if err := (&controller.AgentReconciler{Client: mgr.GetClient(), Identity: identity, Image: agentImage}).SetupWithManager(mgr); err != nil {
 		return err
 	}

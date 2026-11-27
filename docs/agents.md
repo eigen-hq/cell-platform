@@ -153,8 +153,8 @@ If a check fails on a change that no task belongs to, for example one made by ha
 
 **Today** every agent has an account of its own, made from an `Agent` resource: the kinds of tasks it takes, the apps whose tasks it takes, the tools it may call and instructions for its prompt (E-97). The cell comes with two:
 
-- *Ops* (account `cell-agent-ops`) diagnoses apps and answers asks, for every app, with every tool.
-- *Packer* (account `cell-agent-packer`) packages Compose files: it reads the catalog and an app and proposes an install, and cannot restart, restore or remove an app.
+- *Ops* diagnoses apps and answers asks, for every app, with every tool.
+- *Packer* packages Compose files: it reads the catalog and an app and proposes an install, and cannot restart, restore or remove an app.
 
 Within what its `Agent` allows, an agent may:
 
@@ -177,7 +177,7 @@ spec:
   instructions: Answer in German.
 ```
 
-The operator makes its account, credentials and Deployment `cell-agent-notes-reader` in `cell-system`; `spec.paused: true` stops it. If two agents take the same task, the first to claim it works on it.
+The operator makes its account `cell-agent-notes-reader.<uid>` with the Agent's UID, its credentials and Deployment `cell-agent-notes-reader` in `cell-system`; `spec.paused: true` stops it. Deleting the Agent deletes its account; an Agent made again under the name gets a new one. If two agents take the same task, the first to claim it works on it.
 
 They may not approve and have no access to the cluster. They cannot read the cell's Secrets, but a log or a manifest can contain anything an app prints or holds, a password too; the agent and its model provider then see it (E-62).
 

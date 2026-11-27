@@ -277,7 +277,7 @@ func TestChangeApproval(t *testing.T) {
 	agent = agent.working(t, admin, "whoami")
 	cr := agent.do(t, http.MethodPatch, "/v0/apps/whoami", map[string]any{"patch": map[string]any{"title": "Who am I"}, "reason": "e2e"}, http.StatusAccepted)
 	name := field(cr, "name").(string)
-	if field(cr, "requester", "kind") != "Agent" || field(cr, "requester", "name") != "cell-agent-e2e" || field(cr, "task") != agent.task {
+	if field(cr, "requester", "kind") != "Agent" || field(cr, "requester", "name") != "e2e" || field(cr, "task") != agent.task {
 		t.Errorf("requester %v, task %v", field(cr, "requester"), field(cr, "task"))
 	}
 	if steps := calls(admin.do(t, http.MethodGet, "/v0/tasks/"+agent.task, nil, http.StatusOK)); !slices.Equal(steps, []string{"PATCH /v0/apps/whoami"}) {

@@ -17,26 +17,29 @@ import (
 // only the tasks it takes and calls only its tools; an account in the
 // agents' group without an Agent may do nothing.
 func TestAgentSpec(t *testing.T) {
-	reader := &cellv1.Agent{ObjectMeta: metav1.ObjectMeta{Name: "reader"},
+	reader := &cellv1.Agent{ObjectMeta: metav1.ObjectMeta{Name: "reader", UID: "reader-1"},
 		Spec: cellv1.AgentSpec{Kinds: []string{"diagnose"}, Apps: []string{"notes"}, Tools: []string{"getApp", "listApps", "installApp"}, Instructions: "Be brief."}}
 	other := pendingTask("plain-diagnose-1")
 	other.Spec.App = "plain"
-	gone := &cellv1.Agent{ObjectMeta: metav1.ObjectMeta{Name: "gone", Finalizers: []string{"cell.internal/agent"}, DeletionTimestamp: &metav1.Time{Time: time.Now()}},
+	gone := &cellv1.Agent{ObjectMeta: metav1.ObjectMeta{Name: "gone", UID: "gone-1", Finalizers: []string{"cell.internal/agent"}, DeletionTimestamp: &metav1.Time{Time: time.Now()}},
 		Spec: reader.Spec}
-	// Made after the harness's tokens were issued, and in the same second.
-	late := &cellv1.Agent{ObjectMeta: metav1.ObjectMeta{Name: "late", CreationTimestamp: metav1.Date(2026, 11, 19, 13, 0, 0, 0, time.UTC)}, Spec: reader.Spec}
-	same := &cellv1.Agent{ObjectMeta: metav1.ObjectMeta{Name: "same", CreationTimestamp: metav1.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)}, Spec: reader.Spec}
-	h := newHarness(t, installed("notes", "oidc"), installed("plain", "none"), reader, gone, late, same, pendingTask("notes-diagnose-1"), other)
+	// A later Agent of the name than the one token agent-again is of.
+	again := &cellv1.Agent{ObjectMeta: metav1.ObjectMeta{Name: "again", UID: "again-2"}, Spec: reader.Spec}
+	h := newHarness(t, installed("notes", "oidc"), installed("plain", "none"), reader, gone, again, pendingTask("notes-diagnose-1"), other)
 	h.agentTask = ""
 	// An Agent being deleted may do nothing: its passwords are on their way out.
 	if code, body := h.do("GET", "/v0/whoami", "agent-gone", nil); code != 403 {
 		t.Errorf("agent being deleted: %d %v", code, body)
 	}
-	// Nor may a token from before the Agent or its second: it may be an
-	// earlier one's of the name.
-	for _, name := range []string{"late", "same"} {
-		if code, body := h.do("GET", "/v0/whoami", "agent-"+name, nil); code != 401 || !strings.Contains(field(body, "error").(string), "not newer than agent "+name) {
-			t.Errorf("token from before agent %s: %d %v", name, code, body)
+	// Nor may the account of an earlier Agent of the name: its tokens may
+	// still be cached after the account went.
+	if code, body := h.do("GET", "/v0/whoami", "agent-again", nil); code != 403 || !strings.Contains(field(body, "error").(string), "earlier agent again") {
+		t.Errorf("account of an earlier agent: %d %v", code, body)
+	}
+	// Nor an account that is not named after an Agent and its UID.
+	for _, account := range []string{"cell-agent-reader", "cell-agent-.reader-1", "reader.reader-1"} {
+		if code, body := h.do("GET", "/v0/whoami", "account:"+account, nil); code != 403 || !strings.Contains(field(body, "error").(string), "no agent of the cell") {
+			t.Errorf("account %s: %d %v", account, code, body)
 		}
 	}
 

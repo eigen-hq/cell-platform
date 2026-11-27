@@ -283,7 +283,8 @@ func (s *Server) record(ctx context.Context, c *Caller, w http.ResponseWriter, s
 		if spec.App != task.App {
 			return errorf(http.StatusForbidden, "task %s is about app %s, not %s", task.Name, task.App, spec.App)
 		}
-		spec.Requester.Kind = "Agent"
+		// Under its Agent's name; the task names the account.
+		spec.Requester = cellv1.Requester{Kind: "Agent", Name: agentOf(ctx).Name}
 		spec.Task = task.Name
 	}
 	spec.Approval = cellv1.Approval{Required: true}

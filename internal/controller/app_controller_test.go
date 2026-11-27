@@ -161,6 +161,9 @@ func TestMain(m *testing.M) {
 	if err := (&AgentReconciler{Client: mgr.GetClient(), Identity: agentIdent, Image: "agent:test"}).SetupWithManager(mgr); err != nil {
 		panic(err)
 	}
+	if err := (&AgentTaskReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
+		panic(err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		if err := mgr.Start(ctx); err != nil {

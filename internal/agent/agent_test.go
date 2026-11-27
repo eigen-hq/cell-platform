@@ -38,6 +38,9 @@ type cell struct {
 	agent *Agent
 }
 
+// opsAccount is the account of the cell's agent, Agent ops (E-97).
+const opsAccount = "cell-agent-ops.ops-1"
+
 func newCell(t *testing.T, script agenttest.Script, objs ...client.Object) *cell {
 	t.Helper()
 	scheme := runtime.NewScheme()
@@ -51,7 +54,7 @@ func newCell(t *testing.T, script agenttest.Script, objs ...client.Object) *cell
 	}
 	// The agent's Agent, unless the test brings its own.
 	if !slices.ContainsFunc(objs, func(o client.Object) bool { _, ok := o.(*cellv1.Agent); return ok }) {
-		objs = append(objs, &cellv1.Agent{ObjectMeta: metav1.ObjectMeta{Name: "ops"},
+		objs = append(objs, &cellv1.Agent{ObjectMeta: metav1.ObjectMeta{Name: "ops", UID: "ops-1"},
 			Spec: cellv1.AgentSpec{Kinds: []string{"diagnose", "package", "ask"}, Apps: []string{"*"}, Tools: []string{"*"}}})
 	}
 	// The operator tells that a provider is set.
@@ -64,13 +67,13 @@ func newCell(t *testing.T, script agenttest.Script, objs ...client.Object) *cell
 			if token != "agent-token" {
 				return nil, errors.New("bad token")
 			}
-			return &cellapi.Caller{Username: "cell-agent-ops", Role: cellapi.RoleAgent, Groups: []string{"cell-agents"}, IssuedAt: time.Now()}, nil
+			return &cellapi.Caller{Username: opsAccount, Role: cellapi.RoleAgent, Groups: []string{"cell-agents"}}, nil
 		},
 	}).Handler())
 	t.Cleanup(api.Close)
 	identity := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.FormValue("grant_type") != "client_credentials" || r.FormValue("client_id") != "cell-api" ||
-			r.FormValue("username") != "cell-agent-ops" || r.FormValue("password") != "app-password" {
+			r.FormValue("username") != opsAccount || r.FormValue("password") != "app-password" {
 			http.Error(w, `{"error":"invalid_grant"}`, http.StatusBadRequest)
 			return
 		}
@@ -85,7 +88,7 @@ func newCell(t *testing.T, script agenttest.Script, objs ...client.Object) *cell
 		}
 	})
 	return &cell{kube: kube, agent: &Agent{
-		API:   &API{URL: api.URL, TokenURL: identity.URL, ClientID: "cell-api", Username: "cell-agent-ops", Password: "app-password", HTTP: http.DefaultClient},
+		API:   &API{URL: api.URL, TokenURL: identity.URL, ClientID: "cell-api", Username: opsAccount, Password: "app-password", HTTP: http.DefaultClient},
 		Model: &Model{URL: model.URL, Key: "test", Name: "scripted", HTTP: http.DefaultClient},
 		Log:   slog.New(slog.DiscardHandler), Poll: time.Second,
 	}}
@@ -175,7 +178,7 @@ func TestDiagnose(t *testing.T) {
 	if len(calls) >= 2 {
 		slices.Sort(calls[:2])
 	}
-	if got.Status.Phase != cellv1.RunSucceeded || got.Status.Assignee != "cell-agent-ops" || !strings.Contains(got.Status.Result, "Proposed change "+change) {
+	if got.Status.Phase != cellv1.RunSucceeded || got.Status.Assignee != opsAccount || !strings.Contains(got.Status.Result, "Proposed change "+change) {
 		t.Errorf("task %+v", got.Status)
 	}
 	if want := []string{"GET /v0/apps/board", "GET /v0/apps/board/pods", "GET /v0/apps/board/logs?tail=50", "PATCH /v0/apps/board"}; !slices.Equal(calls, want) {
@@ -281,7 +284,7 @@ func TestCutTurn(t *testing.T) {
 func TestFailures(t *testing.T) {
 	stuck := &cellv1.Task{ObjectMeta: metav1.ObjectMeta{Name: "board-diagnose-1"},
 		Spec:   cellv1.TaskSpec{Kind: "diagnose", App: "board", Requester: cellv1.Requester{Kind: "Operator", Name: "cell-operator"}},
-		Status: cellv1.TaskStatus{Phase: cellv1.RunRunning, Assignee: "cell-agent-ops"}}
+		Status: cellv1.TaskStatus{Phase: cellv1.RunRunning, Assignee: opsAccount}}
 	others := stuck.DeepCopy()
 	others.Name, others.Status.Assignee = "board-diagnose-2", "other-agent"
 	pending := stuck.DeepCopy()

@@ -14,9 +14,13 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	cellv1 "github.com/eigen-hq/cell-platform/api/v1alpha1"
 	"github.com/eigen-hq/cell-platform/internal/cell"
@@ -28,11 +32,12 @@ type AgentIdentity interface {
 	EnsureServiceAccount(ctx context.Context, username string, groups ...string) error
 	CreateAppPassword(ctx context.Context, username string) (string, error)
 	RevokeAppPasswords(ctx context.Context, username string) error
+	RemoveServiceAccount(ctx context.Context, username string) error
 }
 
-// AgentReconciler runs each Agent (E-97): its account in the identity (a
-// service account in the agents' group, so the API gives it the agent
-// role), its credentials as Secret cell-agent-<name> (its password and its
+// AgentReconciler runs each Agent (E-97): its account in the identity
+// (cell-agent-<name>.<uid>, a service account in the agents' group, so the
+// API gives it the agent role), its credentials as Secret cell-agent-<name> (its password and its
 // key to the model gateway, made once) and Deployment cell-agent-<name>.
 // Both belong to the Agent and go with it. The agent has no rights in the
 // cluster: it works through the API alone, which checks each of its calls
@@ -52,35 +57,46 @@ func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-// agentFinalizer revokes a deleted Agent's passwords before its name is
-// free again: an Agent of the same name starts with none of them.
+// agentFinalizer deletes a deleted Agent's account, and with it every
+// password and token it holds, before the Agent is gone.
 var agentFinalizer = cellv1.GroupVersion.Group + "/agent"
 
 func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	a := &cellv1.Agent{}
 	if err := r.Get(ctx, req.NamespacedName, a); err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		if apierrors.IsNotFound(err) {
+			// Gone: what its agent was working on fails. An error comes
+			// back through the queue.
+			return ctrl.Result{}, failTasks(ctx, r.Client, req.Name)
+		}
+		return ctrl.Result{}, err
 	}
-	// ponytail: a deleted Agent's account stays in the identity, without
-	// passwords and without rights in the API (E-97); delete it here too
-	// once leftover accounts get in the way.
 	name := cell.AgentPrefix + a.Name
+	account := cell.AgentAccount(a.Name, string(a.UID))
 	orig := a.DeepCopy()
 	if !a.DeletionTimestamp.IsZero() {
 		if !controllerutil.RemoveFinalizer(a, agentFinalizer) {
 			return ctrl.Result{}, nil
 		}
-		if err := r.Identity.RevokeAppPasswords(ctx, name); err != nil {
+		if err := failTasks(ctx, r.Client, a.Name); err != nil {
+			return ctrl.Result{}, err
+		}
+		if err := r.Identity.RemoveServiceAccount(ctx, account); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(r.Patch(ctx, a, client.MergeFrom(orig)))
 	}
 	if controllerutil.AddFinalizer(a, agentFinalizer) {
+		// A new Agent: what an earlier one of the name, lost without its
+		// finalizer, was working on fails.
+		if err := failTasks(ctx, r.Client, a.Name); err != nil {
+			return ctrl.Result{}, err
+		}
 		if err := r.Patch(ctx, a, client.MergeFrom(orig)); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
-	if err := r.Identity.EnsureServiceAccount(ctx, name, cell.AgentGroup); err != nil {
+	if err := r.Identity.EnsureServiceAccount(ctx, account, cell.AgentGroup); err != nil {
 		return ctrl.Result{}, err
 	}
 	owner := *metav1.NewControllerRef(a, cellv1.GroupVersion.WithKind("Agent"))
@@ -88,12 +104,12 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	err := r.Get(ctx, system(name), s)
 	switch {
 	case apierrors.IsNotFound(err):
-		// Whoever held the last credentials (a deleted Agent of this name,
-		// a removed Secret) loses them.
-		if err := r.Identity.RevokeAppPasswords(ctx, name); err != nil {
+		// Whoever held the account's last credentials (a removed Secret)
+		// loses them.
+		if err := r.Identity.RevokeAppPasswords(ctx, account); err != nil {
 			return ctrl.Result{}, err
 		}
-		password, err := r.Identity.CreateAppPassword(ctx, name)
+		password, err := r.Identity.CreateAppPassword(ctx, account)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -104,7 +120,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		s = &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{Namespace: cell.SystemNamespace, Name: name, OwnerReferences: []metav1.OwnerReference{owner}},
 			Type:       corev1.SecretTypeOpaque,
-			Data:       map[string][]byte{"username": []byte(name), "password": []byte(password), cell.AgentModelKey: []byte(hex.EncodeToString(key))},
+			Data:       map[string][]byte{"username": []byte(account), "password": []byte(password), cell.AgentModelKey: []byte(hex.EncodeToString(key))},
 		}
 		if err := r.Create(ctx, s); err != nil {
 			return ctrl.Result{}, err
@@ -115,9 +131,93 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		// Left by an Agent of the same name deleted a moment ago (the
 		// garbage collector removes it), or no agent's at all.
 		return ctrl.Result{}, fmt.Errorf("secret %s/%s is not agent %s's", cell.SystemNamespace, name, a.Name)
+	case string(s.Data["username"]) != account:
+		// Credentials of another account, which only a hand edit makes: no
+		// release made agent accounts without the UID. The API refuses them;
+		// the operator may not delete Secrets here, so it says what to do.
+		return ctrl.Result{}, fmt.Errorf("secret %s/%s holds the credentials of %q, not of %s: delete it for new ones", cell.SystemNamespace, name, s.Data["username"], account)
 	}
 	_, err = serverApply(ctx, r.Client, agentDeployment(name, r.Image, a.Spec.Paused, owner, string(s.UID)))
 	return ctrl.Result{}, err
+}
+
+// AgentTaskReconciler fails each task that becomes the running task of an
+// account whose Agent is gone, being deleted or made again, as a claim that
+// raced the deletion; AgentReconciler fails those already running.
+type AgentTaskReconciler struct {
+	client.Client
+}
+
+func (r *AgentTaskReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	agents := func(o client.Object) bool {
+		t := o.(*cellv1.Task)
+		_, _, ok := cell.AgentOf(t.Status.Assignee)
+		return ok && t.Status.Phase == cellv1.RunRunning
+	}
+	claimed := predicate.Funcs{
+		CreateFunc: func(e event.CreateEvent) bool { return agents(e.Object) },
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			o, n := e.ObjectOld.(*cellv1.Task), e.ObjectNew.(*cellv1.Task)
+			return agents(n) && (o.Status.Phase != n.Status.Phase || o.Status.Assignee != n.Status.Assignee)
+		},
+		DeleteFunc:  func(event.DeleteEvent) bool { return false },
+		GenericFunc: func(event.GenericEvent) bool { return false },
+	}
+	return ctrl.NewControllerManagedBy(mgr).Named("agent-tasks").
+		For(&cellv1.Task{}, builder.WithPredicates(claimed)).Complete(r)
+}
+
+func (r *AgentTaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	return ctrl.Result{}, failTask(ctx, r.Client, req.NamespacedName)
+}
+
+// failTasks fails the running tasks of Agent name's accounts that failTask
+// fails.
+func failTasks(ctx context.Context, c client.Client, name string) error {
+	var tasks cellv1.TaskList
+	if err := c.List(ctx, &tasks); err != nil {
+		return err
+	}
+	for _, t := range tasks.Items {
+		if n, _, ok := cell.AgentOf(t.Status.Assignee); ok && n == name && t.Status.Phase == cellv1.RunRunning {
+			if err := failTask(ctx, c, client.ObjectKeyFromObject(&t)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// failTask fails a running task whose agent can never finish it: the Agent
+// of its account is gone, being deleted or made again (another UID), so the
+// API refuses the account. The admin sees why and can ask again.
+func failTask(ctx context.Context, c client.Client, key client.ObjectKey) error {
+	// Update checks the task's version: one its agent finished meanwhile
+	// is read again and stays as it is.
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var t cellv1.Task
+		if err := c.Get(ctx, key, &t); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		name, uid, ok := cell.AgentOf(t.Status.Assignee)
+		if !ok || t.Status.Phase != cellv1.RunRunning {
+			return nil
+		}
+		// Cached: the Agent whose credentials the claim used was in the
+		// cache before its Secret was made.
+		var a cellv1.Agent
+		err := c.Get(ctx, client.ObjectKey{Name: name}, &a)
+		if client.IgnoreNotFound(err) != nil {
+			return err
+		}
+		if err == nil && string(a.UID) == uid && a.DeletionTimestamp.IsZero() {
+			return nil
+		}
+		now := metav1.Now()
+		t.Status.Phase, t.Status.FinishedAt = cellv1.RunFailed, &now
+		t.Status.Result = fmt.Sprintf("interrupted: agent %s was deleted or made again while it worked on this; ask again", name)
+		return c.Status().Update(ctx, &t)
+	})
 }
 
 // agentDeployment runs an agent with its credentials and nothing else: no

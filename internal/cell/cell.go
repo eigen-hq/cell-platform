@@ -24,14 +24,25 @@ const (
 	AgentGroup = "cell-agents"
 	// AdminGroup gives its members the admin role in the platform API.
 	AdminGroup = "cell-admins"
-	// AgentPrefix and an Agent's name are the agent's account in the
-	// identity, and the name of its credentials (a Secret) and its
-	// Deployment in SystemNamespace (E-97).
+	// AgentPrefix and an Agent's name are the name of the agent's
+	// credentials (a Secret) and its Deployment in SystemNamespace (E-97).
 	AgentPrefix = "cell-agent-"
 	// MetricsURL is the cell's metrics store (E-87); it answers the
 	// Prometheus query API.
 	MetricsURL = "http://cell-metrics.cell-system.svc.cluster.local:8428"
 )
+
+// AgentAccount is the account in the identity of the Agent name with UID
+// uid (E-97). A later Agent of the name is another account, so nothing the
+// earlier one held counts for it.
+func AgentAccount(name, uid string) string { return AgentPrefix + name + "." + uid }
+
+// AgentOf is the Agent name and UID of an agent's account; ok is false for
+// every other username.
+func AgentOf(account string) (name, uid string, ok bool) {
+	name, uid, ok = strings.Cut(strings.TrimPrefix(account, AgentPrefix), ".")
+	return name, uid, ok && name != "" && uid != "" && account == AgentAccount(name, uid)
+}
 
 // Config is the cell-system/cell-config ConfigMap.
 type Config struct {

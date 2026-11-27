@@ -51,11 +51,13 @@ func agentOf(ctx context.Context) *cellv1.Agent {
 	return a
 }
 
-// withAgent finds the Agent behind an agent's account. An account in the
-// agents' group without one may do nothing (E-97).
+// withAgent finds the Agent behind an agent's account,
+// cell-agent-<name>.<uid> (E-97). An account in the agents' group without
+// one may do nothing, nor may the account of an earlier Agent of the name:
+// its tokens may still be cached after the account went.
 func (s *Server) withAgent(ctx context.Context, c *Caller) (context.Context, error) {
-	name, ok := strings.CutPrefix(c.Username, cell.AgentPrefix)
-	if !ok || name == "" {
+	name, uid, ok := cell.AgentOf(c.Username)
+	if !ok {
 		return nil, errorf(http.StatusForbidden, "%s is in group %s but no agent of the cell", c.Username, GroupAgents)
 	}
 	var a cellv1.Agent
@@ -65,15 +67,11 @@ func (s *Server) withAgent(ctx context.Context, c *Caller) (context.Context, err
 		}
 		return nil, err
 	}
+	if string(a.UID) != uid {
+		return nil, errorf(http.StatusForbidden, "%s is the account of an earlier agent %s", c.Username, name)
+	}
 	if !a.DeletionTimestamp.IsZero() {
 		return nil, errorf(http.StatusForbidden, "agent %s is being deleted", name)
-	}
-	// A token from before this Agent was made is an earlier Agent's of the
-	// name, which still holds it (in the cache too) after its passwords went.
-	// Both times are whole seconds, so one of the same second may be either
-	// and counts as earlier; the agent logs in again on 401.
-	if !c.IssuedAt.After(a.CreationTimestamp.Time) {
-		return nil, errorf(http.StatusUnauthorized, "the token of %s is not newer than agent %s: log in again", c.Username, name)
 	}
 	return context.WithValue(ctx, agentKey{}, &a), nil
 }

@@ -204,6 +204,9 @@ type harness struct {
 // agentWork is the running task the harness's agent works in.
 const agentWork = "agent-work"
 
+// opsAccount is the account of the harness's agent, Agent ops (E-97).
+const opsAccount = "cell-agent-ops.ops-1"
+
 func newHarness(t *testing.T, objs ...client.Object) *harness {
 	t.Helper()
 	return newHarnessWith(t, interceptor.Funcs{}, objs...)
@@ -223,9 +226,9 @@ func newHarnessWith(t *testing.T, funcs interceptor.Funcs, objs ...client.Object
 	}
 	work := &cellv1.Task{ObjectMeta: metav1.ObjectMeta{Name: agentWork},
 		Spec:   cellv1.TaskSpec{Kind: "diagnose", App: "notes", Requester: cellv1.Requester{Kind: "Human", Name: "admin-user"}},
-		Status: cellv1.TaskStatus{Phase: cellv1.RunRunning, Assignee: "cell-agent-ops"}}
+		Status: cellv1.TaskStatus{Phase: cellv1.RunRunning, Assignee: opsAccount}}
 	// The harness's agent takes every task and calls every tool.
-	ops := &cellv1.Agent{ObjectMeta: metav1.ObjectMeta{Name: "ops"},
+	ops := &cellv1.Agent{ObjectMeta: metav1.ObjectMeta{Name: "ops", UID: "ops-1"},
 		Spec: cellv1.AgentSpec{Kinds: []string{"diagnose", "package", "ask"}, Apps: []string{"*"}, Tools: []string{"*"}}}
 	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(append(objs, work, ops)...).WithInterceptorFuncs(funcs).
 		WithStatusSubresource(&cellv1.Task{}).Build()
@@ -233,8 +236,6 @@ func newHarnessWith(t *testing.T, funcs interceptor.Funcs, objs ...client.Object
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Agents' tokens are issued at the harness's time.
-	issued := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
 	s := &Server{
 		Kube:     kube,
 		Pods:     k8sfake.NewSimpleClientset(pods...).CoreV1(),
@@ -244,11 +245,15 @@ func newHarnessWith(t *testing.T, funcs interceptor.Funcs, objs ...client.Object
 			case "admin", "viewer", "none":
 				return &Caller{Username: token + "-user", Role: token, Groups: []string{}}, nil
 			case "agent":
-				return &Caller{Username: "cell-agent-ops", Role: RoleAgent, Groups: []string{GroupAgents}, IssuedAt: issued}, nil
+				return &Caller{Username: opsAccount, Role: RoleAgent, Groups: []string{GroupAgents}}, nil
 			}
-			// agent-<name>: the account of Agent <name>.
+			// agent-<name>: the account of Agent <name> with UID <name>-1;
+			// account:<username>: any account in the agents' group.
 			if name, ok := strings.CutPrefix(token, "agent-"); ok {
-				return &Caller{Username: "cell-agent-" + name, Role: RoleAgent, Groups: []string{GroupAgents}, IssuedAt: issued}, nil
+				return &Caller{Username: "cell-agent-" + name + "." + name + "-1", Role: RoleAgent, Groups: []string{GroupAgents}}, nil
+			}
+			if username, ok := strings.CutPrefix(token, "account:"); ok {
+				return &Caller{Username: username, Role: RoleAgent, Groups: []string{GroupAgents}}, nil
 			}
 			return nil, errors.New("bad token")
 		},
@@ -438,7 +443,7 @@ func TestInstallWaitsForApproval(t *testing.T) {
 		t.Fatalf("install: %d %v", code, body)
 	}
 	name := field(body, "name").(string)
-	if field(body, "action") != "install" || field(body, "requester", "kind") != "Agent" || field(body, "requester", "name") != "cell-agent-ops" ||
+	if field(body, "action") != "install" || field(body, "requester", "kind") != "Agent" || field(body, "requester", "name") != "ops" ||
 		field(body, "approval", "required") != true || field(body, "approval", "decision") != nil {
 		t.Errorf("recorded change %v", body)
 	}
@@ -796,7 +801,7 @@ func TestTokens(t *testing.T) {
 	now := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
 	tokens := &Tokens{UserinfoURL: userinfo.URL, ClientIDs: []string{"cell-api", "cell-console"}, HTTP: userinfo.Client(), TTL: 30 * time.Second, Now: func() time.Time { return now }}
 	exp := float64(now.Add(time.Hour).Unix())
-	good := jwt(map[string]any{"aud": "cell-api", "exp": exp, "iat": float64(now.Add(-time.Minute).Unix())})
+	good := jwt(map[string]any{"aud": "cell-api", "exp": exp})
 	otherApp := jwt(map[string]any{"aud": "forgejo", "exp": exp})
 	gateway := jwt(map[string]any{"aud": "cell-mcp", "exp": exp})
 	console := jwt(map[string]any{"aud": "cell-console", "exp": exp, "sub": "console"})
@@ -804,7 +809,7 @@ func TestTokens(t *testing.T) {
 	accept[good], accept[otherApp], accept[gateway], accept[console] = true, true, true, true
 
 	c, err := tokens.Check(context.Background(), good)
-	if err != nil || c.Username != "alice" || c.Role != RoleAgent || !c.IssuedAt.Equal(now.Add(-time.Minute)) {
+	if err != nil || c.Username != "alice" || c.Role != RoleAgent {
 		t.Fatalf("good token: %+v %v", c, err)
 	}
 	if _, err := tokens.Check(context.Background(), good); err != nil || calls != 1 {
