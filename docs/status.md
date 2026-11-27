@@ -155,7 +155,7 @@ Status 2026-11-20: agentgateway as MCP gateway, configured by the operator from 
 
 Admins sign in to the console of the cell in the browser.
 
-Status 2026-11-27: console in Svelte at `https://console.<domain>`, served by `cell-api` (E-39), own login client with PKCE, for `cell-admins` and read-only for `cell-viewers` (E-40, E-46), two tones, Night and Paper (E-41). Redesign 2026-11-27 (E-87): tabs Overview, Apps, Machines, Backups, Changes and Agents (admins), Organization from the account menu; apps, changes and agent tasks open as pages (`/apps/<name>`, `/changes/<name>`, `/agents/<task>`), drawers only hold forms; old addresses `/approvals` and `/history` lead to `/changes`. The views draw only what the API delivers. On the local cell (2026-11-27) `TestConsoleLogin` with all Playwright specs passed, the viewer spec included; not yet run on the test cell.
+Status 2026-11-27: console in Svelte at `https://console.<domain>`, served by `cell-api` (E-39), own login client with PKCE, for `cell-admins` and read-only for `cell-viewers` (E-40, E-46), two tones, Night and Paper (E-41). Redesign 2026-11-27 (E-93): tabs Overview, Apps, Machines, Backups, Changes and Agents (admins), Organization from the account menu; apps, changes and agent tasks open as pages (`/apps/<name>`, `/changes/<name>`, `/agents/<task>`), drawers only hold forms; old addresses `/approvals` and `/history` lead to `/changes`. The views draw only what the API delivers. On the local cell (2026-11-27) `TestConsoleLogin` with all Playwright specs passed, the viewer spec included; not yet run on the test cell.
 
 | Check | How | Result |
 |---|---|---|
