@@ -88,6 +88,7 @@ What is wanted and tried out happens in the office UI; the platform builds, oper
 | Findings with an agent action (e.g. unused or duplicate apps) | open | Usage numbers |
 | Warnings and notifications to IT | built: a mail to the admins when an app needs attention (E-82); other events and channels open | System mail |
 | Capacity: when the cell needs to grow | open | Metrics |
+| Memory and CPU limits per app: set in the manifest, changed as a change with approval, shown next to the use | open | Metrics |
 
 ### Backups and data
 
