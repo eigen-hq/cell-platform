@@ -107,3 +107,9 @@ export function trail(c: Change): { step: string; state: "done" | "failed" | "op
       return all.map((step) => ({ step, state: "open" }));
   }
 }
+
+/** The list with a change the API just accepted, so it counts before the next reload brings it. */
+export const withChange = (changes: Change[], c: Change): Change[] => [c, ...changes.filter((x) => x.name !== c.name)];
+
+/** Whether a task page still polls for its changes: one is open, or not yet in the list it read. */
+export const unsettled = (proposed: (Change | null)[]) => proposed.some((c) => !c || open(c));

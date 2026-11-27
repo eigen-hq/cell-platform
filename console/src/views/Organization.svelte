@@ -1,19 +1,22 @@
 <script lang="ts">
-  // People, groups and agent accounts (Figma: 18 Organization). Apps are
-  // attached to groups; everyone in a group gets them. Groups are flat
-  // today (departments and teams are still open in the backlog). One group
-  // opens under /organization/<group> to change its members.
+  // People, groups and agent accounts, the system mail and the model
+  // provider. Apps are attached to groups; everyone in a group gets them.
+  // Groups are flat today (departments and teams are still open in the
+  // backlog). One group opens under /organization/<group> to change its
+  // members; every other form opens in a drawer.
   import { api, must } from "../lib/api/client";
   import type { components } from "../lib/api/schema";
   import { authMode } from "../lib/phase";
   import { itemPath } from "../lib/route";
   import { newest, STALE } from "../lib/newest";
   import { replaced } from "../lib/draft";
-  import AgentFace from "../lib/ui/AgentFace.svelte";
   import Avatar from "../lib/ui/Avatar.svelte";
   import Button from "../lib/ui/Button.svelte";
-  import CommandBox from "../lib/ui/CommandBox.svelte";
-  import StatStrip, { type Stat } from "../lib/ui/StatStrip.svelte";
+  import Drawer from "../lib/ui/Drawer.svelte";
+  import { agentIcon } from "../lib/ui/icons";
+  import Logo from "../lib/ui/Logo.svelte";
+  import Tag from "../lib/ui/Tag.svelte";
+  import Tile from "../lib/ui/Tile.svelte";
   import { resultRow } from "../lib/row";
   import GroupDrawer from "./GroupDrawer.svelte";
 
@@ -73,9 +76,12 @@
   // Tokens per agent and app since the gateway last started.
   let usage = $state<Usage | null>(null);
   let usageFailed = $state("");
+  const usageGuard = newest();
   async function loadUsage() {
     try {
-      usage = must(await api.GET("/v0/models/usage")).accounts;
+      const answer = await usageGuard(api.GET("/v0/models/usage"));
+      if (answer === STALE) return;
+      usage = must(answer).accounts;
       usageFailed = "";
     } catch (e) {
       usageFailed = e instanceof Error ? e.message : String(e);
@@ -102,6 +108,7 @@
   let person = $state({ username: "", name: "", email: "", password: "", groups: [] as string[] });
   let personNote = $state<{ text: string; bad?: boolean } | null>(null);
   let newGroup = $state("");
+  let creatingGroup = $state(false);
   let groupNote = $state<{ text: string; bad?: boolean } | null>(null);
   // A credential on screen: an app password or an invite link, shown once.
   let token = $state<{ title: string; text: string; value: string } | null>(null);
@@ -145,6 +152,7 @@
       must(await api.POST("/v0/groups", { body: { name: newGroup.trim() } }));
       groupNote = { text: `Group ${newGroup.trim()} is there. Open it to add people.` };
       newGroup = "";
+      creatingGroup = false;
       await load();
     } catch (err) {
       groupNote = { text: msg(err), bad: true };
@@ -310,222 +318,277 @@
     }
     return m;
   });
-  let stats = $derived.by((): Stat[] => [
-    { label: "People", value: String(people.length), tone: "ok" },
-    { label: "Groups", value: String(teams.length), tone: "ok" },
-    { label: "Admins", value: String(new Set(groups.find((g) => g.name === ADMINS)?.members ?? []).size), tone: "ok" },
-    { label: "Agent accounts", value: String(agentAccounts.length), tone: "ok" },
-    { label: "Apps for everyone", value: String(byGroup.get("")?.length ?? 0), tone: "ok" },
-  ]);
+  let admins = $derived(new Set(groups.find((g) => g.name === ADMINS)?.members ?? []).size);
+  const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+  let lede = $derived(
+    `${plural(people.length, "person", "people")} in ${plural(teams.length, "group")}, ${plural(admins, "admin")}. Apps are attached to groups; everyone in a group gets them.`,
+  );
+  // The credential on screen, copied on request.
+  let copied = $state("");
+  async function copy(value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      copied = "Copied";
+    } catch {
+      copied = "Copy failed";
+    }
+    setTimeout(() => (copied = ""), 1600);
+  }
   const name = (u: string) => users?.find((x) => x.username === u)?.name || u;
   const title = (a: App) => a.title || a.name;
   let current = $derived(teams.find((g) => g.name === open));
 </script>
 
-<section class="view-head">
-  <h1>Organization</h1>
-  <p>Apps are attached to groups. Everyone in a group gets them.</p>
-</section>
-
 <!-- A failed poll keeps what is on screen, open edits included. -->
-{#if failed}
-  <p class="fail" role="alert">{failed}</p>
-{/if}
+{#if failed}<p class="fail" role="alert">{failed}</p>{/if}
 {#if users}
-  <StatStrip items={stats} />
-
-  <section class="tree" aria-label="Who gets which apps">
-    <div class="root">
-      <span class="all">all</span>
-      <span><strong>Everyone</strong><small>{people.length} people</small></span>
-      <span class="gets"><small>gets</small></span>
-      <span class="tiles">
-        {#each byGroup.get("") ?? [] as a (a.name)}<Avatar name={title(a)} tile size={24} />{:else}<small>no app yet</small>{/each}
-      </span>
+  <header class="page-head">
+    <div>
+      <h1>Organization</h1>
+      <p>{lede}</p>
     </div>
-    <ul class="groups">
+  </header>
+
+  <section class="sec" aria-labelledby="h-people">
+    <div class="sec-head">
+      <h2 id="h-people">People</h2>
+      <span>{people.length}</span>
+      <span class="end"><Button kind="outline" size="sm" onclick={() => { adding = true; personNote = null; }}>Add a person</Button></span>
+    </div>
+    {#if row === null && !adding}{@render results()}{/if}
+    {#snippet results()}
+      {#if personNote}<p class="note" class:fail={personNote.bad} role="status">{personNote.text}</p>{/if}
+      {#if token}
+        <div class="token" role="status">
+          <p><strong>{token.title}</strong>, {token.text}</p>
+          <div class="copy">
+            <code class="mono">{token.value}</code>
+            <Button kind="outline" size="sm" onclick={() => copy(token!.value)}>{copied || "Copy"}</Button>
+            <Button kind="plain" size="sm" onclick={() => (token = null)}>Done</Button>
+          </div>
+        </div>
+      {/if}
+      {#if tokenError}<p class="fail" role="alert">{tokenError}</p>{/if}
+    {/snippet}
+    <ul class="list">
+      {#each people as u (u.username)}
+        <li>
+          <div class="person row">
+            <Avatar name={u.name || u.username} size={30} />
+            <span class="who"><strong>{u.name || u.username}</strong><small>{u.username}{u.email ? `, ${u.email}` : ""}</small></span>
+            <span class="in">{#each [...new Set(u.groups)] as g (g)}<Tag>{g}</Tag>{/each}</span>
+            <span class="acts">
+              {#if removing === u.username}
+                <small>Remove {u.name || u.username} for good?</small>
+                <Button kind="warn" size="sm" disabled={minting} onclick={() => remove(u)}>Remove</Button>
+                <Button kind="plain" size="sm" disabled={minting} onclick={() => (removing = null)}>Keep</Button>
+              {:else}
+                <Button kind="plain" size="sm" disabled={minting} onclick={() => invite(u)}>Invite</Button>
+                <Button kind="plain" size="sm" disabled={minting} onclick={() => appPassword(u)}>App password</Button>
+                <Button kind="plain" size="sm" disabled={minting} onclick={() => (removing = u.username)}>Remove</Button>
+              {/if}
+            </span>
+          </div>
+          {#if row === u.username}<div class="result">{@render results()}</div>{/if}
+        </li>
+      {:else}
+        <li class="empty">No person yet.</li>
+      {/each}
+    </ul>
+  </section>
+
+  <section class="sec" aria-labelledby="h-groups">
+    <div class="sec-head">
+      <h2 id="h-groups">Groups</h2>
+      <span>{teams.length}</span>
+      <span class="end"><Button kind="outline" size="sm" onclick={() => { creatingGroup = true; groupNote = null; }}>New group</Button></span>
+    </div>
+    {#if groupNote && !creatingGroup}<p class="note" class:fail={groupNote.bad} role="status">{groupNote.text}</p>{/if}
+    <ul class="list" aria-label="Who gets which apps">
+      <li>
+        <div class="group">
+          <Tile icon="users" size={30} />
+          <span class="who"><strong>Everyone</strong><small>{plural(people.length, "person", "people")}</small></span>
+          <span class="faces"></span>
+          <span class="apps">
+            {#each byGroup.get("") ?? [] as a (a.name)}<Logo app={a} title={title(a)} size={24} />{:else}<small>no app yet</small>{/each}
+          </span>
+        </div>
+      </li>
       {#each teams as g (g.name)}
         {@const members = [...new Set(g.members)]}
         <li>
-          <a href={itemPath("/organization", g.name)}>
-            <span class="gh"><strong>{g.name}</strong><small>{members.length} {members.length === 1 ? "person" : "people"}</small></span>
+          <a class="group row" href={itemPath("/organization", g.name)}>
+            <Tile icon={g.name === ADMINS ? "key" : "users"} size={30} />
+            <span class="who"><strong>{g.name}</strong><small>{plural(members.length, "person", "people")}</small></span>
             <span class="faces">{#each members.slice(0, 4) as m (m)}<Avatar name={name(m)} size={22} />{/each}{#if members.length > 4}<small>+{members.length - 4}</small>{/if}</span>
-            <span class="tiles">
-              {#each byGroup.get(g.name) ?? [] as a (a.name)}<Avatar name={title(a)} tile size={24} />{/each}
-              {#if g.name === ADMINS}<span class="chip">runs the console</span>{/if}
+            <span class="apps">
+              {#each byGroup.get(g.name) ?? [] as a (a.name)}<Logo app={a} title={title(a)} size={24} />{/each}
+              {#if g.name === ADMINS}<Tag>runs the console</Tag>{/if}
             </span>
           </a>
         </li>
       {/each}
-      <li class="new">
-        <form onsubmit={addGroup}>
-          <label for="new-group"><strong>New group</strong><small>lowercase, digits, . _ -</small></label>
-          <input id="new-group" bind:value={newGroup} placeholder="e.g. studio" pattern="[a-z0-9][a-z0-9._\-]{'{1,62}'}" required />
-          <Button kind="quiet" type="submit">Add group</Button>
-          {#if groupNote}<small class:fail={groupNote.bad} role="status">{groupNote.text}</small>{/if}
-        </form>
-      </li>
     </ul>
-    {#if agentAccounts.length}
-      <div class="agents">
-        <span class="faces">{#each agentAccounts.slice(0, 3) as a (a.username)}<AgentFace name={a.username.replace(/^agent-/, "")} size={28} />{/each}</span>
-        <span><strong>Agents</strong><small>{agentAccounts.length} {agentAccounts.length === 1 ? "account that works" : "accounts that work"} here too</small></span>
-        {#each agentAccounts as a (a.username)}<span class="chip">{a.username}</span>{/each}
-      </div>
-    {/if}
   </section>
 
-  <section class="people">
-    <div class="head">
-      <h2 class="sec-title">People <small>{people.length}</small></h2>
-      {#if !adding}<Button kind="quiet" onclick={() => { adding = true; personNote = null; }}>Add a person</Button>{/if}
+  {#if agentAccounts.length}
+    <section class="sec" aria-labelledby="h-agents">
+      <div class="sec-head">
+        <h2 id="h-agents">Agent accounts</h2>
+        <span>{agentAccounts.length === 1 ? "one account that works here too" : `${agentAccounts.length} accounts that work here too`}</span>
+      </div>
+      <ul class="list">
+        {#each agentAccounts as a (a.username)}
+          {@const short = a.username.replace(/^agent-/, "")}
+          <li class="agent">
+            <Tile icon={agentIcon(short)} tone="agent" size={28} />
+            <span class="who"><strong>{a.name || short}</strong><small class="mono">{a.username}</small></span>
+          </li>
+        {/each}
+      </ul>
+    </section>
+  {/if}
+
+  <section class="sec" aria-labelledby="h-mail">
+    <div class="sec-head">
+      <h2 id="h-mail">System mail</h2>
+      <span>invites and warnings to the admins</span>
+      <span class="end">
+        {#if mail?.ownServer && !mail.own}<Button kind="outline" size="sm" disabled={usingOwn} onclick={useOwnMail}>{usingOwn ? "Checking delivery" : "Use the cell's own server"}</Button>{/if}
+        <Button kind="outline" size="sm" onclick={editMail}>{mail?.configured && !mail.own ? "Change" : mail?.ownServer ? "Use another server" : "Set up"}</Button>
+      </span>
     </div>
-    {#if row === null}{@render results()}{/if}
-    {#if adding}
-      <form class="add" onsubmit={addPerson}>
-        <label>Username<input bind:value={person.username} required pattern="[a-z0-9][a-z0-9._\-]{'{1,62}'}" autocomplete="off" /></label>
-        <label>Name<input bind:value={person.name} required autocomplete="off" /></label>
-        <label>Email<input type="email" bind:value={person.email} autocomplete="off" /></label>
-        <label>First password<input type="password" bind:value={person.password} autocomplete="new-password" placeholder="empty: send an invite" /></label>
+    {#if mailNote && !editingMail}<p class="note" class:fail={mailNote.bad} role="status">{mailNote.text}</p>{/if}
+    {#if mailFailed}<p class="fail" role="alert">{mailFailed}</p>{/if}
+    <div class="panel">
+      {#if mail?.own}
+        <p class="line"><Tile icon="mail" tone="ok" size={28} /><span><Tag mono>{mail.from}</Tag> from the cell's own mail server, straight to each receiver. Admins with a mail address hear when an app needs attention.</span></p>
+      {:else if mail?.configured}
+        <p class="line"><Tile icon="mail" tone="ok" size={28} /><span><Tag mono>{mail.from}</Tag> through {mail.host}:{mail.port}{mail.username ? ` as ${mail.username}` : ""}, {mail.tls ? "TLS" : "STARTTLS"}. Admins with a mail address hear when an app needs attention.</span></p>
+      {:else}
+        <p class="line"><Tile icon="mail" size={28} /><span>No mail server yet. Invites come back as links to hand over, and warnings stay in the console.</span></p>
+      {/if}
+      {#if mail?.ownServer}
+        {#if mail.own}
+          <p class="hint">Keep these records: without them receivers file the cell's mail as spam.</p>
+        {:else}
+          <ol class="mail-steps">
+            <li>Ask your hosting provider to allow outgoing mail on port 25. Many block it for new servers until asked.</li>
+            <li>Set the PTR record below at the hosting provider, in the server's network settings.</li>
+            <li>Add the other records below in your DNS. Each shows Set once DNS answers with it.</li>
+            <li>Press <em>Use the cell's own server</em>. The cell first checks that it reaches your people's mail servers and changes nothing if it does not.</li>
+          </ol>
+        {/if}
+        <ul class="records">
+          {#each mail.ownServer.records as r (r.type + r.name)}
+            <li>
+              <Tag tone={r.set ? "ok" : "warn"}>{r.set ? "Set" : "Missing"}</Tag>
+              <code class="mono">{r.type}</code>
+              <code class="mono name">{r.name}</code>
+              <code class="mono value">{r.value}</code>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </div>
+  </section>
+
+  <section class="sec" aria-labelledby="h-models">
+    <div class="sec-head">
+      <h2 id="h-models">Models</h2>
+      <span>the provider every agent and app of the cell uses</span>
+      <span class="end"><Button kind="outline" size="sm" onclick={editModels}>{models?.configured ? "Change" : "Set up"}</Button></span>
+    </div>
+    {#if modelsNote && !editingModels}<p class="note" class:fail={modelsNote.bad} role="status">{modelsNote.text}</p>{/if}
+    {#if modelsFailed}<p class="fail" role="alert">{modelsFailed}</p>{/if}
+    <div class="panel">
+      {#if models?.configured}
+        <p class="line"><Tile icon="spark" tone="agent" size={28} /><span><Tag mono>{models.model}</Tag> from {models.provider === "openai" ? models.baseUrl : "Anthropic"}, for every agent and app of the cell, {models.tokensPerHour ? `at most ${tokens(models.tokensPerHour)} tokens an hour each` : "without a limit"}.</span></p>
+      {:else}
+        <p class="line"><Tile icon="spark" size={28} /><span>No model provider yet. Agent tasks wait until one is set.</span></p>
+      {/if}
+      {#if usageFailed}<p class="fail" role="alert">{usageFailed}</p>{/if}
+      {#if usage?.length}
+        <ul class="usage" aria-label="Tokens per account since the gateway last started">
+          {#each usage as a (a.account)}
+            <li>
+              <span class="acct">{accountName(a.account)}</span>
+              <span class="bar" aria-hidden="true">
+                <span class="tin" style:width="{(a.inputTokens / usageMax) * 100}%"></span><span class="tout" style:width="{(a.outputTokens / usageMax) * 100}%"></span>
+              </span>
+              <small class="mono">{tokens(a.inputTokens)} in, {tokens(a.outputTokens)} out</small>
+            </li>
+          {/each}
+        </ul>
+        <p class="hint">Tokens since the model gateway last started.</p>
+      {/if}
+    </div>
+  </section>
+
+  {#if adding}
+    <Drawer title="Add a person" subtitle="Without a first password the person gets an invite." onclose={() => (adding = false)}>
+      <form class="form" onsubmit={addPerson}>
+        {#if personNote?.bad}<p class="fail" role="alert">{personNote.text}</p>{/if}
+        <label class="field">Username<input bind:value={person.username} required pattern="[a-z0-9][a-z0-9._\-]{'{1,62}'}" autocomplete="off" /></label>
+        <label class="field">Name<input bind:value={person.name} required autocomplete="off" /></label>
+        <label class="field">Email<input type="email" bind:value={person.email} autocomplete="off" /></label>
+        <label class="field">First password<input type="password" bind:value={person.password} autocomplete="new-password" placeholder="empty: send an invite" /></label>
         <fieldset>
           <legend>Groups</legend>
           {#each teams as g (g.name)}
             <label class="pick"><input type="checkbox" bind:group={person.groups} value={g.name} />{g.name}</label>
           {/each}
         </fieldset>
-        <div class="row"><Button type="submit" disabled={minting}>Add</Button><Button kind="quiet" type="button" onclick={() => (adding = false)}>Cancel</Button></div>
+        <div class="buttons"><Button type="submit" disabled={minting}>Add</Button><Button kind="plain" onclick={() => (adding = false)}>Cancel</Button></div>
       </form>
-    {/if}
-    {#snippet results()}
-      {#if personNote}<p class="note" class:fail={personNote.bad} role="status">{personNote.text}</p>{/if}
-      {#if token}
-        <div class="token" role="status">
-          <p><strong>{token.title}</strong>, {token.text}</p>
-          <CommandBox command={token.value} />
-          <Button kind="quiet" onclick={() => (token = null)}>Done</Button>
-        </div>
-      {/if}
-      {#if tokenError}<p class="note fail" role="alert">{tokenError}</p>{/if}
-    {/snippet}
-    <ul class="list">
-      {#each people as u (u.username)}
-        <li>
-          <Avatar name={u.name || u.username} size={30} />
-          <span class="who"><strong>{u.name || u.username}</strong><small>{u.username}{u.email ? ` · ${u.email}` : ""}</small></span>
-          <span class="in">{#each [...new Set(u.groups)] as g (g)}<span class="chip">{g}</span>{/each}</span>
-          <span class="acts">
-            {#if removing === u.username}
-              <small>Remove {u.name || u.username} for good?</small>
-              <Button kind="danger" disabled={minting} onclick={() => remove(u)}>Remove</Button>
-              <Button kind="quiet" disabled={minting} onclick={() => (removing = null)}>Keep</Button>
-            {:else}
-              <Button kind="quiet" disabled={minting} onclick={() => invite(u)}>Invite</Button>
-              <Button kind="quiet" disabled={minting} onclick={() => appPassword(u)}>App password</Button>
-              <Button kind="quiet" disabled={minting} onclick={() => (removing = u.username)}>Remove</Button>
-            {/if}
-          </span>
-          {#if row === u.username}<div class="result">{@render results()}</div>{/if}
-        </li>
-      {/each}
-    </ul>
-  </section>
+    </Drawer>
+  {/if}
 
-  <section class="mail">
-    <div class="head">
-      <h2 class="sec-title">System mail</h2>
-      {#if !editingMail}
-        <span class="acts">
-          {#if mail?.ownServer && !mail.own}<Button kind="quiet" disabled={usingOwn} onclick={useOwnMail}>{usingOwn ? "Checking delivery" : "Use the cell's own server"}</Button>{/if}
-          <Button kind="quiet" onclick={editMail}>{mail?.configured && !mail.own ? "Change" : mail?.ownServer ? "Use another server" : "Set up"}</Button>
-        </span>
-      {/if}
-    </div>
-    {#if mailNote}<p class="note" class:fail={mailNote.bad} role="status">{mailNote.text}</p>{/if}
-    {#if mailFailed}<p class="note fail" role="alert">{mailFailed}</p>{/if}
-    {#if editingMail}
-      <form class="add" onsubmit={saveMail}>
-        <label>Server<input bind:value={mailForm.host} required placeholder="smtp.example.com" autocomplete="off" /></label>
-        <label>Port<input type="number" min="1" max="65535" bind:value={mailForm.port} placeholder={mailForm.tls ? "465" : "587"} /></label>
-        <label>Sender<input type="email" bind:value={mailForm.from} required placeholder="cell@example.com" autocomplete="off" /></label>
-        <label>Login<input bind:value={mailForm.username} autocomplete="off" /></label>
-        <label>Password<input type="password" bind:value={mailForm.password} autocomplete="new-password" placeholder={mail?.configured && mailForm.username.trim() && mailForm.username.trim() === mail.username && mailForm.host.trim() === mail.host ? "empty keeps the password" : ""} /></label>
+  {#if creatingGroup}
+    <Drawer title="New group" subtitle="Open it afterwards to add people." onclose={() => (creatingGroup = false)}>
+      <form class="form" onsubmit={addGroup}>
+        {#if groupNote?.bad}<p class="fail" role="alert">{groupNote.text}</p>{/if}
+        <label class="field">Name<input bind:value={newGroup} placeholder="e.g. studio" pattern="[a-z0-9][a-z0-9._\-]{'{1,62}'}" required autocomplete="off" /><small>lowercase, digits, . _ -</small></label>
+        <div class="buttons"><Button type="submit">Add group</Button><Button kind="plain" onclick={() => (creatingGroup = false)}>Cancel</Button></div>
+      </form>
+    </Drawer>
+  {/if}
+
+  {#if editingMail}
+    <Drawer title="System mail" onclose={() => { editingMail = false; mailNote = null; }}>
+      <form class="form" onsubmit={saveMail}>
+        {#if mailNote?.bad}<p class="fail" role="alert">{mailNote.text}</p>{/if}
+        <label class="field">Server<input bind:value={mailForm.host} required placeholder="smtp.example.com" autocomplete="off" /></label>
+        <label class="field">Port<input type="number" min="1" max="65535" bind:value={mailForm.port} placeholder={mailForm.tls ? "465" : "587"} /></label>
+        <label class="field">Sender<input type="email" bind:value={mailForm.from} required placeholder="cell@example.com" autocomplete="off" /></label>
+        <label class="field">Login<input bind:value={mailForm.username} autocomplete="off" /></label>
+        <label class="field">Password<input type="password" bind:value={mailForm.password} autocomplete="new-password" placeholder={mail?.configured && mailForm.username.trim() && mailForm.username.trim() === mail.username && mailForm.host.trim() === mail.host ? "empty keeps the password" : ""} /></label>
         <label class="pick"><input type="checkbox" bind:checked={mailForm.tls} />TLS from the start (port 465)</label>
-        <div class="row">
+        <div class="buttons">
           <Button type="submit" disabled={savingMail}>{savingMail ? "Checking the server" : "Check and save"}</Button>
-          <Button kind="quiet" type="button" onclick={() => { editingMail = false; mailNote = null; }}>Cancel</Button>
+          <Button kind="plain" onclick={() => { editingMail = false; mailNote = null; }}>Cancel</Button>
         </div>
       </form>
-    {:else if mail?.own}
-      <p class="mail-line"><span class="chip">{mail.from}</span><small>from the cell's own mail server, straight to each receiver. Admins with a mail address hear when an app needs attention.</small></p>
-    {:else if mail?.configured}
-      <p class="mail-line"><span class="chip">{mail.from}</span><small>through {mail.host}:{mail.port}{mail.username ? ` as ${mail.username}` : ""}, {mail.tls ? "TLS" : "STARTTLS"}. Admins with a mail address hear when an app needs attention.</small></p>
-    {:else}
-      <p class="mail-line"><small>No mail server yet. Invites come back as links to hand over, and warnings stay in the console.</small></p>
-    {/if}
-    {#if mail?.ownServer && !editingMail}
-      {#if mail.own}
-        <p class="mail-line"><small>Keep these records: without them receivers file the cell's mail as spam.</small></p>
-      {:else}
-        <ol class="mail-steps">
-          <li>Ask your hosting provider to allow outgoing mail on port 25. Many block it for new servers until asked.</li>
-          <li>Set the PTR record below at the hosting provider, in the server's network settings.</li>
-          <li>Add the other records below in your DNS. Each shows Set once DNS answers with it.</li>
-          <li>Press <em>Use the cell's own server</em>. The cell first checks that it reaches your people's mail servers and changes nothing if it does not.</li>
-        </ol>
-      {/if}
-      <ul class="records">
-        {#each mail.ownServer.records as r (r.type + r.name)}
-          <li>
-            <span class="chip" class:missing={!r.set}>{r.set ? "Set" : "Missing"}</span>
-            <code>{r.type}</code>
-            <code class="name">{r.name}</code>
-            <code class="value">{r.value}</code>
-          </li>
-        {/each}
-      </ul>
-    {/if}
-  </section>
+    </Drawer>
+  {/if}
 
-  <section class="mail">
-    <div class="head">
-      <h2 class="sec-title">Models</h2>
-      {#if !editingModels}<Button kind="quiet" onclick={editModels}>{models?.configured ? "Change" : "Set up"}</Button>{/if}
-    </div>
-    {#if modelsNote}<p class="note" class:fail={modelsNote.bad} role="status">{modelsNote.text}</p>{/if}
-    {#if modelsFailed}<p class="note fail" role="alert">{modelsFailed}</p>{/if}
-    {#if editingModels}
-      <form class="add" onsubmit={saveModels}>
-        <label>Provider<select bind:value={modelsForm.provider}><option value="anthropic">Anthropic</option><option value="openai">OpenAI-compatible</option></select></label>
-        <label>Address<input type="url" bind:value={modelsForm.baseUrl} required={modelsForm.provider === "openai"} placeholder={modelsForm.provider === "openai" ? "https://api.openai.com/v1" : "https://api.anthropic.com"} autocomplete="off" /></label>
-        <label>Model<input bind:value={modelsForm.model} required={modelsForm.provider === "openai"} placeholder={modelsForm.provider === "openai" ? "gpt-5" : "claude-opus-5-5"} autocomplete="off" /></label>
-        <label>Tokens per hour<input type="number" min="1" step="1" bind:value={modelsForm.tokensPerHour} placeholder="no limit" /><small>for each agent and app on its own</small></label>
-        <label>Key<input type="password" bind:value={modelsForm.apiKey} autocomplete="new-password" placeholder={models?.configured && models.provider === modelsForm.provider && (models.baseUrl ?? "") === modelsForm.baseUrl.trim().replace(/\/$/, "") ? "empty keeps the key" : ""} /></label>
-        <div class="row">
+  {#if editingModels}
+    <Drawer title="Models" onclose={() => { editingModels = false; modelsNote = null; }}>
+      <form class="form" onsubmit={saveModels}>
+        {#if modelsNote?.bad}<p class="fail" role="alert">{modelsNote.text}</p>{/if}
+        <label class="field">Provider<select bind:value={modelsForm.provider}><option value="anthropic">Anthropic</option><option value="openai">OpenAI-compatible</option></select></label>
+        <label class="field">Address<input type="url" bind:value={modelsForm.baseUrl} required={modelsForm.provider === "openai"} placeholder={modelsForm.provider === "openai" ? "https://api.openai.com/v1" : "https://api.anthropic.com"} autocomplete="off" /></label>
+        <label class="field">Model<input bind:value={modelsForm.model} required={modelsForm.provider === "openai"} placeholder={modelsForm.provider === "openai" ? "gpt-5" : "claude-opus-5-5"} autocomplete="off" /></label>
+        <label class="field">Tokens per hour<input type="number" min="1" step="1" bind:value={modelsForm.tokensPerHour} placeholder="no limit" /><small>for each agent and app on its own</small></label>
+        <label class="field">Key<input type="password" bind:value={modelsForm.apiKey} autocomplete="new-password" placeholder={models?.configured && models.provider === modelsForm.provider && (models.baseUrl ?? "") === modelsForm.baseUrl.trim().replace(/\/$/, "") ? "empty keeps the key" : ""} /></label>
+        <div class="buttons">
           <Button type="submit" disabled={savingModels}>{savingModels ? "Checking the key" : "Check and save"}</Button>
-          <Button kind="quiet" type="button" onclick={() => { editingModels = false; modelsNote = null; }}>Cancel</Button>
+          <Button kind="plain" onclick={() => { editingModels = false; modelsNote = null; }}>Cancel</Button>
         </div>
       </form>
-    {:else if models?.configured}
-      <p class="mail-line"><span class="chip">{models.model}</span><small>from {models.provider === "openai" ? models.baseUrl : "Anthropic"}, for every agent and app of the cell, {models.tokensPerHour ? `at most ${tokens(models.tokensPerHour)} tokens an hour each` : "without a limit"}</small></p>
-    {:else}
-      <p class="mail-line"><small>No model provider yet. Agent tasks wait until one is set.</small></p>
-    {/if}
-    {#if usageFailed}<p class="note fail" role="alert">{usageFailed}</p>{/if}
-    {#if usage?.length}
-      <ul class="usage" aria-label="Tokens per account since the gateway last started">
-        {#each usage as a (a.account)}
-          <li>
-            <span class="who">{accountName(a.account)}</span>
-            <span class="bar" aria-hidden="true">
-              <span class="in" style:width="{(a.inputTokens / usageMax) * 100}%"></span><span class="out" style:width="{(a.outputTokens / usageMax) * 100}%"></span>
-            </span>
-            <small>{tokens(a.inputTokens)} in · {tokens(a.outputTokens)} out</small>
-          </li>
-        {/each}
-      </ul>
-      <small>Tokens since the model gateway last started.</small>
-    {/if}
-  </section>
+    </Drawer>
+  {/if}
 
   {#if current}
     {#key current.name}
@@ -542,163 +605,266 @@
     />
     {/key}
   {/if}
+{:else if !failed}
+  <p class="empty plain">Reading the organization</p>
 {/if}
 
 <style>
-  .tree {
-    position: relative;
-    display: grid;
-    justify-items: center;
-    gap: 34px;
-    margin-top: 40px;
+  .empty.plain {
+    padding: 0;
   }
-  .root {
+  .note {
+    margin: 0 0 12px;
+    padding: 10px 14px;
+    border-radius: var(--radius-control);
+    background: var(--color-ok-tile);
+    color: var(--color-ink);
+  }
+  .note.fail {
+    background: var(--color-warn-bg);
+    color: var(--color-warn-text);
+  }
+  .who {
+    flex: 1;
+    min-width: 0;
+  }
+  .who strong,
+  .who small {
+    display: block;
+  }
+  .who strong {
+    font-weight: 500;
+  }
+  .who small {
+    font-size: 12.5px;
+    color: var(--color-text);
+    overflow-wrap: anywhere;
+  }
+  .person,
+  .group,
+  .agent {
     display: flex;
     align-items: center;
     gap: 14px;
-    padding: 14px 18px;
-    border-radius: var(--radius-panel);
-    background: var(--color-panel);
+    padding: 12px 20px;
   }
-  .root::after {
-    content: "";
-    position: absolute;
-    top: 72px;
-    left: 8%;
-    right: 8%;
-    height: 22px;
-    border: 2px dashed var(--color-line);
-    border-bottom: 0;
-    border-radius: 14px 14px 0 0;
-    pointer-events: none;
-  }
-  .all {
-    display: grid;
-    place-items: center;
-    width: 28px;
-    height: 28px;
-    border-radius: 8px;
-    background: var(--color-sunk);
-    font-size: 11.5px;
-    font-weight: 700;
-  }
-  .root strong,
-  .root small,
-  .gh strong,
-  .gh small,
-  .agents strong,
-  .agents small {
-    display: block;
-  }
-  small {
-    color: var(--color-muted);
-    font-size: 13px;
-  }
-  .gets {
-    min-width: 64px;
-    padding-bottom: 6px;
-    background: repeating-linear-gradient(90deg, var(--color-ok) 0 5px, transparent 5px 9px) bottom / 100% 2px no-repeat;
-    text-align: center;
-  }
-  .tiles,
+  .in,
+  .apps,
   .faces {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
   }
-  .groups {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: 12px;
-    width: 100%;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-  .groups a,
-  .groups form {
-    display: grid;
-    align-content: start;
-    gap: 12px;
-    height: 100%;
-    padding: 16px;
-    border-radius: var(--radius-panel);
-    background: var(--color-panel);
-    color: inherit;
-    text-decoration: none;
-  }
-  .groups a:hover {
-    outline: 2px solid var(--color-line);
-  }
-  .gh strong {
-    font: 600 1.05rem var(--font-display);
-  }
-  .new label strong,
-  .new label small {
-    display: block;
-  }
-  .new form {
-    background: none;
-    outline: 2px dashed var(--color-line);
-    outline-offset: -2px;
-  }
-  .agents {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 12px;
-    padding: 12px 18px;
-    border-radius: var(--radius-panel);
-    background: var(--color-panel);
+  .in {
+    flex: 0 1 auto;
+    justify-content: flex-end;
   }
   .acts {
+    flex: none;
     display: flex;
-    gap: 6px;
+    align-items: center;
+    gap: 2px;
   }
-  .mail-line {
+  .acts small {
+    margin-right: 8px;
+    color: var(--color-warn-text);
+  }
+  .result {
+    padding: 0 20px 14px 64px;
+  }
+  .token {
+    margin: 0 0 12px;
+    padding: 14px 16px;
+    border-radius: var(--radius-box);
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+  }
+  .result .token {
+    margin: 0;
+  }
+  .token p {
+    margin: 0;
+    color: var(--color-text);
+  }
+  .token strong {
+    font-weight: 500;
+    color: var(--color-ink);
+  }
+  .copy {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 10px;
-    margin: 0;
+    gap: 8px;
+    margin-top: 10px;
   }
-  .mail-steps {
-    display: grid;
-    gap: 4px;
-    margin: 0;
-    padding-left: 20px;
-    font-size: 13px;
-    color: var(--color-muted);
-  }
-  .records {
-    display: grid;
-    gap: 6px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-  .records li {
-    display: grid;
-    grid-template-columns: 76px 44px minmax(0, 14rem) minmax(0, 1fr);
-    align-items: center;
-    gap: 10px;
-    padding: 10px 14px;
-    border-radius: var(--radius-part);
-    background: var(--color-panel);
-  }
-  .records code {
+  .copy code {
+    flex: 1 1 260px;
+    min-width: 0;
+    padding: 8px 12px;
+    border-radius: var(--radius-control);
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-hairline);
+    font-size: 12.5px;
     overflow-wrap: anywhere;
     user-select: all;
   }
-  .records .chip {
-    justify-self: start;
-    background: color-mix(in srgb, var(--color-ok) 22%, transparent);
+  .group .faces {
+    flex: 0 0 140px;
+    gap: 0;
   }
-  .records .chip.missing {
-    background: color-mix(in srgb, var(--color-bad) 22%, transparent);
+  .group .faces > :global(*) + :global(*) {
+    margin-left: -6px;
   }
-  @media (max-width: 760px) {
+  .group .faces small,
+  .apps small {
+    margin-left: 8px;
+    font-size: 12px;
+    color: var(--color-muted);
+  }
+  .group .apps {
+    flex: 0 1 280px;
+    justify-content: flex-end;
+  }
+  .panel {
+    padding: 18px 20px;
+    border-radius: var(--radius-panel);
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-line);
+  }
+  .line {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin: 0;
+    color: var(--color-text);
+  }
+  .line > span {
+    padding-top: 3px;
+  }
+  .hint {
+    margin: 14px 0 0;
+    font-size: 12.5px;
+    color: var(--color-muted);
+  }
+  .mail-steps {
+    margin: 16px 0 0;
+    padding-left: 20px;
+    color: var(--color-text);
+  }
+  .mail-steps li + li {
+    margin-top: 4px;
+  }
+  .records {
+    margin: 14px 0 0;
+    padding: 0;
+    list-style: none;
+    border-top: 1px solid var(--color-hairline);
+  }
+  .records li {
+    display: grid;
+    grid-template-columns: 76px 56px minmax(0, 1fr) minmax(0, 2fr);
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--color-hairline);
+    font-size: 12.5px;
+  }
+  .records code {
+    overflow-wrap: anywhere;
+  }
+  .records .value {
+    color: var(--color-text);
+  }
+  .usage {
+    display: grid;
+    gap: 10px;
+    margin: 18px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .usage li {
+    display: grid;
+    grid-template-columns: 160px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 14px;
+    font-size: 13px;
+  }
+  .acct {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .bar {
+    display: flex;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--color-track);
+    overflow: hidden;
+  }
+  .tin {
+    background: var(--color-agent);
+  }
+  .tout {
+    background: var(--color-agent-edge);
+  }
+  .usage small {
+    font-size: 12px;
+    color: var(--color-muted);
+  }
+  .form {
+    display: grid;
+    gap: 16px;
+  }
+  .field small {
+    color: var(--color-muted);
+  }
+  fieldset {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    margin: 0;
+    padding: 12px 14px;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-control);
+  }
+  legend {
+    padding: 0 4px;
+    font-size: 13px;
+    color: var(--color-text);
+  }
+  .pick {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13.5px;
+  }
+  .buttons {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+  }
+  @media (max-width: 860px) {
+    .person {
+      flex-wrap: wrap;
+    }
+    .in {
+      justify-content: flex-start;
+    }
+    .acts {
+      flex-basis: 100%;
+      flex-wrap: wrap;
+      margin-left: 30px;
+    }
+    .result {
+      padding-left: 20px;
+    }
+    .group {
+      flex-wrap: wrap;
+    }
+    .group .faces {
+      flex-basis: auto;
+    }
     .records li {
       grid-template-columns: 76px 1fr;
     }
@@ -706,172 +872,12 @@
     .records .value {
       grid-column: 1 / -1;
     }
-  }
-  .mail,
-  .people {
-    display: grid;
-    gap: 12px;
-    margin-top: 48px;
-  }
-  .head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-  .head .sec-title {
-    margin: 0;
-  }
-  input,
-  select {
-    width: 100%;
-    padding: 9px 12px;
-    border: 2px solid var(--color-line);
-    border-radius: var(--radius-part);
-    background: var(--color-sunk);
-    color: inherit;
-    font: inherit;
-  }
-  .pick input {
-    width: auto;
-  }
-  .add {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: 12px;
-    padding: 16px;
-    border-radius: var(--radius-panel);
-    background: var(--color-panel);
-  }
-  .add label {
-    display: grid;
-    align-content: start;
-    gap: 6px;
-    font-size: 13.5px;
-    font-weight: 600;
-  }
-  fieldset {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    grid-column: 1 / -1;
-    margin: 0;
-    padding: 0;
-    border: 0;
-  }
-  legend {
-    margin-bottom: 6px;
-    font-size: 13.5px;
-    font-weight: 600;
-  }
-  .add .pick {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 12px;
-    border-radius: var(--radius-pill);
-    background: var(--color-sunk);
-  }
-  .row {
-    display: flex;
-    gap: 8px;
-    grid-column: 1 / -1;
-  }
-  .token {
-    display: grid;
-    gap: 10px;
-    justify-items: start;
-    padding: 16px;
-    border-radius: var(--radius-panel);
-    background: color-mix(in srgb, var(--color-wait) 16%, var(--color-panel));
-  }
-  .token p {
-    margin: 0;
-  }
-  .token :global(.box) {
-    width: 100%;
-  }
-  .list {
-    display: grid;
-    gap: 6px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-  .list li {
-    display: grid;
-    grid-template-columns: 30px minmax(0, 1.2fr) minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 14px;
-    padding: 10px 12px;
-    border-radius: var(--radius-part);
-  }
-  .list .result {
-    display: grid;
-    gap: 6px;
-    grid-column: 1 / -1;
-  }
-  .list li:hover {
-    background: var(--color-panel);
-  }
-  .who strong,
-  .who small {
-    display: block;
-  }
-  .in {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-  .usage {
-    display: grid;
-    gap: 8px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-  .usage li {
-    display: grid;
-    grid-template-columns: minmax(120px, 180px) 1fr auto;
-    align-items: center;
-    gap: 12px;
-  }
-  .usage .who {
-    font-weight: 600;
-    overflow-wrap: anywhere;
-  }
-  .usage .bar {
-    display: flex;
-    height: 12px;
-    border-radius: 999px;
-    overflow: hidden;
-    background: color-mix(in srgb, var(--color-info) 10%, transparent);
-  }
-  .usage .in {
-    background: var(--color-info);
-  }
-  .usage .out {
-    background: var(--color-ok);
-  }
-  .note {
-    margin: 0;
-    padding: 12px 14px;
-    border-radius: var(--radius-part);
-    background: color-mix(in srgb, var(--color-info) 16%, transparent);
-    font-weight: 600;
-  }
-  .note.fail,
-  small.fail {
-    color: var(--color-bad);
-  }
-  @media (max-width: 760px) {
-    .list li {
-      grid-template-columns: 30px 1fr auto;
+    .usage li {
+      grid-template-columns: minmax(0, 1fr) auto;
     }
-    .in {
-      display: none;
-    }
-    .root::after {
-      display: none;
+    .usage .bar {
+      grid-column: 1 / -1;
+      grid-row: 2;
     }
   }
 </style>

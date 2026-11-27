@@ -1,17 +1,29 @@
 <script lang="ts">
-  // One change waiting for a yes, as a ticket (Figma: 02 Approvals, cr.slip):
-  // who asked, what happens to which app and for whom, why, how risky and
-  // what protects it; the stub holds the decision and the steps that follow.
+  // One change waiting for a yes, as a row: who asked, what happens to which
+  // app, why; the plan (steps, risk, what protects it) opens below. Only
+  // admins decide (E-63): anyone else sees the plan alone.
   import { api, must } from "../lib/api/client";
   import { backupOf, groupsOf, headline, safety, steps, type Change } from "../lib/change";
+  import { itemPath } from "../lib/route";
   import { ago } from "../lib/time";
   import Avatar from "../lib/ui/Avatar.svelte";
-  import Risk from "../lib/ui/Risk.svelte";
+  import Button from "../lib/ui/Button.svelte";
+  import Icon from "../lib/ui/Icon.svelte";
+  import { agentIcon } from "../lib/ui/icons";
+  import Logo from "../lib/ui/Logo.svelte";
+  import Tag from "../lib/ui/Tag.svelte";
+  import Tile from "../lib/ui/Tile.svelte";
 
-  // Only admins decide (E-63): for anyone else the stub shows the plan alone.
-  let { change: c, title, admin, ondecided }: { change: Change; title: string; admin: boolean; ondecided: () => void } = $props();
+  let {
+    change: c,
+    title,
+    admin,
+    app,
+    ondecided,
+  }: { change: Change; title: string; admin: boolean; app?: { name: string; spec?: unknown }; ondecided: () => void } = $props();
   let busy = $state(false);
   let declining = $state(false);
+  let plan = $state(false);
   let failed = $state("");
 
   async function decide(verb: "approve" | "reject") {
@@ -32,315 +44,189 @@
   const agent = $derived(c.requester.kind === "Agent");
   const who = $derived(agent ? `${c.requester.name[0]!.toUpperCase()}${c.requester.name.slice(1)}` : c.requester.name);
   const groups = $derived(groupsOf(c));
-  const verb = $derived({ install: "install", update: "change", restore: "bring back", restart: "restart", remove: c.deleteData ? "remove, delete data" : "remove" }[c.action]);
+  const version = $derived(c.action === "update" && c.patch && typeof (c.patch as Record<string, unknown>).version === "string" ? String((c.patch as Record<string, unknown>).version) : "");
   const patch = $derived(c.patch && Object.keys(c.patch).length ? JSON.stringify(c.patch, null, 2) : "");
 </script>
 
 <article class="slip" aria-label={headline(c, title)}>
-  <div class="main">
-    <p class="by">
-      <Avatar name={who} size={22} />
-      <span><strong>{who}</strong> {agent ? "proposes this" : "asked for this"}</span>
-      <small>{ago(c.createdAt)}</small>
-    </p>
-    <h3><Avatar name={title} tile size={40} />{headline(c, title)}</h3>
-
-    <div class="plan">
-      <div class="line">
-        <span class="stn"><Avatar name={who} size={24} /><span><b>{who}</b><small>{agent ? "agent" : "person"}</small></span></span>
-        <span class="wire"><small>{verb}</small></span>
-        <span class="stn" class:new={c.action === "install"}><Avatar name={title} tile size={24} /><span><b>{title}</b><small>{c.app}</small></span></span>
-      </div>
-      {#if c.action === "restore"}
-        <div class="line">
-          <span class="wire"><small>back to</small></span>
-          <span class="stn small"><b>{backupOf(c)}</b></span>
-        </div>
-      {/if}
-      {#if groups}
-        <div class="line">
-          <span class="wire"><small>open to</small></span>
-          {#each groups.length ? groups : ["everyone"] as g (g)}<span class="stn small"><b>{g}</b></span>{/each}
-        </div>
-      {/if}
-    </div>
-
-    {#if c.reason}<p class="why">{c.reason}</p>{/if}
-
-    <ul class="facts">
-      <li><Risk level={c.risk} /></li>
-      <li>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z" /></svg>
-        {safety(c)}
-      </li>
-    </ul>
-    {#if patch}
-      <details>
-        <summary>Show the details</summary>
-        <pre>{patch}</pre>
-      </details>
-    {/if}
-    <span class="orb" aria-hidden="true"></span>
+  <div class="who">
+    {#if agent}<Tile icon={agentIcon(c.requester.name)} tone="agent" size={30} />{:else}<Avatar name={who} size={30} />{/if}
+    <span>
+      <strong>{agent ? `${who} agent` : who}</strong>
+      <small>{admin ? "Waiting for you" : "Waiting for an admin"}</small>
+    </span>
   </div>
-
-  <div class="stub">
+  <div class="what">
+    <Logo app={app ?? { name: c.app }} {title} />
+    <span class="txt">
+      <span class="head">{headline(c, title).replace(/ to \S+$/, version ? "" : "$&")}{#if version}<span class="mono ver">to {version}</span>{/if}</span>
+      <span class="why">{c.reason || `${agent ? "Proposed" : "Asked for"} ${ago(c.createdAt)}.`}</span>
+    </span>
+  </div>
+  <div class="act">
     {#if admin && declining}
-      <button class="key" disabled={busy} onclick={() => decide("reject")}>Yes, decline</button>
-      <button class="ghost" disabled={busy} onclick={() => (declining = false)}>Keep it</button>
+      <Button kind="warn" disabled={busy} onclick={() => decide("reject")}>Yes, decline</Button>
+      <Button kind="plain" disabled={busy} onclick={() => (declining = false)}>Keep it</Button>
     {:else if admin}
-      <button class="key" disabled={busy} onclick={() => decide("approve")}>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>Approve
-      </button>
-      <button class="ghost" disabled={busy} onclick={() => (declining = true)}>Decline</button>
+      <Button disabled={busy} onclick={() => decide("approve")}>Approve</Button>
+      <Button kind="outline" disabled={busy} onclick={() => (declining = true)}>Decline</Button>
     {/if}
-    {#if failed}<p class="failed" role="alert">{failed}</p>{/if}
-    <ol class="steps" aria-label="What happens after a yes">
-      {#each steps(c) as s (s)}<li>{s}</li>{/each}
-    </ol>
-    {#if c.task && admin}<a class="trail" href="/agents/{c.task}">How the agent got there</a>{/if}
-    <small class="ref">{c.name}</small>
+    <Button kind="plain" aria-expanded={plan} onclick={() => (plan = !plan)}>{plan ? "Hide the plan" : "See the plan"}</Button>
   </div>
+  {#if failed}<p class="fail" role="alert">{failed}</p>{/if}
+  {#if plan}
+    <div class="plan">
+      <ol aria-label="What happens after a yes">
+        {#each steps(c) as s, i (s)}<li><span class="mono">{i + 1}</span>{s}</li>{/each}
+      </ol>
+      <p class="facts">
+        <Tag tone={c.risk === "low" ? "neutral" : "warn"}>{c.risk} risk</Tag>
+        <span><Icon name="shield" size={13} stroke={2} />{safety(c)}</span>
+        {#if c.action === "restore"}<span><Icon name="restore" size={13} stroke={2} />Back to {backupOf(c)}</span>{/if}
+        {#if groups}<span><Icon name="users" size={13} stroke={2} />Open to {groups.length ? groups.join(", ") : "everyone"}</span>{/if}
+      </p>
+      {#if patch}<pre class="mono">{patch}</pre>{/if}
+      <p class="ref">
+        <span class="mono">{c.name}</span>, {agent ? "proposed" : "asked"} {ago(c.createdAt)}
+        {#if c.task && admin}<a class="go" href={itemPath("/agents", c.task)}>How the agent got there<Icon name="right" size={13} stroke={2} /></a>{/if}
+      </p>
+    </div>
+  {/if}
 </article>
 
 <style>
   .slip {
-    --cut: calc(100% - 234px);
-    position: relative;
     display: grid;
-    grid-template-columns: 1fr 234px;
-    overflow: hidden;
-    border-radius: 28px;
-    background: var(--slip-bg);
-    color: var(--slip-ink);
-    /* the two notches where the stub tears off */
-    mask-image: radial-gradient(circle 13px at var(--cut) 0, #0000 97%, #000), radial-gradient(circle 13px at var(--cut) 100%, #0000 97%, #000);
-    mask-composite: intersect;
+    grid-template-columns: 200px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 14px 24px;
+    padding: 20px 22px;
+    background: var(--color-surface);
   }
-  .main {
-    position: relative;
-    display: grid;
-    align-content: start;
-    gap: 18px;
-    padding: 24px 28px 26px;
-  }
-  .by {
+  .who,
+  .what {
     display: flex;
     align-items: center;
-    gap: 9px;
-    margin: 0;
-    font-size: 15px;
+    gap: 11px;
+    min-width: 0;
   }
-  .by small {
-    margin-left: auto;
-    font-size: 13px;
-    font-weight: 600;
-  }
-  h3 {
-    display: flex;
-    align-items: flex-start;
+  .what {
     gap: 14px;
-    margin: 0;
-    max-width: 22ch;
-    font: 600 clamp(1.6rem, 2.6vw, 2.05rem) / 1.06 var(--font-display);
-    letter-spacing: -0.025em;
-    text-wrap: balance;
   }
-  h3 :global(.face) {
+  .who strong,
+  .who small {
+    display: block;
+  }
+  .who strong {
+    font-weight: 500;
+  }
+  .who small {
+    font-size: 12.5px;
+    color: var(--color-agent-ink);
+  }
+  .txt {
+    min-width: 0;
+  }
+  .head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 10px;
+    font-size: 15px;
+    font-weight: 500;
+  }
+  .ver {
+    font-size: 12.5px;
+    font-weight: 400;
+    color: var(--color-text);
+  }
+  .why {
+    display: block;
     margin-top: 2px;
+    color: var(--color-text);
+  }
+  .act {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .fail,
+  .plan {
+    grid-column: 2 / -1;
+    margin: 0;
   }
   .plan {
     display: grid;
-    gap: 12px;
-    padding: 16px;
-    border-radius: 12px;
-    background: rgb(255 255 255 / 0.3);
+    gap: 14px;
+    padding-top: 6px;
   }
-  .line {
+  ol {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
-    gap: 6px 0;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
   }
-  .stn {
+  ol li {
     display: inline-flex;
     align-items: center;
-    gap: 9px;
-    padding: 8px 12px 8px 9px;
-    border-radius: 12px;
-    background: rgb(255 255 255 / 0.56);
-    font-size: 13.5px;
-  }
-  .stn.small {
-    margin-right: 6px;
-    padding: 6px 12px;
-  }
-  .stn.new {
-    outline: 2px dashed currentColor;
-    outline-offset: -2px;
-  }
-  .stn b,
-  .stn small {
-    display: block;
-    line-height: 1.25;
-  }
-  .stn small {
-    opacity: 0.68;
+    gap: 8px;
+    height: 30px;
+    padding: 0 12px 0 6px;
+    border: 1px solid var(--color-chip-line);
+    border-radius: var(--radius-control);
     font-size: 13px;
   }
-  .wire {
-    display: inline-grid;
-    min-width: 74px;
-    padding: 0 8px 8px;
-    background: repeating-linear-gradient(90deg, currentColor 0 6px, transparent 6px 10px) bottom / 100% 2px no-repeat;
-    font-size: 13px;
-    text-align: center;
-    opacity: 0.85;
-  }
-  .why {
-    margin: 0;
-    max-width: 60ch;
-    font-size: 16px;
-    line-height: 1.5;
+  ol li span {
+    width: 20px;
+    height: 20px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--color-tile);
+    font-size: 11px;
+    color: var(--color-text);
   }
   .facts {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    align-items: center;
+    gap: 8px 18px;
     margin: 0;
-    padding: 0;
-    list-style: none;
+    font-size: 13px;
+    color: var(--color-text);
   }
-  .facts li {
+  .facts > span {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    padding: 6px 14px 6px 10px;
-    border-radius: var(--radius-pill);
-    background: rgb(255 255 255 / 0.22);
-    font-size: 13.5px;
-    font-weight: 700;
-  }
-  .facts svg {
-    width: 15px;
-    height: 15px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 2;
-    stroke-linejoin: round;
-  }
-  details {
-    font-size: 13px;
-    font-weight: 600;
-  }
-  summary {
-    cursor: pointer;
+    gap: 7px;
   }
   pre {
-    overflow: auto;
-    max-height: 260px;
-    margin: 10px 0 0;
-    padding: 12px;
-    border-radius: 12px;
-    background: rgb(255 255 255 / 0.4);
-    font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
-  }
-  .main > :not(.orb) {
-    position: relative;
-    z-index: 1;
-  }
-  .orb {
-    position: absolute;
-    z-index: 0;
-    right: -40px;
-    bottom: -84px;
-    width: 156px;
-    height: 156px;
-    border-radius: 50%;
-    background: var(--slip-orb);
-    pointer-events: none;
-  }
-  .stub {
-    display: grid;
-    align-content: center;
-    gap: 10px;
-    padding: 24px 22px;
-    background: repeating-linear-gradient(180deg, currentColor 0 5px, transparent 5px 10px) left / 2px 100% no-repeat;
-  }
-  .stub button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    min-height: 48px;
-    border-radius: var(--radius-pill);
-    font-size: 15.5px;
-    font-weight: 700;
-  }
-  .stub button:disabled {
-    opacity: 0.6;
-    cursor: progress;
-  }
-  .key {
-    border: 0;
-    background: var(--slip-ink);
-    color: var(--slip-key) !important;
-  }
-  .key svg {
-    width: 16px;
-    height: 16px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 2.4;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-  .ghost {
-    border: 2px solid currentColor;
-    background: none;
-    color: var(--slip-ink) !important;
-  }
-  .failed {
     margin: 0;
-    font-size: 13px;
-    font-weight: 700;
-  }
-  .steps {
-    display: grid;
-    gap: 12px;
-    margin: 12px 0 0;
-    padding: 0;
-    list-style: none;
-    font-size: 13.5px;
-    font-weight: 700;
-    opacity: 0.55;
-  }
-  .steps li {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-  }
-  .steps li::before {
-    content: "";
-    width: 10px;
-    height: 10px;
-    border: 2px solid currentColor;
-    border-radius: 50%;
-  }
-  .trail {
-    font-size: 13px;
-    font-weight: 700;
+    padding: 12px 14px;
+    border-radius: var(--radius-tile);
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-hairline);
+    font-size: 12px;
+    overflow-x: auto;
   }
   .ref {
-    font-size: 13px;
-    opacity: 0.7;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    margin: 0;
+    font-size: 12.5px;
+    color: var(--color-muted);
   }
-  @media (max-width: 760px) {
+  @media (max-width: 860px) {
     .slip {
-      grid-template-columns: 1fr;
-      mask-image: none;
+      grid-template-columns: minmax(0, 1fr);
     }
-    .stub {
-      background: repeating-linear-gradient(90deg, currentColor 0 5px, transparent 5px 10px) top / 100% 2px no-repeat;
+    .fail,
+    .plan {
+      grid-column: 1;
     }
   }
 </style>

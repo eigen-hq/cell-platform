@@ -1,13 +1,13 @@
 <script lang="ts">
   // A whole-page state: signing in, refused, something broke.
   import type { Snippet } from "svelte";
-  import Mark from "./Mark.svelte";
+  import Tile from "./Tile.svelte";
 
   let { title, children }: { title: string; children?: Snippet } = $props();
 </script>
 
 <main>
-  <Mark />
+  <Tile icon="cell" size={40} />
   <h1>{title}</h1>
   {@render children?.()}
 </main>
@@ -23,13 +23,15 @@
   }
   h1 {
     margin: 0;
-    font: 600 clamp(2rem, 4vw, 3.1rem) / 1.02 var(--font-display);
+    font-size: 40px;
+    line-height: 1.05;
+    font-weight: 500;
     letter-spacing: -0.035em;
     text-wrap: balance;
   }
   main :global(p) {
     margin: 0;
-    color: var(--color-muted);
-    font-size: 1.1rem;
+    color: var(--color-text);
+    font-size: 16px;
   }
 </style>

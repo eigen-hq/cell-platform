@@ -3,6 +3,7 @@
   // dialog (focus trap, Escape). Closing goes through onclose, so the caller
   // decides (for example the URL). Knows nothing about the API.
   import type { Snippet } from "svelte";
+  import Icon from "./Icon.svelte";
 
   let { title, subtitle = "", onclose, children }: { title: string; subtitle?: string; onclose: () => void; children: Snippet } = $props();
   let dialog: HTMLDialogElement;
@@ -26,7 +27,7 @@
         {#if subtitle}<p>{subtitle}</p>{/if}
       </div>
       <button class="close" onclick={onclose} aria-label="Close">
-        <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg>
+        <Icon name="x" size={16} stroke={2} />
       </button>
     </header>
     {@render children()}
@@ -46,19 +47,20 @@
     overscroll-behavior: contain;
     border: 0;
     border-radius: var(--radius-panel) 0 0 var(--radius-panel);
-    background: var(--color-panel);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-menu);
     color: var(--color-ink);
     animation: slide 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
   }
   dialog::backdrop {
-    background: color-mix(in srgb, var(--color-base) 62%, transparent);
+    background: color-mix(in srgb, var(--color-ink) 28%, transparent);
   }
   /* One column no content can widen past the panel. */
   .inner {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    gap: 26px;
-    padding: 22px 22px 40px;
+    gap: 24px;
+    padding: 26px 28px 40px;
   }
   header {
     display: flex;
@@ -67,13 +69,15 @@
   }
   h2 {
     margin: 0;
-    font: 600 1.6rem / 1.15 var(--font-display);
-    letter-spacing: -0.02em;
+    font-size: 26px;
+    line-height: 1.15;
+    font-weight: 500;
+    letter-spacing: -0.03em;
   }
   p {
     margin: 4px 0 0;
-    color: var(--color-muted);
-    font-size: 13.5px;
+    color: var(--color-text);
+    font-size: 14px;
     overflow-wrap: anywhere;
   }
   .close {
@@ -83,16 +87,12 @@
     width: 36px;
     height: 36px;
     border: 0;
-    border-radius: 50%;
-    background: var(--color-sunk);
+    border-radius: var(--radius-control);
+    background: var(--color-surface-2);
+    box-shadow: 0 0 0 1px var(--color-line);
   }
-  .close svg {
-    width: 16px;
-    height: 16px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 2;
-    stroke-linecap: round;
+  .close:hover {
+    background: var(--color-hover);
   }
   @keyframes slide {
     from { transform: translateX(40px); opacity: 0; }

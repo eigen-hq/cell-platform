@@ -1,29 +1,40 @@
 <script lang="ts">
-  // Where the backups go (E-47): the path out of the cell, the last check
-  // of a target, and, for admins, setting an S3 target. The cell checks a
-  // new target before it uses it. Shows only what the API delivers.
+  // Where the backups go (E-47) and what was backed up: the target and its
+  // last check, each app's last copy, and the copies newest first. Admins
+  // set an S3 target; the cell checks a new target before it uses it.
+  // Shows only what the API delivers.
   import { onMount } from "svelte";
   import { api, must } from "../lib/api/client";
   import type { components } from "../lib/api/schema";
   import { checking, hetznerEndpoint, hetznerRegions, plainHttp, requestOf, shown, type TargetForm } from "../lib/backup";
+  import { lastBackup } from "../lib/home";
   import { newest, STALE } from "../lib/newest";
+  import { itemPath } from "../lib/route";
   import { ago } from "../lib/time";
   import Button from "../lib/ui/Button.svelte";
-  import StatStrip, { type Stat } from "../lib/ui/StatStrip.svelte";
-  import Status from "../lib/ui/Status.svelte";
+  import Drawer from "../lib/ui/Drawer.svelte";
+  import Logo from "../lib/ui/Logo.svelte";
+  import Tag from "../lib/ui/Tag.svelte";
+  import Tile from "../lib/ui/Tile.svelte";
 
+  type App = components["schemas"]["App"];
+  type Backup = components["schemas"]["Backup"];
   type Target = components["schemas"]["BackupTarget"];
 
   let { admin }: { admin: boolean } = $props();
   let polled = $state<Target | null>(null);
   // The answer to the admin's request, until a poll shows that check or a later one.
   let asked = $state<Target | null>(null);
+  let apps = $state<App[] | null>(null);
+  let backups = $state<Backup[]>([]);
   let failed = $state("");
+  let failedCopies = $state("");
 
-  const guard = newest();
-  async function load() {
+  // Two loaders, each with its own guard, so one never drops the other's answer.
+  const guardTarget = newest();
+  async function loadTarget() {
     try {
-      const answer = await guard(api.GET("/v0/backup-target"));
+      const answer = await guardTarget(api.GET("/v0/backup-target"));
       if (answer === STALE) return;
       polled = must(answer);
       failed = "";
@@ -31,19 +42,53 @@
       failed = e instanceof Error ? e.message : String(e);
     }
   }
+  const guardCopies = newest();
+  async function loadCopies() {
+    try {
+      const answer = await guardCopies(
+        (async () => {
+          const list = must(await api.GET("/v0/apps"));
+          const b = await Promise.all(list.map((x) => api.GET("/v0/apps/{name}/backups", { params: { path: { name: x.name } } })));
+          return { list, b: b.flatMap((r) => must(r)) };
+        })(),
+      );
+      if (answer === STALE) return;
+      apps = answer.list.sort((x, y) => (x.title || x.name).localeCompare(y.title || y.name));
+      backups = answer.b.sort((x, y) => y.createdAt.localeCompare(x.createdAt));
+      failedCopies = "";
+    } catch (e) {
+      failedCopies = e instanceof Error ? e.message : String(e);
+    }
+  }
 
   let target = $derived(shown(polled, asked));
   let busy = $derived(checking(target));
-  onMount(() => void load());
-  // Quick while a check runs, slow otherwise.
+  const running = (b: Backup) => b.phase === "" || b.phase === "Pending" || b.phase === "Running";
+  let copying = $derived(backups.some(running));
+  onMount(() => {
+    void loadTarget();
+    void loadCopies();
+  });
+  // Quick while a check or a backup runs, slow otherwise.
   $effect(() => {
-    const t = setInterval(load, busy ? 2500 : 15000);
+    const t = setInterval(loadTarget, busy ? 2500 : 15000);
+    return () => clearInterval(t);
+  });
+  $effect(() => {
+    const t = setInterval(loadCopies, copying ? 5000 : 15000);
     return () => clearInterval(t);
   });
 
   let form = $state<TargetForm>({ provider: "hetzner", region: "fsn1", endpoint: "", otherRegion: "", bucket: "", accessKey: "", secretKey: "", prefix: "", privateNetwork: false });
+  let editing = $state(false);
   let sending = $state(false);
   let formError = $state("");
+
+  function close() {
+    editing = false;
+    form.secretKey = "";
+    formError = "";
+  }
 
   async function submit(e: SubmitEvent) {
     e.preventDefault();
@@ -52,7 +97,7 @@
     formError = "";
     try {
       asked = must(await api.PUT("/v0/backup-target", { body: requestOf(form) }));
-      form.secretKey = "";
+      close();
     } catch (err) {
       formError = err instanceof Error ? err.message : String(err);
     } finally {
@@ -60,513 +105,448 @@
     }
   }
 
-  const kinds = { s3: "S3 bucket", local: "directory on the first machine", other: "rclone remote" } as const;
+  const kinds = { s3: "S3 bucket", local: "Directory on the first machine", other: "rclone remote" } as const;
+  const phases = { "": "Waiting to start", Pending: "Waiting to start", Running: "Running", Completed: "Done", Failed: "Failed" } as const;
+  const tone = (b: Backup) => (b.phase === "Completed" ? "ok" : b.phase === "Failed" ? "warn" : "neutral");
+  const at = (b: Backup) => b.completedAt ?? b.createdAt;
   let check = $derived(target?.check);
-  let wire = $derived(busy ? "wait" : check?.state === "failed" ? "bad" : target?.configured ? "ok" : "none");
-  let stats = $derived.by((): Stat[] => {
-    if (!target) return [];
-    return [
-      { label: "Backups", value: target.configured ? "leave the cell" : "have nowhere to go", tone: target.configured ? "ok" : "bad" },
-      { label: "Target", value: target.kind ? kinds[target.kind] : "not set", tone: target.configured ? "ok" : "none" },
-      {
-        label: "Last check",
-        value: !check ? "none yet" : check.state === "checking" ? "running" : `${check.state} ${ago(check.at)}`,
-        tone: !check ? "none" : check.state === "passed" ? "ok" : check.state === "failed" ? "bad" : "wait",
-      },
-    ];
+  let last = $derived(lastBackup(backups));
+  let titles = $derived(new Map((apps ?? []).map((a) => [a.name, a.title || a.name])));
+  let byName = $derived(new Map((apps ?? []).map((a) => [a.name, a])));
+  const title = (name: string) => titles.get(name) ?? name;
+
+  // Per app: the newest backup (it may still run) and the newest that ended.
+  let perApp = $derived(
+    (apps ?? []).map((a) => {
+      const own = backups.filter((b) => b.app === a.name);
+      return { app: a, count: own.length, now: own.find(running), ended: own.find((b) => !running(b)) };
+    }),
+  );
+
+  let lede = $derived.by(() => {
+    if (!target) return "";
+    const copy = last ? (last.ok ? `Last copy ${ago(last.at)}.` : `The last backup failed, ${ago(last.at)}.`) : apps ? "No copy yet." : "";
+    const where = target.configured ? (target.where ? `Copies go to ${target.where}.` : "") : "Without a target nothing leaves the cell.";
+    return [copy, where].filter(Boolean).join(" ");
   });
+  const HISTORY = 30;
 </script>
 
-<section class="view-head">
-  <h1>Backups</h1>
-  <p>The cell copies the files and databases of every app out of the cell, to one target. Apps never see its keys: each gets its own, for its own corner.</p>
-</section>
+<header class="page-head">
+  <div>
+    <h1>Backups</h1>
+    {#if lede}<p>{lede}</p>{/if}
+  </div>
+  {#if admin && target}
+    <Button kind="outline" size="lg" onclick={() => (editing = true)}>{target.configured ? "Move the backups" : "Set a target"}</Button>
+  {/if}
+</header>
 
 {#if failed}<p class="fail" role="alert">{failed}</p>{/if}
+{#if failedCopies}<p class="fail" role="alert">{failedCopies}</p>{/if}
+
 {#if target}
-  <StatStrip items={stats} />
-
-  <section class="map" aria-label="The path of the backups">
-    <div class="cap">
-      <span>Out of the cell</span>
-      <span class="legend"><i class="ok"></i>in use <i class="wait"></i>being checked <i class="bad"></i>no target or failed</span>
+  <section class="sec" aria-labelledby="h-target">
+    <div class="sec-head">
+      <h2 id="h-target">Where the copies go</h2>
+      <span>One target for the files and databases of every app.</span>
     </div>
-    <div class="topo">
-      <div class="node">
-        <span class="ico"><svg viewBox="0 0 24 24"><rect x="3.5" y="4" width="7" height="7" rx="2" /><rect x="13.5" y="4" width="7" height="7" rx="2" /><rect x="3.5" y="14" width="7" height="6" rx="2" /><ellipse cx="17" cy="15.2" rx="3.5" ry="1.6" /><path d="M13.5 15.2v3.4c0 .9 1.6 1.6 3.5 1.6s3.5-.7 3.5-1.6v-3.4" /></svg></span>
-        <strong>Apps</strong><small>files and databases</small>
+    <div class="target">
+      <div class="where">
+        <Tile icon="backups" tone={target.configured ? "ok" : "warn"} size={40} />
+        <span class="wn">
+          <strong>{target.configured ? (target.kind ? kinds[target.kind] : "Target set") : "No target yet"}</strong>
+          <small>{target.configured ? target.where : "Backups have nowhere to go, so no app is backed up."}</small>
+        </span>
+        {#if target.configured}<Tag tone="ok">in use</Tag>{:else}<Tag tone="warn">not set</Tag>{/if}
       </div>
-      <div class="wire ok"><span>a key per app</span></div>
-      <div class="node">
-        <span class="ico"><svg viewBox="0 0 24 24"><path d="M12 3.5 19 6v5.5c0 4.2-3 7.7-7 9-4-1.3-7-4.8-7-9V6z" /><path d="M9.2 12.2 11.2 14l3.8-4" /></svg></span>
-        <strong>Backup gateway</strong><small>holds the target's keys</small>
+
+      <div class="check">
+        <span class="cl">Last check</span>
+        {#if !check}
+          <p>{target.configured ? "This target was set at the install; nobody checked another one here yet." : "Set one, and the cell checks it before it uses it."}</p>
+        {:else}
+          <div class="ch">
+            {#if check.state === "passed"}
+              <Tag tone="ok">{check.target === target.where ? "Passed, in use" : "Passed"}</Tag>
+            {:else if check.state === "failed"}
+              <Tag tone="warn">Failed, nothing changed</Tag>
+            {:else}
+              <Tag>Checking</Tag>
+            {/if}
+            <span class="tried mono">{check.target}</span>
+          </div>
+          {#if check.state === "checking"}
+            <p>{check.message || "Writing a small test file and deleting it again. This takes a few seconds, at most two minutes."}</p>
+          {:else if check.message}
+            <p class:why={check.state === "failed"}>{check.message}</p>
+          {/if}
+          <small>Asked by {check.by}, {ago(check.at)}</small>
+        {/if}
       </div>
-      <div class="wire {wire}" class:still={wire === "none"}><span>{busy ? "checking" : target.configured ? "encrypted" : "nowhere"}</span></div>
-      {#if target.configured || busy}
-        <div class="node far {wire}">
-          <span class="ico"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="2.5" /><path d="M5 6v12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5V6M5 12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5" /></svg></span>
-          <strong>{busy ? "New target" : target.kind ? kinds[target.kind] : "Target"}</strong>
-          <small class="where">{busy ? check?.target : target.where}</small>
-        </div>
-      {:else}
-        <div class="ghost">no target yet</div>
-      {/if}
     </div>
-  </section>
-
-  <section class="band">
-    <div class="card">
-      <h2 class="sec-title">Last check</h2>
-      {#if !check}
-        <div class="verdict none">
-          <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="19" /><path d="M24 15v10" /><circle cx="24" cy="32" r="1.4" /></svg>
-          <p>{target.configured ? "This target was set at the install; nobody checked another one here yet." : "Without a target nothing leaves the cell. Set one, and the cell checks it before it uses it."}</p>
-        </div>
-      {:else}
-        <div class="verdict {check.state}">
-          {#if check.state === "passed"}
-            <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="19" /><path d="M15.5 24.5l6 6 11-12" /></svg>
-          {:else if check.state === "failed"}
-            <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="19" /><path d="M17 17l14 14M31 17 17 31" /></svg>
-          {:else}
-            <svg class="spin" viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="19" /><path d="M24 5a19 19 0 0 1 19 19" /></svg>
-          {/if}
-          <div>
-            <Status tone={check.state === "passed" ? "ok" : check.state === "failed" ? "bad" : "wait"} label={{ checking: "Checking", passed: check.target === target.where ? "Passed, in use" : "Passed", failed: "Failed, nothing changed" }[check.state]} />
-            <p class="tried">{check.target}</p>
-            {#if check.state === "checking"}
-              <p>{check.message || "Writing a small test file and deleting it again. This takes a few seconds, at most two minutes."}</p>
-              <span class="progress" aria-hidden="true"><span></span></span>
-            {:else if check.message}
-              <p class="why">{check.message}</p>
-            {/if}
-            <small>asked by {check.by}, {ago(check.at)}</small>
-          </div>
-        </div>
-      {/if}
-    </div>
-
-    <div class="card">
-      <h2 class="sec-title">{target.configured ? "Move the backups" : "Set a target"} <small>an S3 bucket</small></h2>
-      {#if admin}
-        <form onsubmit={submit}>
-          <fieldset class="providers">
-            <legend class="vh">Provider</legend>
-            <label class="tile" class:on={form.provider === "hetzner"}>
-              <input type="radio" bind:group={form.provider} value="hetzner" />
-              <strong>Hetzner Object Storage</strong><small>Germany and Finland</small>
-            </label>
-            <label class="tile" class:on={form.provider === "other"}>
-              <input type="radio" bind:group={form.provider} value="other" />
-              <strong>Another S3 service</strong><small>endpoint and region</small>
-            </label>
-          </fieldset>
-          {#if form.provider === "hetzner"}
-            <fieldset class="regions">
-              <legend>Location</legend>
-              {#each hetznerRegions as r (r.id)}
-                <label class="pick" class:on={form.region === r.id}><input type="radio" bind:group={form.region} value={r.id} />{r.city} <small>{r.id}</small></label>
-              {/each}
-              <code class="endpoint">{hetznerEndpoint(form.region)}</code>
-            </fieldset>
-          {:else}
-            <label>Endpoint<input type="url" bind:value={form.endpoint} required placeholder="https://s3.example.com" autocomplete="off" spellcheck="false" /></label>
-            <label>Region <small>optional</small><input bind:value={form.otherRegion} placeholder="us-east-1" autocomplete="off" spellcheck="false" /></label>
-            {#if plainHttp(form)}
-              <label class="pick"><input type="checkbox" bind:checked={form.privateNetwork} />Plain http on a private network, on purpose <small>only to a private IP address</small></label>
-            {/if}
-          {/if}
-          <label>Bucket<input bind:value={form.bucket} required placeholder="cell-backups" autocomplete="off" spellcheck="false" /></label>
-          <label>Folder in the bucket <small>optional</small><input bind:value={form.prefix} placeholder={target.prefix || "the cell's domain"} autocomplete="off" spellcheck="false" /></label>
-          <label>Access key<input bind:value={form.accessKey} required autocomplete="off" spellcheck="false" /></label>
-          <label>Secret key<input type="password" bind:value={form.secretKey} required autocomplete="new-password" /></label>
-          {#if target.configured}
-            <p class="note">Backups made so far stay in the old target, and the cell restores only from the new one. Once the check passed, the next backups go to the new bucket.</p>
-          {/if}
-          <div class="row">
-            <Button type="submit" disabled={sending || busy}>{busy ? "Checking..." : "Check and use"}</Button>
-            {#if formError}<p class="fail" role="alert">{formError}</p>{/if}
-          </div>
-        </form>
-      {:else}
-        <p class="note">Admins (cell-admins) set the target. The cell checks it before it uses it.</p>
-      {/if}
-    </div>
+    {#if !admin}
+      <p class="note">Admins (cell-admins) set the target. The cell checks it before it uses it.</p>
+    {/if}
   </section>
 {/if}
 
-<style>
-  .map {
-    position: relative;
-    margin-top: 44px;
-    padding: 16px 20px 30px;
-    border-radius: var(--radius-panel);
-    background: var(--color-panel);
-  }
-  .map::before {
-    content: "";
-    position: absolute;
-    z-index: -1;
-    top: -60px;
-    right: 6%;
-    width: 480px;
-    height: 220px;
-    border-radius: 50%;
-    background: var(--paint-glow);
-    filter: blur(40px);
-    opacity: 0.45;
-  }
-  .cap {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: space-between;
-    gap: 8px;
-    color: var(--color-muted);
-    font-size: 13px;
-    font-weight: 600;
-  }
-  .legend {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    color: var(--color-dim);
-    font-weight: 400;
-  }
-  .legend i {
-    display: inline-block;
-    width: 14px;
-    height: 2px;
-    margin-left: 6px;
-  }
-  .legend .ok { background: var(--color-ok); }
-  .legend .wait { background: var(--color-wait); }
-  .legend .bad { background: var(--color-bad); }
-  .topo {
-    display: grid;
-    grid-template-columns: auto minmax(70px, 1fr) auto minmax(70px, 1fr) minmax(0, auto);
-    align-items: center;
-    margin-top: 34px;
-  }
-  .node {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    column-gap: 12px;
-    align-items: center;
-    padding: 12px 16px 12px 12px;
-    border-radius: 12px;
-    background: var(--color-sunk);
-  }
-  .node .ico {
-    grid-row: span 2;
-  }
-  .node strong {
-    font-size: 14px;
-    font-weight: 600;
-  }
-  .node small {
-    color: var(--color-dim);
-    font-size: 12px;
-  }
-  .node .where {
-    max-width: 30ch;
-    overflow-wrap: anywhere;
-  }
-  .far.ok { outline: 2px solid color-mix(in srgb, var(--color-ok) 55%, transparent); }
-  .far.wait { outline: 2px dashed var(--color-wait); }
-  .far.bad { outline: 2px solid color-mix(in srgb, var(--color-bad) 65%, transparent); }
-  .ico {
-    display: grid;
-    place-items: center;
-    width: 40px;
-    height: 40px;
-    border-radius: 12px;
-    background: color-mix(in srgb, var(--color-info) 18%, transparent);
-    color: var(--color-info);
-  }
-  .far .ico {
-    background: color-mix(in srgb, var(--color-wait) 20%, transparent);
-    color: var(--color-wait);
-  }
-  .ico svg {
-    width: 22px;
-    height: 22px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.6;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-  .ghost {
-    padding: 20px 18px;
-    border: 2px dashed color-mix(in srgb, var(--color-bad) 60%, transparent);
-    border-radius: 12px;
-    color: var(--color-dim);
-    font-size: 12.6px;
-    font-weight: 600;
-  }
-  .wire {
-    --c: var(--color-dim);
-    position: relative;
-    height: 2px;
-    background: linear-gradient(90deg, var(--c) 0 5px, transparent 5px) 0 0 / 10px 2px;
-    animation: flow 1.6s linear infinite;
-  }
-  .wire.ok { --c: var(--color-ok); }
-  .wire.wait { --c: var(--color-wait); animation-duration: 0.6s; }
-  .wire.bad { --c: var(--color-bad); }
-  .wire.still { animation: none; opacity: 0.6; }
-  .wire span {
-    position: absolute;
-    bottom: 7px;
-    left: 50%;
-    translate: -50%;
-    color: var(--color-muted);
-    font-size: 11.5px;
-    font-weight: 600;
-    white-space: nowrap;
-  }
-  @keyframes flow {
-    to { background-position: 10px 0; }
-  }
+{#if apps}
+  <section class="sec" aria-labelledby="h-apps">
+    <div class="sec-head">
+      <h2 id="h-apps">By app</h2>
+      <span>{apps.length}</span>
+    </div>
+    <ul class="list">
+      {#each perApp as p (p.app.name)}
+        <li>
+          <a class="app row" href={itemPath("/apps", p.app.name)}>
+            <Logo app={p.app} title={title(p.app.name)} size={32} />
+            <span class="an">
+              <strong>{title(p.app.name)}</strong>
+              <small>{p.count === 0 ? "No copy yet" : `${p.count} ${p.count === 1 ? "backup" : "backups"}`}</small>
+            </span>
+            {#if p.now}
+              <Tag>{phases[p.now.phase]}</Tag>
+            {/if}
+            {#if p.ended}
+              <Tag tone={tone(p.ended)}>{p.ended.phase === "Completed" ? "Backed up" : "Failed"}</Tag>
+              <time class="mono" datetime={at(p.ended)}>{ago(at(p.ended))}</time>
+            {:else if !p.now}
+              <span class="never">never</span>
+            {/if}
+          </a>
+        </li>
+      {:else}
+        <li class="empty">No app is installed yet, so there is nothing to back up.</li>
+      {/each}
+    </ul>
+  </section>
 
-  .band {
+  <section class="sec" aria-labelledby="h-history">
+    <div class="sec-head">
+      <h2 id="h-history">History</h2>
+      <span>{backups.length > HISTORY ? `newest ${HISTORY} of ${backups.length}` : backups.length}</span>
+    </div>
+    {#if backups.length}
+      <ul class="list">
+        {#each backups.slice(0, HISTORY) as b (`${b.app}/${b.name}`)}
+          <li class="hist">
+            <time class="mono" datetime={at(b)}>{ago(at(b))}</time>
+            <Logo app={byName.get(b.app) ?? { name: b.app }} title={title(b.app)} size={24} />
+            <span class="ht">
+              <span>{title(b.app)}{#if b.reason}<small>, {b.reason}</small>{/if}</span>
+              {#if b.message && b.phase === "Failed"}<small class="msg">{b.message}</small>{/if}
+            </span>
+            <Tag tone={tone(b)}>{phases[b.phase]}</Tag>
+          </li>
+        {/each}
+      </ul>
+    {:else}
+      <p class="empty plain">No backup ran yet.</p>
+    {/if}
+  </section>
+{/if}
+
+{#if !target && !apps && !failed && !failedCopies}
+  <p class="empty plain">Reading the backups</p>
+{/if}
+
+{#if editing && target}
+  <Drawer
+    title={target.configured ? "Move the backups" : "Set a target"}
+    subtitle="An S3 bucket. The cell checks it first: only if that works does the target change."
+    onclose={close}
+  >
+    <form onsubmit={submit}>
+      <fieldset class="choice two">
+        <legend>Provider</legend>
+        <label class:on={form.provider === "hetzner"}>
+          <input type="radio" bind:group={form.provider} value="hetzner" />
+          <strong>Hetzner Object Storage</strong><small>Germany and Finland</small>
+        </label>
+        <label class:on={form.provider === "other"}>
+          <input type="radio" bind:group={form.provider} value="other" />
+          <strong>Another S3 service</strong><small>endpoint and region</small>
+        </label>
+      </fieldset>
+      {#if form.provider === "hetzner"}
+        <fieldset class="choice pills">
+          <legend>Location</legend>
+          {#each hetznerRegions as r (r.id)}
+            <label class:on={form.region === r.id}><input type="radio" bind:group={form.region} value={r.id} />{r.city} <small>{r.id}</small></label>
+          {/each}
+          <code class="endpoint mono">{hetznerEndpoint(form.region)}</code>
+        </fieldset>
+      {:else}
+        <label class="field">Endpoint<input type="url" bind:value={form.endpoint} required placeholder="https://s3.example.com" autocomplete="off" spellcheck="false" /></label>
+        <label class="field">Region, optional<input bind:value={form.otherRegion} placeholder="us-east-1" autocomplete="off" spellcheck="false" /></label>
+        {#if plainHttp(form)}
+          <label class="tick"><input type="checkbox" bind:checked={form.privateNetwork} />Plain http on a private network, on purpose <small>only to a private IP address</small></label>
+        {/if}
+      {/if}
+      <label class="field">Bucket<input bind:value={form.bucket} required placeholder="cell-backups" autocomplete="off" spellcheck="false" /></label>
+      <label class="field">Folder in the bucket, optional<input bind:value={form.prefix} placeholder={target.prefix || "the cell's domain"} autocomplete="off" spellcheck="false" /></label>
+      <label class="field">Access key<input bind:value={form.accessKey} required autocomplete="off" spellcheck="false" /></label>
+      <label class="field">Secret key<input type="password" bind:value={form.secretKey} required autocomplete="new-password" /></label>
+      {#if target.configured}
+        <p class="note">Backups made so far stay in the old target, and the cell restores only from the new one. Once the check passed, the next backups go to the new bucket.</p>
+      {/if}
+      {#if formError}<p class="fail" role="alert">{formError}</p>{/if}
+      <div><Button type="submit" size="lg" disabled={sending || busy}>{busy ? "Checking..." : "Check and use"}</Button></div>
+    </form>
+  </Drawer>
+{/if}
+
+<style>
+  .target {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
-    gap: 12px;
-    margin-top: 52px;
-  }
-  .card {
-    display: grid;
-    align-content: start;
-    gap: 14px;
-    padding: 18px;
     border-radius: var(--radius-panel);
-    background: var(--color-panel);
-  }
-  .card .sec-title {
-    margin: 0;
-  }
-  .verdict {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    gap: 18px;
-    align-items: start;
-    padding: 18px;
-    border-radius: 16px;
-    background: var(--color-sunk);
-  }
-  .verdict svg {
-    width: 52px;
-    height: 52px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 3;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-  .verdict.passed { color: var(--color-ok); }
-  .verdict.failed { color: var(--color-bad); }
-  .verdict.checking { color: var(--color-wait); }
-  .verdict.none { color: var(--color-dim); }
-  .verdict div {
-    display: grid;
-    gap: 6px;
-    color: var(--color-ink);
-  }
-  .verdict p {
-    margin: 0;
-    color: var(--color-muted);
-  }
-  .verdict .tried {
-    color: var(--color-ink);
-    font-weight: 600;
-    overflow-wrap: anywhere;
-  }
-  .verdict .why {
-    padding: 8px 12px;
-    border-left: 3px solid var(--color-bad);
-    border-radius: 6px;
-    background: color-mix(in srgb, var(--color-bad) 10%, transparent);
-    color: var(--color-ink);
-    font-size: 14px;
-    overflow-wrap: anywhere;
-  }
-  .verdict small {
-    color: var(--color-dim);
-    font-size: 12.5px;
-  }
-  .spin {
-    animation: turn 1.1s linear infinite;
-  }
-  .spin circle {
-    opacity: 0.25;
-  }
-  @keyframes turn {
-    to { rotate: 360deg; }
-  }
-  .progress {
-    display: block;
-    height: 5px;
-    border-radius: 3px;
-    background: color-mix(in srgb, var(--color-ink) 14%, transparent);
+    border: 1px solid var(--color-line);
+    background: var(--color-surface);
     overflow: hidden;
   }
-  .progress span {
+  .where {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 22px 24px;
+    background: var(--color-surface-2);
+  }
+  .wn {
+    flex: 1;
+    min-width: 0;
+  }
+  .wn strong,
+  .wn small {
     display: block;
-    width: 35%;
-    height: 100%;
-    border-radius: inherit;
-    background: var(--color-wait);
-    animation: slide 1.4s ease-in-out infinite;
   }
-  @keyframes slide {
-    from { translate: -100% 0; }
-    to { translate: 300% 0; }
+  .wn strong {
+    font-size: 16px;
+    font-weight: 500;
   }
-
+  .wn small {
+    margin-top: 2px;
+    font-size: 13px;
+    color: var(--color-text);
+    overflow-wrap: anywhere;
+  }
+  .check {
+    display: grid;
+    align-content: start;
+    gap: 8px;
+    padding: 22px 24px;
+    border-left: 1px solid var(--color-hairline);
+  }
+  .cl {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-text);
+  }
+  .ch {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+  }
+  .tried {
+    font-size: 12.5px;
+    overflow-wrap: anywhere;
+  }
+  .check p {
+    margin: 0;
+    color: var(--color-text);
+  }
+  .check p.why {
+    padding: 8px 12px;
+    border-radius: var(--radius-control);
+    background: var(--color-warn-bg);
+    color: var(--color-warn-text);
+    overflow-wrap: anywhere;
+  }
+  .check small {
+    font-size: 12.5px;
+    color: var(--color-muted);
+  }
+  .note {
+    margin: 12px 0 0;
+    color: var(--color-text);
+    font-size: 13px;
+  }
+  .app {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 22px;
+  }
+  .an {
+    flex: 1;
+    min-width: 0;
+  }
+  .an strong,
+  .an small {
+    display: block;
+  }
+  .an strong {
+    font-weight: 500;
+  }
+  .an small {
+    font-size: 12.5px;
+    color: var(--color-muted);
+  }
+  .app time,
+  .never {
+    flex: none;
+    min-width: 88px;
+    text-align: right;
+    font-size: 12px;
+    color: var(--color-muted);
+  }
+  .hist {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 48px;
+    padding: 10px 22px;
+    font-size: 13px;
+  }
+  .hist time {
+    flex: none;
+    width: 110px;
+    font-size: 12px;
+    color: var(--color-muted);
+  }
+  .ht {
+    flex: 1;
+    min-width: 0;
+  }
+  .ht small {
+    color: var(--color-muted);
+  }
+  .ht .msg {
+    display: block;
+    color: var(--color-warn-text);
+    overflow-wrap: anywhere;
+  }
+  .empty.plain {
+    padding: 0;
+    margin-top: 24px;
+  }
   form {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: 12px;
+    gap: 16px;
   }
   fieldset {
-    grid-column: 1 / -1;
     margin: 0;
     padding: 0;
     border: 0;
   }
-  .providers {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
+  legend {
+    margin-bottom: 8px;
+    font-size: 13px;
+    color: var(--color-text);
   }
-  .tile {
-    display: grid;
-    gap: 2px;
-    padding: 14px 16px;
-    border-radius: 16px;
-    background: var(--color-sunk);
-    outline: 2px solid transparent;
+  .choice label {
+    position: relative;
     cursor: pointer;
+    border-radius: var(--radius-box);
+    background: var(--color-surface-2);
+    box-shadow: 0 0 0 1px var(--color-line);
   }
-  .tile.on {
-    outline-color: var(--color-ink);
+  .choice label.on {
+    box-shadow: 0 0 0 2px var(--color-ink);
   }
-  .tile input,
-  .pick input {
+  .choice input {
     position: absolute;
     opacity: 0;
     pointer-events: none;
   }
-  .tile:has(input:focus-visible),
-  .pick:has(input:focus-visible) {
-    outline: 2px solid var(--color-focus);
+  .choice label:has(input:focus-visible) {
+    outline: 2px solid var(--color-agent);
     outline-offset: 2px;
   }
-  .tile small {
-    color: var(--color-dim);
-    font-size: 12.5px;
+  .two {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
   }
-  .regions {
+  .two legend {
+    grid-column: 1 / -1;
+  }
+  .two label {
+    display: grid;
+    gap: 2px;
+    padding: 14px 16px;
+  }
+  .two strong {
+    font-weight: 500;
+  }
+  .two small {
+    font-size: 12.5px;
+    color: var(--color-muted);
+  }
+  .pills {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 8px;
   }
-  legend {
+  .pills legend {
     width: 100%;
-    margin-bottom: 6px;
-    font-size: 13.5px;
-    font-weight: 600;
   }
-  .pick {
-    position: relative;
+  .pills label {
     display: inline-flex;
     align-items: baseline;
     gap: 6px;
-    padding: 6px 14px;
-    border-radius: var(--radius-pill);
-    background: var(--color-sunk);
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
+    padding: 6px 12px;
+    border-radius: var(--radius-control);
   }
-  .pick small {
-    color: var(--color-dim);
-    font-weight: 500;
-  }
-  .pick.on {
-    background: var(--color-selected);
-    color: var(--color-on-selected);
-  }
-  .pick.on small {
-    color: inherit;
-    opacity: 0.7;
+  .pills small {
+    color: var(--color-muted);
   }
   .endpoint {
+    flex-basis: 100%;
+    margin-top: 4px;
+    font-size: 12px;
     color: var(--color-muted);
-    font-size: 12.5px;
     overflow-wrap: anywhere;
   }
-  form > label {
-    display: grid;
-    gap: 6px;
-    font-size: 13.5px;
-    font-weight: 600;
+  .tick {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 13px;
   }
-  form > label small {
-    color: var(--color-dim);
-    font-weight: 500;
-  }
-  input {
-    width: 100%;
-    padding: 9px 12px;
-    border: 2px solid var(--color-line);
-    border-radius: var(--radius-part);
-    background: var(--color-sunk);
-    color: inherit;
-    font: inherit;
-  }
-  .note {
-    grid-column: 1 / -1;
-    margin: 0;
-    padding: 10px 14px;
-    border-left: 4px solid var(--shelf-sun);
-    border-radius: var(--radius-part);
-    background: var(--color-sunk);
+  .tick small {
     color: var(--color-muted);
   }
-  .row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 12px;
-    grid-column: 1 / -1;
+  form .note {
+    margin: 0;
+    padding: 10px 14px;
+    border-radius: var(--radius-control);
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-line);
   }
-  .row .fail {
+  form .fail {
     margin: 0;
   }
-  @media (max-width: 900px) {
-    .topo {
-      grid-template-columns: 1fr;
-      justify-items: start;
+  @media (max-width: 860px) {
+    .target,
+    .two {
+      grid-template-columns: minmax(0, 1fr);
     }
-    .wire {
-      width: 2px;
-      height: 34px;
-      margin-left: 30px;
-      background: linear-gradient(var(--c) 0 5px, transparent 5px) 0 0 / 2px 10px;
+    .check {
+      border-left: 0;
+      border-top: 1px solid var(--color-hairline);
     }
-    .wire span {
-      bottom: auto;
-      top: 50%;
-      left: 12px;
-      translate: 0 -50%;
+    .app,
+    .hist {
+      flex-wrap: wrap;
+      padding: 12px 16px;
     }
-    .band,
-    .providers {
-      grid-template-columns: 1fr;
+    .hist time {
+      width: auto;
     }
   }
 </style>

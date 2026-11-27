@@ -1,37 +1,36 @@
 <script lang="ts">
-  // The cell at a glance (Figma: 01 Home): a headline that says what needs
-  // the admin, one shape per app, what waits for a yes, the apps, what
-  // happened lately and who works in the cell. Everything comes from the
-  // API; each part links to the view that holds the details.
+  // The cell at a glance: one sentence on where it stands, the ask box,
+  // what agents do and what waits for a yes, the machines with their apps,
+  // four numbers and what was done lately. Everything comes from the API;
+  // each part links to the view that holds the details.
   import { api, must } from "../lib/api/client";
   import type { components } from "../lib/api/schema";
-  import { ended, headline, type Change } from "../lib/change";
-  import { appState, hero, isDown, isUp, lastBackup, reach } from "../lib/home";
+  import type { Change } from "../lib/change";
+  import { doneLately, hero, isDown, isUp, lastBackup } from "../lib/home";
   import { follow } from "../lib/live";
   import { newest, STALE } from "../lib/newest";
-    import { itemPath } from "../lib/route";
-  import { crew, type Task } from "../lib/task";
+  import { itemPath } from "../lib/route";
+  import { agents, task, taskState, type Task } from "../lib/task";
+  import { machineName } from "../lib/text";
   import { ago } from "../lib/time";
-  import AgentFace from "../lib/ui/AgentFace.svelte";
-  import Avatar from "../lib/ui/Avatar.svelte";
-  import StatStrip, { type Stat } from "../lib/ui/StatStrip.svelte";
-  import Status from "../lib/ui/Status.svelte";
-  import Ask from "./Ask.svelte";
+  import Icon from "../lib/ui/Icon.svelte";
+  import { agentIcon, type IconName } from "../lib/ui/icons";
+  import Logo from "../lib/ui/Logo.svelte";
+  import Tag from "../lib/ui/Tag.svelte";
+  import Tile from "../lib/ui/Tile.svelte";
+  import Composer from "./Composer.svelte";
   import Slip from "./Slip.svelte";
 
   type App = components["schemas"]["App"];
-  type User = components["schemas"]["User"];
-  type Group = components["schemas"]["Group"];
   type Backup = components["schemas"]["Backup"];
+  type Node = components["schemas"]["Node"];
 
-  const AGENTS = "cell-agents";
-  // Viewers read the state of the cell only (E-63): no people, no tasks.
-  let { admin }: { admin: boolean } = $props();
+  // Viewers read the state of the cell only (E-63): no tasks, no asks.
+  let { admin, cell }: { admin: boolean; cell: string; onnavigate?: (href: string) => void } = $props();
   let apps = $state<App[] | null>(null);
   let changes = $state<Change[]>([]);
   let tasks = $state<Task[]>([]);
-  let users = $state<User[]>([]);
-  let groups = $state<Group[]>([]);
+  let nodes = $state<Node[]>([]);
   let backups = $state<Backup[]>([]);
   let titles = $state<Map<string, string>>(new Map());
   let target = $state<components["schemas"]["BackupTarget"] | null>(null);
@@ -42,24 +41,20 @@
     try {
       const answer = await guard(
         (async () => {
-          const [a, c, t, u, g, k, bt] = await Promise.all([
-            api.GET("/v0/apps"), api.GET("/v0/changes"), admin ? api.GET("/v0/tasks") : null, admin ? api.GET("/v0/users") : null,
-            admin ? api.GET("/v0/groups") : null, api.GET("/v0/catalog"),
-            api.GET("/v0/backup-target"),
+          const [a, c, t, n, k, bt] = await Promise.all([
+            api.GET("/v0/apps"), api.GET("/v0/changes"), admin ? api.GET("/v0/tasks") : null, api.GET("/v0/nodes"),
+            api.GET("/v0/catalog"), api.GET("/v0/backup-target"),
           ]);
           const list = must(a);
           const b = await Promise.all(list.map((x) => api.GET("/v0/apps/{name}/backups", { params: { path: { name: x.name } } })));
-          return {
-            list, c: must(c), t: t ? must(t) : [], u: u ? must(u) : [], g: g ? must(g) : [], k: must(k), bt: must(bt), b: b.flatMap((r) => must(r)),
-          };
+          return { list, c: must(c), t: t ? must(t) : [], n: must(n), k: must(k), bt: must(bt), b: b.flatMap((r) => must(r)) };
         })(),
       );
       if (answer === STALE) return;
       apps = answer.list.sort((x, y) => (x.title || x.name).localeCompare(y.title || y.name));
       changes = answer.c;
       tasks = answer.t;
-      users = answer.u;
-      groups = answer.g;
+      nodes = answer.n.sort((x, y) => x.name.localeCompare(y.name));
       backups = answer.b;
       target = answer.bt;
       titles = new Map([...answer.k.map((e) => [e.name, e.title] as const), ...answer.list.map((x) => [x.name, x.title || x.name] as const)]);
@@ -92,530 +87,560 @@
   });
 
   const title = (app: string) => titles.get(app) ?? app;
-  // Agents go by their name with a capital, people by their username.
-  const who = (c: Change) => (c.requester.kind === "Agent" ? c.requester.name.replace(/^./, (x) => x.toUpperCase()) : c.requester.name);
-  let people = $derived(users.filter((u) => !u.groups.includes(AGENTS)));
+  const byName = $derived(new Map((apps ?? []).map((a) => [a.name, a])));
+  const who = (c: Change) => (c.requester.kind === "Agent" ? `${c.requester.name.replace(/^./, (x) => x.toUpperCase())} agent` : c.requester.kind === "Operator" ? "Operator" : c.requester.name);
   let waiting = $derived(changes.filter((c) => c.phase === "WaitingForApproval").sort((x, y) => y.createdAt.localeCompare(x.createdAt)));
   let top = $derived(hero(apps ?? [], changes, title));
   let running = $derived(apps?.filter(isUp).length ?? 0);
+  let down = $derived(apps?.filter(isDown).length ?? 0);
   let backup = $derived(lastBackup(backups));
-  let reaches = $derived(new Map((apps ?? []).map((a) => [a.name, reach(a, people, groups)])));
-  let most = $derived(Math.max(1, ...reaches.values()));
-  let busyTasks = $derived(tasks.filter((t) => t.phase === "Pending" || t.phase === "Running"));
-  let recent = $derived([...changes].sort((x, y) => y.createdAt.localeCompare(x.createdAt)).slice(0, 8));
-  let teams = $derived(groups.filter((g) => g.name !== AGENTS));
+  let working = $derived(tasks.filter((t) => t.phase === "Pending" || t.phase === "Running").sort((x, y) => y.createdAt.localeCompare(x.createdAt)));
+  // Apps an agent works on right now: their tile gets the moving ring.
+  let busyApps = $derived(new Set(working.flatMap((t) => (t.app ? [t.app] : []))));
   let noTarget = $derived(target?.configured === false);
+  let month = $derived(changes.filter((c) => Date.now() - new Date(c.createdAt).getTime() < 30 * 86400_000));
+  const pct = (used: number | undefined, all: number) => (used === undefined || !all ? undefined : Math.round((100 * used) / all));
+  let fullest = $derived(
+    nodes.map((n) => ({ n, p: pct(n.diskUsed, n.disk) })).filter((x) => x.p !== undefined).sort((x, y) => y.p! - x.p!)[0],
+  );
 
+  const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
   const clock = (iso: string) => {
     const d = new Date(iso);
-    const days = (Date.now() - d.getTime()) / 86400_000;
-    const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
-    if (d.toDateString() === new Date().toDateString()) return time;
-    if (days < 6) return `${d.toLocaleDateString([], { weekday: "short" })} ${time}`;
+    if (d.toDateString() === new Date().toDateString()) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
     return d.toLocaleDateString([], { day: "numeric", month: "short" });
   };
-  const backupText = (b: { at: string; ok: boolean } | null) =>
-    !b ? "none yet" : `${new Date(b.at).toDateString() === new Date().toDateString() ? "today at " : ""}${clock(b.at)}`;
-
-  let stats = $derived.by((): Stat[] => {
-    if (!apps) return [];
-    return [
-      { label: "State", value: { you: "Needs you", busy: "Platform at work", good: "All good" }[top.mood], tone: top.mood === "good" ? "ok" : "wait" },
-      { label: "Apps up", value: `${running} / ${apps.length}`, tone: apps.some(isDown) ? "bad" : running < apps.length ? "wait" : "ok" },
-      { label: "Waiting for you", value: String(waiting.length), tone: waiting.length ? "wait" : "ok" },
-      { label: "Last backup", value: backup ? `${clock(backup.at)} ${backup.ok ? "ok" : "failed"}` : "none yet", tone: !backup ? "none" : backup.ok ? "ok" : "bad" },
-      ...(admin ? [{ label: "Agents", value: busyTasks.length ? `${busyTasks.length} at work` : "idle", tone: busyTasks.length ? "wait" : "none" } as Stat] : []),
+  let lede = $derived.by(() => {
+    if (!apps) return "";
+    const parts = [
+      `${running} of ${plural(apps.length, "app")} ${apps.length === 1 ? "answers" : "answer"}`,
+      backup ? `${backup.ok ? "backed up" : "the last backup failed"} ${ago(backup.at)}` : "no backup yet",
     ];
+    const agentsLine = admin && working.length ? `${working.length === 1 ? "One agent is" : `${working.length} agents are`} working` : "";
+    const wait = waiting.length ? `${waiting.length === 1 ? "one decision waits" : `${waiting.length} decisions wait`} for ${admin ? "you" : "an admin"}` : "";
+    const tail = [agentsLine, wait].filter(Boolean).join(", ");
+    return `${parts.join(", ")}.${tail ? ` ${tail.replace(/^./, (x) => x.toUpperCase())}.` : ""}`;
   });
-  const shades = ["sun", "rose", "lilac"] as const;
+
+  // Suggestions for the ask box, from what the cell shows now.
+  let suggestions = $derived.by((): { text: string; icon: IconName }[] => {
+    const s: { text: string; icon: IconName }[] = [];
+    const bad = apps?.find((a) => !isUp(a));
+    if (bad) s.push({ text: `Why does ${title(bad.name)} not answer?`, icon: "pulse" });
+    if (fullest && fullest.p! >= 70) s.push({ text: `What fills ${machineName(fullest.n.name)}?`, icon: "server" });
+    s.push({ text: "What changed this week?", icon: "changes" });
+    if (nodes.length) s.push({ text: "Which machine is fullest?", icon: "disk" });
+    return s.slice(0, 3);
+  });
+
+  // Done lately: finished changes and backups, newest first.
+  let done = $derived(doneLately(changes, backups, title, who));
 </script>
 
 {#if failed}<p class="fail" role="alert">{failed}</p>{/if}
 {#if apps}
-  <StatStrip items={stats} />
-
-  <section class="hero">
-    <div class="words">
-      <h1>{top.lines[0]}<br /><span>{top.lines[1]}</span></h1>
-      <p>
-        {running} of {apps.length} {apps.length === 1 ? "app is" : "apps are"} running{#if admin}{" "}for {people.length} {people.length === 1 ? "person" : "people"}{/if}.
-        Last backup {backupText(backup)}{backup && !backup.ok ? ", and it failed" : ""}.
-      </p>
-      <p class="live" class:up={live.up} title={live.why}>{live.up ? "Live" : live.tried ? "Reconnecting to the cell" : "Connecting"}</p>
+  <header class="page-head">
+    <div>
+      <h1>{top.lines[0]}</h1>
+      <p>{lede}</p>
     </div>
-    {#if apps.length}
-      <figure class="shelf">
-        <ul aria-label={admin ? "Apps by how many people can open them" : "Apps"}>
-          {#each apps as a, i (a.name)}
-            {@const s = appState(a)}
-            {@const n = reaches.get(a.name) ?? 0}
-            {@const down = isDown(a)}
-            <li class:down>
-              <a href={itemPath("/apps", a.name)} aria-label="{title(a.name)}: {s.label}{admin ? `, ${n} of ${people.length} people can open it` : ''}">
-                <span
-                  class="pill {down ? 'lying' : s.tone === 'wait' ? 'busy' : shades[i % 3]}"
-                  style:--h={down ? "34px" : `${Math.round(44 + 96 * (n / most))}px`}
-                ></span>
-                <span class="name">{title(a.name)}</span>
-                <small>{s.tone === "ok" ? "\u00a0" : down ? "is down" : s.label.toLowerCase()}</small>
-              </a>
-            </li>
-          {/each}
-        </ul>
-        <figcaption>One shape per app.{admin ? " Taller means more people can open it." : ""} <a href="/apps">All apps</a></figcaption>
-      </figure>
-    {/if}
-  </section>
+    <p class="live" class:up={live.up} title={live.why}><span class="dot" class:pulse-ok={live.up} aria-hidden="true"></span>{live.up ? "Live" : live.tried ? "Reconnecting to the cell" : "Connecting"}</p>
+  </header>
 
-  {#if admin}<div class="ask"><Ask /></div>{/if}
+  {#if admin}
+    <div class="composer"><Composer {suggestions} /></div>
+  {/if}
 
-  <div class="grid">
-    <section aria-labelledby="needs">
-      <header>
-        <h2 id="needs" class="sec-title">Needs you <small>{waiting.length} waiting for a yes or a no</small></h2>
-        <a href="/approvals">all approvals</a>
-      </header>
-      {#if noTarget}
-        <ul class="rows">
+  {#if noTarget}
+    <a class="needs row" href="/backups">
+      <Tile icon="backups" tone="warn" size={30} />
+      <span><strong>{admin ? "Set a backup target" : "No backup target"}</strong><small>Backups have nowhere to go yet, so no app is backed up.</small></span>
+      <Icon name="right" size={14} stroke={2} />
+    </a>
+  {/if}
+
+  {#if admin || waiting.length}
+    <section class="sec" aria-labelledby="h-agents">
+      <div class="sec-head">
+        <h2 id="h-agents">{admin ? "Agents" : "Waiting for a decision"}</h2>
+        <span>{admin ? `${working.length} working, ${waiting.length} waiting for you` : `${waiting.length} for an admin`}</span>
+        <span class="end">{#if admin}<a href="/agents">All tasks</a>{/if}<a href="/changes">All changes</a></span>
+      </div>
+      <ul class="list">
+        {#each waiting.slice(0, 5) as c (c.name)}
+          <!-- keyed by the change: a newer request must not inherit a half-made decision -->
+          <li><Slip change={c} title={title(c.app)} app={byName.get(c.app)} {admin} ondecided={load} /></li>
+        {/each}
+        {#each working.slice(0, 5) as t (t.name)}
+          {@const a = agents[t.kind]}
+          {@const last = t.steps.at(-1)}
           <li>
-            <a href="/backups">
-              <span class="plus warn" aria-hidden="true">!</span>
-              <span><strong>{admin ? "Set a backup target" : "No backup target"}</strong><small>backups have nowhere to go yet</small></span>
-              <Status tone="bad" label="Not set" />
-            </a>
-          </li>
-        </ul>
-      {/if}
-      {#if waiting[0]}
-        <!-- keyed: a newer request must not inherit a half-made decision -->
-        {#key waiting[0].name}
-          <Slip change={waiting[0]} title={title(waiting[0].app)} {admin} ondecided={load} />
-        {/key}
-        <ul class="rows">
-          {#each waiting.slice(1, 5) as c (c.name)}
-            <li>
-              <a href="/approvals">
-                {#if c.requester.kind === "Agent"}<AgentFace name={c.requester.name} size={30} />{:else}<Avatar name={c.requester.name} />{/if}
-                <span><strong>{headline(c, title(c.app))}</strong><small>{c.name}, asked by {who(c)}, {ago(c.createdAt)}</small></span>
-                <Status tone="wait" label="Waiting" />
-              </a>
-            </li>
-          {/each}
-        </ul>
-      {:else if !noTarget}
-        <div class="calm">
-          <svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="26" /><path d="M21 33l7 7 15-16" /></svg>
-          <p>Nothing waits for you. Changes that agents or people ask for show up here.</p>
-        </div>
-      {/if}
-    </section>
-
-    <section aria-labelledby="apps">
-      <header>
-        <h2 id="apps" class="sec-title">Apps <small>{apps.length} installed</small></h2>
-        <a href="/apps">open apps</a>
-      </header>
-      <ul class="apps">
-        {#each apps as a (a.name)}
-          {@const s = appState(a)}
-          {@const n = reaches.get(a.name) ?? 0}
-          <li>
-            <a href={itemPath("/apps", a.name)}>
-              <Avatar name={title(a.name)} tile size={30} />
-              <span><strong>{title(a.name)}</strong><small>{a.version ? `${a.name} ${a.version}` : a.name}</small></span>
-              <Status tone={s.tone} label={s.label} />
-              {#if admin}
-                <span class="reach" title="{n} of {people.length} people can open it">
-                  <span class="bar"><span style:width="{people.length ? (100 * n) / people.length : 0}%"></span></span>
-                  <small>{n}/{people.length}</small>
+            <a class="task row" href={itemPath("/agents", t.name)}>
+              <span class="who">
+                <Tile icon={agentIcon(a.name)} tone="agent" size={30} pulse />
+                <span><strong>{a.name} agent</strong><small class="shimmer">{taskState(t).label}</small></span>
+              </span>
+              <span class="what">
+                {#if t.app}<Logo app={byName.get(t.app) ?? { name: t.app }} title={title(t.app)} busy />{:else}<Tile icon="cell" size={36} />{/if}
+                <span class="txt">
+                  <strong>{task(t, title(t.app ?? ""))}</strong>
+                  <small>Asked by {t.requester.name} {ago(t.createdAt)}</small>
+                  <span class="bar flow" aria-hidden="true"></span>
+                  {#if last}<span class="now"><span class="mono">{clock(last.at)}</span>{last.call}</span>{/if}
                 </span>
-              {/if}
+              </span>
+              <Icon name="right" size={14} stroke={2} />
             </a>
           </li>
         {/each}
-        {#if admin}
-          <li>
-            <a href="/apps" class="add">
-              <span class="plus" aria-hidden="true">+</span>
-              <span><strong>Add an app</strong><small>from the catalog</small></span>
-            </a>
-          </li>
+        {#if admin && !waiting.length && !working.length}
+          <li class="empty">No agent is at work and nothing waits for you. Hand off a task above, or ask Ops about one app from its page.</li>
         {/if}
       </ul>
     </section>
+  {/if}
 
-    <section aria-labelledby="activity">
-      <header>
-        <h2 id="activity" class="sec-title">Activity <small>every change, who asked, how it ended</small></h2>
-        <a href="/history">full history</a>
-      </header>
-      {#if recent.length}
-        <ol class="feed">
-          {#each recent as c (c.name)}
-            {@const e = ended(c)}
-            <li>
-              <a href={itemPath("/history", c.name)}>
-                <time datetime={c.createdAt}>{clock(c.createdAt)}</time>
-                {#if c.requester.kind === "Agent"}<AgentFace name={c.requester.name} size={26} />{:else}<Avatar name={c.requester.name} size={24} />{/if}
-                <span><strong>{who(c)}</strong> asked to {headline(c, title(c.app)).replace(/^./, (x) => x.toLowerCase())}.</span>
-                <Status tone={e.tone} label={e.label} />
-              </a>
-            </li>
-          {/each}
-        </ol>
-      {:else}
-        <p class="empty">No changes yet.</p>
-      {/if}
-    </section>
+  <section class="sec" aria-labelledby="h-cell">
+    <div class="sec-head">
+      <h2 id="h-cell">Your cell</h2>
+      <span>{plural(apps.length, "app")} on {plural(nodes.length, "machine")}.{admin && busyApps.size ? " A moving ring shows where an agent works right now." : ""}</span>
+      <span class="end">{#if admin}<a href="/machines">Add a machine</a>{/if}</span>
+    </div>
+    <div class="board">
+      <div class="map">
+        {#each nodes as n (n.name)}
+          {@const disk = pct(n.diskUsed, n.disk)}
+          {@const look = !n.ready || (disk ?? 0) >= 85}
+          <a class="plate" class:look href="/machines">
+            <span class="ph">
+              <Tile icon="server" size={30} />
+              <span class="pn"><strong>{machineName(n.name)}</strong><small>{plural(n.apps.length, "app")}{n.system ? ", runs the cell" : ""}</small></span>
+              {#if !n.ready}<Tag tone="warn">not ready</Tag>{:else if look}<Tag tone="warn">needs a look</Tag>{:else}<span class="ok pulse-ok" aria-label="ready"></span>{/if}
+            </span>
+            <span class="meter">
+              <span class="ml"><span><Icon name="disk" size={12} stroke={2} />Disk</span><span class="mono" class:hot={look}>{disk === undefined ? (n.unmeasured ? "not measured" : "n/a") : `${disk}%`}</span></span>
+              <span class="track"><span class:hot={look} style:width="{disk ?? 0}%"></span></span>
+            </span>
+            {#if n.apps.length}
+              <span class="tiles">
+                {#each n.apps as name (name)}
+                  {@const a = byName.get(name)}
+                  <span class="t">
+                    <Logo app={a ?? { name }} title={title(name)} size={42} busy={admin && busyApps.has(name)} />
+                    {#if a && !isUp(a)}<span class="badge" aria-label="not answering"></span>{/if}
+                    <small>{title(name)}</small>
+                  </span>
+                {/each}
+              </span>
+            {:else}
+              <span class="none">No app runs here yet.</span>
+            {/if}
+            <span class="pf mono">{n.address}</span>
+          </a>
+        {:else}
+          <p class="empty">No machine reports yet.</p>
+        {/each}
+      </div>
+      <div class="stats">
+        <a class="stat row" href="/apps">
+          <span class="sl"><Icon name="apps" size={14} stroke={2} />Apps</span>
+          <span class="big"><span>{running}</span>answer</span>
+          <span class="sub" class:hot={down}>{down ? `${plural(down, "app")} down` : running < apps.length ? `${apps.length - running} not answering yet` : apps.length ? "All of them answer" : "None installed yet"}</span>
+        </a>
+        <a class="stat row" href="/backups">
+          <span class="sl"><Icon name="backups" size={14} stroke={2} />Backups</span>
+          <span class="big"><span>{backup ? clock(backup.at) : "none"}</span>{backup ? "last copy" : ""}</span>
+          <span class="sub" class:hot={noTarget || (backup && !backup.ok)} class:good={backup?.ok && !noTarget}>{noTarget ? "No target set" : backup && !backup.ok ? "The last one failed" : target?.where ? `Kept in ${target.where}` : "Target set"}</span>
+        </a>
+        <a class="stat row" href="/machines">
+          <span class="sl"><Icon name="server" size={14} stroke={2} />Machines</span>
+          <span class="big"><span>{nodes.length}</span>{nodes.filter((n) => n.ready).length === nodes.length ? "ready" : `${nodes.filter((n) => n.ready).length} ready`}</span>
+          <span class="sub" class:hot={(fullest?.p ?? 0) >= 85}>{fullest ? `${machineName(fullest.n.name)} disk at ${fullest.p}%` : "No disk measured"}</span>
+        </a>
+        <a class="stat row" href="/changes">
+          <span class="sl"><Icon name="changes" size={14} stroke={2} />Changes</span>
+          <span class="big"><span>{month.length}</span>in 30 days</span>
+          <span class="sub">{waiting.length ? `${waiting.length} waiting for a decision` : "Each one in the change log"}</span>
+        </a>
+      </div>
+    </div>
+  </section>
 
-    {#if admin}
-    <section aria-labelledby="operators">
-      <header>
-        <h2 id="operators" class="sec-title">Who works here <small>{crew.length} agents, the rules, {people.length} people</small></h2>
-        <a href="/agents">agents</a>
-      </header>
-      <ul class="rows">
-        {#each crew as a (a.name)}
-          {@const at = busyTasks.filter((t) => a.kinds.includes(t.kind)).length}
+  <section class="sec" aria-labelledby="h-done">
+    <div class="sec-head">
+      <h2 id="h-done">Done lately</h2>
+      <span>{done.length}</span>
+      <span class="end"><a href="/changes">Change log</a></span>
+    </div>
+    {#if done.length}
+      <ul class="done">
+        {#each done as d (d.key)}
           <li>
-            <a href="/agents">
-              <AgentFace name={a.name} size={30} />
-              <span><strong>{a.name}</strong><small>{a.does}</small></span>
-              <Status tone={at ? "wait" : "none"} label={at ? `${at} at work` : "Idle"} />
+            <a class="row" href={d.href}>
+              <time class="mono" datetime={d.at}>{clock(d.at)}</time>
+              {#if d.app}<Logo app={byName.get(d.app) ?? { name: d.app }} title={title(d.app)} size={24} />{:else}<Tile icon="cell" size={24} />{/if}
+              <span class="dt">{d.text}</span>
+              {#if d.tag}<Tag tone={d.tag.tone}>{d.tag.label}</Tag>{/if}
+              <span class="by {d.by}"><span aria-hidden="true"></span>{d.who}</span>
             </a>
           </li>
         {/each}
-        <li>
-          <div class="static">
-            <svg class="rule" viewBox="0 0 30 30" aria-hidden="true"><rect x="8" y="8" width="14" height="14" rx="3" transform="rotate(45 15 15)" /></svg>
-            <span><strong>Rules</strong><small>backups, updates, rollbacks; no AI</small></span>
-            <Status tone="ok" label="Always on" />
-          </div>
-        </li>
-        <li>
-          <a href="/organization">
-            <span class="faces" aria-hidden="true">
-              {#each people.slice(0, 4) as p (p.username)}<Avatar name={p.name || p.username} size={24} />{/each}
-            </span>
-            <span><strong>{people.length} {people.length === 1 ? "person" : "people"}</strong><small>{teams.length} {teams.length === 1 ? "group" : "groups"}</small></span>
-            {#if people.length > 4}<span class="chip">+{people.length - 4}</span>{/if}
-          </a>
-        </li>
       </ul>
-    </section>
+    {:else}
+      <p class="empty plain">Nothing yet. Changes and backups show up here once they ran.</p>
     {/if}
-  </div>
+  </section>
+{:else if !failed}
+  <p class="empty plain">Reading {cell}</p>
 {/if}
 
 <style>
-  .hero {
-    position: relative;
-    isolation: isolate;
-    display: grid;
-    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
-    align-items: end;
-    gap: 40px;
-    margin: 48px 0 56px;
-  }
-  /* the one soft glow of the brand, behind the shapes */
-  .hero::before {
-    content: "";
-    position: absolute;
-    z-index: -1;
-    right: 2%;
-    top: -10px;
-    width: min(560px, 60vw);
-    height: 280px;
-    border-radius: 50%;
-    background: var(--paint-glow);
-    filter: blur(40px);
-    opacity: 0.45;
-    pointer-events: none;
-  }
-  h1 {
-    margin: 0 0 18px;
-    font: 600 clamp(2.4rem, 5vw, 4.2rem) / 1.02 var(--font-display);
-    letter-spacing: -0.038em;
-    text-wrap: balance;
-  }
-  h1 span {
-    background: var(--paint-headline);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-  }
-  .words p {
-    margin: 0;
-    max-width: 56ch;
-    color: var(--color-muted);
-    font-size: 1.1rem;
-  }
-  .words .live {
+  .live {
+    flex: none;
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    margin-top: 14px;
-    font-size: 0.85rem;
+    margin: 0 0 6px;
+    font-size: 13px;
+    color: var(--color-muted);
   }
-  .live::before {
-    content: "";
+  .live .dot {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: var(--color-wait);
+    background: var(--color-warn);
   }
-  .live.up::before {
+  .live.up .dot {
     background: var(--color-ok);
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-ok) 25%, transparent);
   }
-  .shelf {
-    margin: 0;
+  .composer {
+    margin-top: 32px;
   }
-  .shelf ul {
+  .needs {
     display: flex;
-    align-items: flex-end;
-    gap: 10px;
-    margin: 0;
-    padding: 0 0 0;
-    list-style: none;
-    border-bottom: 1px solid var(--color-line);
-    overflow-x: auto;
+    align-items: center;
+    gap: 14px;
+    margin-top: 32px;
+    padding: 16px 20px;
+    border-radius: var(--radius-panel);
+    background: var(--color-warn-bg);
+    border: 1px solid var(--color-warn-edge);
+    color: var(--color-warn-text);
   }
-  .shelf li {
-    flex: 1 1 0;
-    min-width: 46px;
-    max-width: 70px;
+  .needs:hover {
+    background: var(--color-warn-bg);
   }
-  .shelf li.down {
-    flex-basis: 80px;
-    max-width: 100px;
+  .needs > span {
+    flex: 1;
   }
-  .shelf li a {
-    display: grid;
-    justify-items: center;
-    gap: 6px;
-    padding-bottom: 8px;
-    text-decoration: none;
-  }
-  .pill {
+  .needs strong,
+  .needs small {
     display: block;
-    width: 100%;
-    max-width: 52px;
-    height: var(--h);
-    border-radius: 999px;
-    box-shadow: 0 18px 30px -18px var(--color-base);
-    transition: transform 0.2s ease;
   }
-  .shelf li a:hover .pill {
-    transform: translateY(-4px);
-  }
-  .pill.sun {
-    background: var(--shelf-sun);
-  }
-  .pill.rose {
-    background: var(--shelf-rose);
-  }
-  .pill.lilac {
-    background: var(--shelf-lilac);
-  }
-  .pill.busy {
-    background: none;
-    border: 2px dashed var(--color-muted);
-  }
-  .pill.lying {
-    max-width: 96px;
-    background: var(--shelf-down);
-  }
-  .shelf .name {
-    max-width: 100%;
-    overflow: hidden;
-    font-size: 0.8rem;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .shelf small {
-    margin-top: -6px;
-    color: var(--color-muted);
-    font-size: 0.7rem;
-  }
-  .shelf .down .name,
-  .shelf .down small {
-    color: var(--color-bad);
-  }
-  figcaption {
-    margin-top: 12px;
-    color: var(--color-muted);
-    font-size: 0.85rem;
-  }
-  figcaption a {
+  .needs strong {
+    font-weight: 500;
     color: var(--color-ink);
   }
-
-  .ask {
-    margin: -24px 0 56px;
-  }
-  .grid {
+  .task {
     display: grid;
-    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
-    gap: 56px 48px;
+    grid-template-columns: 200px minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 24px;
+    padding: 18px 22px 20px;
+    color: var(--color-muted);
   }
-  @media (max-width: 960px) {
-    .hero,
-    .grid {
-      grid-template-columns: 1fr;
+  .task .who,
+  .task .what {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    min-width: 0;
+    color: var(--color-ink);
+  }
+  .task .what {
+    align-items: flex-start;
+    gap: 14px;
+  }
+  .task strong {
+    display: block;
+    font-weight: 500;
+  }
+  .task .who small {
+    display: block;
+    font-size: 12.5px;
+  }
+  .txt {
+    flex: 1;
+    min-width: 0;
+  }
+  .txt strong {
+    font-size: 15px;
+  }
+  .txt small {
+    display: block;
+    margin-top: 2px;
+    color: var(--color-text);
+    font-size: 14px;
+  }
+  .bar {
+    display: block;
+    height: 4px;
+    margin-top: 14px;
+    border-radius: 2px;
+  }
+  .now {
+    display: flex;
+    gap: 10px;
+    margin-top: 8px;
+    font-size: 12.5px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .now .mono {
+    color: var(--color-agent-ink);
+  }
+  .board {
+    border-radius: var(--radius-hero);
+    border: 1px solid var(--color-line);
+    overflow: hidden;
+    background: var(--color-surface);
+  }
+  .map {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 22px;
+    padding: 28px 24px;
+    background-color: var(--color-surface-2);
+    background-image: radial-gradient(var(--color-line) 1px, transparent 1.3px);
+    background-size: 16px 16px;
+  }
+  .plate {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-height: 260px;
+    padding: 16px 18px;
+    border-radius: var(--radius-panel);
+    background: var(--color-surface);
+    box-shadow: 0 0 0 1px var(--color-line), var(--shadow-raised);
+  }
+  @supports (corner-shape: squircle) {
+    .plate {
+      border-radius: 36px;
+      corner-shape: squircle;
     }
   }
-  header {
+  .plate.look {
+    box-shadow: 0 0 0 1px var(--color-warn-edge), var(--shadow-raised);
+  }
+  .ph {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .pn {
+    flex: 1;
+    min-width: 0;
+  }
+  .pn strong,
+  .pn small {
+    display: block;
+  }
+  .pn strong {
+    font-weight: 600;
+  }
+  .pn small {
+    font-size: 12px;
+    color: var(--color-muted);
+  }
+  .ok {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-ok);
+  }
+  .ml {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--color-text);
+  }
+  .ml > span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .ml .mono {
+    color: var(--color-muted);
+  }
+  .ml .hot {
+    color: var(--color-warn-ink);
+  }
+  .meter .track {
+    display: block;
+    margin-top: 6px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--color-hairline);
+    overflow: hidden;
+  }
+  .meter .track span {
+    display: block;
+    height: 100%;
+    background: var(--color-ok-dot);
+  }
+  .meter .track span.hot {
+    background: var(--color-warn);
+  }
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px 8px;
+  }
+  .t {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+  }
+  .t small {
+    max-width: 100%;
+    font-size: 11.5px;
+    color: var(--color-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .badge {
+    position: absolute;
+    top: -3px;
+    left: calc(50% + 14px);
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--color-warn);
+    box-shadow: 0 0 0 2px var(--color-surface);
+  }
+  .none {
+    color: var(--color-muted);
+    font-size: 13px;
+  }
+  .pf {
+    margin-top: auto;
+    font-size: 11.5px;
+    color: var(--color-muted);
+  }
+  .stats {
+    display: flex;
+    flex-wrap: wrap;
+    border-top: 1px solid var(--color-hairline);
+  }
+  .stat {
+    flex: 1 1 220px;
+    padding: 18px 24px 20px;
+    box-shadow: -1px 0 0 var(--color-hairline);
+  }
+  .sl {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-text);
+  }
+  .big {
     display: flex;
     align-items: baseline;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 16px;
+    gap: 10px;
+    margin-top: 4px;
+    color: var(--color-text);
   }
-  header h2 {
-    margin: 0;
+  .big span {
+    font-size: 48px;
+    line-height: 1.05;
+    letter-spacing: -0.045em;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-ink);
   }
-  header small {
-    margin-left: 8px;
-    color: var(--color-muted);
-    font: 400 0.82rem var(--font-sans);
-    letter-spacing: 0;
+  .sub {
+    display: block;
+    margin-top: 4px;
+    font-size: 12.5px;
+    color: var(--color-text);
   }
-  header > a {
-    font-size: 0.85rem;
+  .sub.hot {
+    color: var(--color-warn-ink);
   }
-  ul,
-  ol {
+  .sub.good {
+    color: var(--color-ok);
+  }
+  .done {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(480px, 100%), 1fr));
+    column-gap: 40px;
     margin: 0;
     padding: 0;
     list-style: none;
   }
-  .rows {
-    margin-top: 14px;
+  .done li {
+    border-bottom: 1px solid var(--color-line);
   }
-  .rows a,
-  .rows .static,
-  .apps a {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 14px;
-    padding: 10px 10px;
-    border-radius: var(--radius-part);
-    text-decoration: none;
-  }
-  .rows a:hover,
-  .apps a:hover,
-  .feed a:hover {
-    background: var(--color-sunk);
-  }
-  li span > strong {
-    display: block;
-    font-weight: 600;
-  }
-  li span > small {
-    display: block;
-    color: var(--color-muted);
-    font-size: 0.82rem;
-  }
-  .apps a {
-    grid-template-columns: auto minmax(0, 1fr) 120px minmax(110px, 160px);
-  }
-  .reach {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    align-items: center;
-    gap: 10px;
-  }
-  .reach small {
-    color: var(--color-muted);
-    font-size: 0.8rem;
-    font-variant-numeric: tabular-nums;
-  }
-  .bar {
-    height: 6px;
-    border-radius: 999px;
-    background: var(--color-sunk);
-    overflow: hidden;
-  }
-  .bar span {
-    display: block;
-    height: 100%;
-    border-radius: inherit;
-    background: var(--color-info);
-  }
-  .add .plus,
-  .plus.warn {
-    display: grid;
-    place-items: center;
-    width: 30px;
-    height: 30px;
-    border: 1.5px dashed var(--color-muted);
-    border-radius: 50%;
-    color: var(--color-muted);
-  }
-  .plus.warn {
-    border: 0;
-    background: color-mix(in srgb, var(--color-bad) 22%, transparent);
-    color: var(--color-bad);
-    font-weight: 700;
-  }
-  .add {
-    grid-template-columns: auto minmax(0, 1fr) !important;
-  }
-  .feed a {
-    display: grid;
-    grid-template-columns: 82px auto minmax(0, 1fr) auto;
+  .done a {
+    display: flex;
     align-items: center;
     gap: 12px;
-    padding: 9px 10px;
-    border-radius: var(--radius-part);
-    text-decoration: none;
+    height: 46px;
+    margin: 0 -10px;
+    padding: 0 10px;
+    border-radius: var(--radius-control);
+    font-size: 13px;
   }
-  .feed time {
+  .done time {
+    flex: none;
+    width: 48px;
+    font-size: 12px;
     color: var(--color-muted);
-    font-size: 0.82rem;
-    font-variant-numeric: tabular-nums;
   }
-  .feed strong {
-    display: inline;
-    font-weight: 600;
+  .dt {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
-  .faces {
-    display: flex;
-  }
-  .faces :global(*:not(:first-child)) {
-    margin-left: -8px;
-  }
-  .rule {
-    width: 30px;
-    height: 30px;
-  }
-  .rule rect {
-    fill: var(--color-ink);
-    opacity: 0.85;
-  }
-  .calm {
-    display: grid;
-    grid-template-columns: auto 1fr;
+  .by {
+    flex: none;
+    display: inline-flex;
     align-items: center;
-    gap: 18px;
-    padding: 24px;
-    border-radius: var(--radius-panel);
-    background: var(--color-panel);
-  }
-  .calm svg {
-    width: 52px;
-    height: 52px;
-    fill: none;
-    stroke: var(--color-ok);
-    stroke-width: 3;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-  .calm p,
-  .empty {
-    margin: 0;
+    gap: 7px;
+    font-size: 12px;
     color: var(--color-muted);
+  }
+  .by span {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-operator);
+  }
+  .by.agent span {
+    background: var(--color-agent);
+  }
+  .by.person span {
+    background: var(--color-ink);
+  }
+  .empty.plain {
+    padding: 0;
+  }
+  @media (max-width: 860px) {
+    .task {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 14px;
+    }
+    .task > :global(svg) {
+      display: none;
+    }
   }
 </style>

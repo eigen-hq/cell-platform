@@ -1,40 +1,72 @@
 <script lang="ts">
+  // Buttons: primary (ink), outline, plain (text only) and warn (for what
+  // removes or undoes something). A link when href is set.
   import type { Snippet } from "svelte";
   import type { HTMLButtonAttributes } from "svelte/elements";
-
-  let { kind = "primary", children, ...rest }: { kind?: "primary" | "quiet" | "danger"; children: Snippet } & HTMLButtonAttributes = $props();
+  let {
+    kind = "primary",
+    size = "md",
+    href,
+    children,
+    ...rest
+  }: { kind?: "primary" | "outline" | "plain" | "warn"; size?: "sm" | "md" | "lg"; href?: string; children: Snippet } & HTMLButtonAttributes = $props();
 </script>
 
-<button class={kind} {...rest}>{@render children()}</button>
+{#if href}
+  <a class="btn {kind} {size}" {href}>{@render children()}</a>
+{:else}
+  <button class="btn {kind} {size}" type="button" {...rest}>{@render children()}</button>
+{/if}
 
 <style>
-  button {
+  .btn {
+    flex: none;
     display: inline-flex;
     align-items: center;
-    gap: 9px;
-    border: 0;
-    border-radius: var(--radius-pill);
-    padding: 11px 20px;
-    font-weight: 600;
-    transition: transform 0.15s;
+    justify-content: center;
+    gap: 8px;
+    height: 34px;
+    padding: 0 14px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    font-weight: 500;
+    white-space: nowrap;
+    transition: background-color 0.16s ease;
   }
-  button:active {
-    transform: translateY(1px);
+  .sm {
+    height: 30px;
+    padding: 0 11px;
+    font-size: 13px;
+  }
+  .lg {
+    height: 40px;
+    padding: 0 16px 0 18px;
+    border-radius: var(--radius-tile);
   }
   .primary {
-    background: var(--button-primary-bg);
-    color: var(--button-primary-ink);
+    background: var(--color-ink);
+    color: var(--color-on-ink);
   }
-  .quiet,
-  .danger {
-    background: var(--button-quiet-bg);
-    color: var(--button-quiet-ink);
+  .primary:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--color-ink) 88%, var(--color-bg));
   }
-  .danger {
-    color: var(--color-bad);
+  .outline {
+    border-color: var(--color-line);
+    background: var(--color-surface);
+    color: var(--color-ink);
   }
-  button:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
+  .outline:hover:not(:disabled),
+  .plain:hover:not(:disabled) {
+    background: var(--color-hover);
+  }
+  .plain {
+    padding: 0 8px;
+    background: transparent;
+    color: var(--color-text);
+  }
+  .warn {
+    border-color: var(--color-warn-edge);
+    background: var(--color-warn-bg);
+    color: var(--color-warn-text);
   }
 </style>

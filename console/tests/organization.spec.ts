@@ -18,9 +18,12 @@ test("the admin sees the groups and people and opens a group", async ({ page, ba
   await page.keyboard.press("Escape");
   await expect(page).toHaveURL(/\/organization$/);
 
+  await expect(page.getByRole("heading", { name: "People", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Groups", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Add a person" }).click();
-  await expect(page.getByLabel("Username")).toBeVisible();
-  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByRole("dialog").getByLabel("Username")).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByLabel("Username")).toBeHidden();
   expect(errors).toEqual([]);
 });
 

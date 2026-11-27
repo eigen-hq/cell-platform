@@ -15,3 +15,6 @@ export function textOf(r: { data?: string; error?: unknown; response: { ok: bool
   const msg = (e as { error?: unknown } | undefined)?.error;
   throw new Error(typeof msg === "string" && msg ? msg : `The API answered HTTP ${r.response.status}.`);
 }
+
+/** A machine's name without the prefix of the local tools that made it. */
+export const machineName = (name: string) => name.replace(/^lima-|^k3d-/, "");

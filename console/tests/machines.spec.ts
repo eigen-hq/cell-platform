@@ -8,13 +8,20 @@ test("the admin sees the machines and gets a join command", async ({ page, baseU
   // A login started on /machines comes back to /machines.
   await signIn(page, env("CONSOLE_ADMIN_USER"), env("CONSOLE_ADMIN_PASSWORD"), "/machines");
   await expect(page.getByRole("heading", { name: "Machines", level: 1 })).toBeVisible();
-  await expect(page.getByText(/One cell on one machine\./)).toBeVisible();
-  await expect(page.getByText("Machines and links")).toBeVisible();
-  await expect(page.getByText(/· runs the cell$/)).toBeVisible();
-  await expect(page.getByText("cell services")).toBeVisible();
+  await expect(page.getByText(/^One machine, /)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "What runs where", level: 2 })).toBeVisible();
+  // The one machine runs the cell, its services and its load.
+  const plate = page.getByRole("article");
+  await expect(plate).toHaveCount(1);
+  await expect(plate.getByText(/^runs the cell, /)).toBeVisible();
+  await expect(plate.getByText("cell services")).toBeVisible();
+  await expect(plate.getByText("Processor")).toBeVisible();
+  await expect(plate.getByText("Kubernetes")).toBeVisible();
 
-  await page.getByRole("button", { name: "Add machine" }).click();
-  await expect(page.getByText("this cell takes no more machines")).toBeVisible();
+  // The local cell refuses a join; the console says why.
+  await page.getByRole("button", { name: "Add a machine" }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "this cell takes no more machines" })).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 
   // The key comes apart from the command, to paste when it asks (E-64).
   const command = 'curl -fsSL https://api.cell.example/v0/nodes/join.sh | bash';
@@ -22,13 +29,16 @@ test("the admin sees the machines and gets a join command", async ({ page, baseU
   await page.route("**/v0/nodes/joins", (route) =>
     route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ command, key, expiresAt: "2030-01-01T12:00:00Z" }) }),
   );
-  await page.getByRole("button", { name: "Add machine" }).click();
-  await expect(page.getByRole("heading", { name: "Add a machine" })).toBeVisible();
-  await expect(page.getByText(command)).toBeVisible();
-  await expect(page.getByText(key, { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Copy the join key" })).toBeVisible();
-  await page.getByRole("button", { name: "Done" }).click();
-  await expect(page.getByRole("button", { name: "Add machine" })).toBeVisible();
+  await page.getByRole("button", { name: "Add a machine" }).click();
+  const drawer = page.getByRole("dialog");
+  await expect(drawer.getByRole("heading", { name: "Add a machine" })).toBeVisible();
+  await expect(drawer.getByText(command)).toBeVisible();
+  await expect(drawer.getByText(key, { exact: true })).toBeVisible();
+  await expect(drawer.getByRole("button", { name: "Copy the command" })).toBeVisible();
+  await expect(drawer.getByRole("button", { name: "Copy the join key" })).toBeVisible();
+  await drawer.getByRole("button", { name: "Done" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Add a machine" })).toBeVisible();
 
   // A reload keeps the view (the console routes in the browser).
   await page.reload();

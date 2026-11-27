@@ -1,7 +1,9 @@
 // The Home overview in plain words: what the headline says, how many
 // people can open each app, and when the cell last backed up.
 import type { components } from "./api/schema";
+import { ended, headline, open } from "./change.ts";
 import { appStatus, authMode } from "./phase.ts";
+import { itemPath } from "./route.ts";
 
 type App = components["schemas"]["App"];
 type Change = components["schemas"]["ChangeRequest"];
@@ -80,4 +82,39 @@ export function lastBackup(backups: Backup[]): { at: string; ok: boolean } | nul
     .map((b) => ({ at: b.completedAt ?? b.createdAt, ok: b.phase === "Completed" }))
     .sort((x, y) => y.at.localeCompare(x.at));
   return ended[0] ?? null;
+}
+
+/** One line of "Done lately"; key names the resource, so two at the same time stay apart. */
+export type Done = { key: string; at: string; text: string; href: string; by: "agent" | "person" | "operator"; who: string; app?: string; tag?: { label: string; tone: "ok" | "warn" | "neutral" } };
+
+/** Finished changes and backups, newest first, at most eight. */
+export function doneLately(changes: Change[], backups: Backup[], title: (app: string) => string, who: (c: Change) => string): Done[] {
+  const fromChanges = changes
+    .filter((c) => !open(c))
+    .map((c): Done => {
+      const e = ended(c);
+      return {
+        key: `change/${c.name}`,
+        at: c.finishedAt ?? c.startedAt ?? c.createdAt,
+        text: headline(c, title(c.app)),
+        href: itemPath("/changes", c.name),
+        by: c.requester.kind === "Agent" ? "agent" : c.requester.kind === "Operator" ? "operator" : "person",
+        who: who(c),
+        app: c.app,
+        tag: e.tone === "ok" ? undefined : { label: e.label, tone: e.tone === "bad" ? "warn" : "neutral" },
+      };
+    });
+  const fromBackups = backups
+    .filter((b) => b.phase === "Completed" || b.phase === "Failed")
+    .map((b): Done => ({
+      key: `backup/${b.name}`,
+      at: b.completedAt ?? b.createdAt,
+      text: `Backed up ${title(b.app)}`,
+      href: "/backups",
+      by: "operator",
+      who: "Operator",
+      app: b.app,
+      tag: b.phase === "Failed" ? { label: "Failed", tone: "warn" } : undefined,
+    }));
+  return [...fromChanges, ...fromBackups].sort((x, y) => y.at.localeCompare(x.at)).slice(0, 8);
 }

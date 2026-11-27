@@ -1,21 +1,22 @@
 import { expect, test } from "@playwright/test";
 import { env, signIn, watchErrors } from "./helpers";
 
-// The overview of the cell: a headline from the cell's state, one shape per
-// app, what waits for a yes, the apps, the latest changes and who works here.
+// The overview of the cell: a headline from the cell's state, the ask box,
+// what agents do and what waits for a yes, the machines with their apps,
+// four numbers and what was done lately.
 test("home shows the state of the cell and links to the views", async ({ page, baseURL }) => {
   const errors = watchErrors(page, baseURL!);
   await signIn(page, env("CONSOLE_ADMIN_USER"), env("CONSOLE_ADMIN_PASSWORD"));
   await page.waitForURL(`${baseURL}/`);
   await expect(page.getByRole("heading", { level: 1 })).toContainText(/down|look|is |are changing|Everything is running|The cell is ready/);
-  await expect(page.getByText("State", { exact: true })).toBeVisible();
   // The page follows the cell's event stream.
   await expect(page.getByText("Live", { exact: true })).toBeVisible();
-  for (const name of [/^Needs you/, /^Apps/, /^Activity/, /^Who works here/]) {
+  await expect(page.getByRole("textbox", { name: "What should Ops do?" })).toBeVisible();
+  for (const name of [/^Agents/, /^Your cell/, /^Done lately/]) {
     await expect(page.getByRole("heading", { level: 2, name })).toBeVisible();
   }
-  await page.getByRole("link", { name: "full history" }).click();
-  await expect(page).toHaveURL(/\/history$/);
+  await page.getByRole("link", { name: "Change log", exact: true }).click();
+  await expect(page).toHaveURL(/\/changes$/);
   expect(errors).toEqual([]);
 });
 
@@ -42,6 +43,9 @@ test("a newer request does not inherit the decline confirmation", async ({ page,
   await expect(page.getByRole("button", { name: "Yes, decline" })).toBeVisible();
   changes = [request("cr-b", "second request"), changes[0]!].map((c, i) => ({ ...c, createdAt: new Date(Date.now() + 1000 - i * 1000).toISOString() }));
   await expect(page.getByText("second request")).toBeVisible({ timeout: 10000 });
-  await expect(page.getByRole("button", { name: "Yes, decline" })).toHaveCount(0);
+  // Each request keeps its own decision: the newer one starts fresh.
+  const newer = page.getByRole("article").filter({ hasText: "second request" });
+  await expect(newer.getByRole("button", { name: "Decline" })).toBeVisible();
+  await expect(newer.getByRole("button", { name: "Yes, decline" })).toHaveCount(0);
   expect(errors).toEqual([]);
 });

@@ -1,76 +1,39 @@
 {
-  "$description": "Brand layer: raw values of the Eigen brand (Figma file Sketches, read into Platform Console 02). A customer's own look starts by replacing values here.",
-  "brand": {
-    "night": {
-      "$type": "color",
-      "bg": {"$value": "#1e1a36"},
-      "panel": {"$value": "#2e2648"},
-      "sunk": {"$value": "#1a1626"},
-      "line": {"$value": "#4a3d6b"},
-      "ink": {"$value": "#ffffff"},
-      "muted": {"$value": "#d3cbdc"},
-      "dim": {"$value": "#b9b0c6"},
-      "base": {"$value": "#141220"},
-      "sky": {"$type": "gradient", "$value": "linear-gradient(180deg, #232048 0, #1e1a36 22%, #141220 100%)"},
-      "glow": {"$type": "gradient", "$value": "linear-gradient(135deg, #e393a6, #8e86c0 50%, #4f6e9c)"}
+  "$description": "Brand layer: values shared by both tones. A customer's own look starts by replacing values here and in the tone files.",
+  "font": {
+    "$type": "fontFamily",
+    "sans": {
+      "$value": "'Geist Variable', 'Geist', system-ui, sans-serif"
     },
-    "paper": {
-      "$type": "color",
-      "bg": {"$value": "#f5f0eb"},
-      "panel": {"$value": "#e6e0ea"},
-      "sunk": {"$value": "#ffffff"},
-      "line": {"$value": "#c3bbce"},
-      "ink": {"$value": "#2b2f45"},
-      "muted": {"$value": "#6e6a7e"},
-      "dim": {"$value": "#8f8a9e"},
-      "base": {"$value": "#f3eee6"},
-      "sky": {"$type": "gradient", "$value": "linear-gradient(180deg, #f5f0eb, #f3eee6)"},
-      "glow": {"$type": "gradient", "$value": "linear-gradient(135deg, #f2d6c4, #e8c9de 50%, #c9b8e3)"}
+    "mono": {
+      "$value": "'Geist Mono Variable', 'Geist Mono', ui-monospace, monospace"
+    }
+  },
+  "radius": {
+    "$type": "dimension",
+    "chip": {
+      "$value": "6px"
     },
-    "pastel": {
-      "$type": "color",
-      "sun": {"$value": "#fbd08a"},
-      "leaf": {"$value": "#8fcba0"},
-      "poppy": {"$value": "#ed795b"},
-      "blue": {"$value": "#78aaff"},
-      "lavender": {"$value": "#c9b6f2"},
-      "rose": {"$value": "#e393a6"}
+    "control": {
+      "$value": "10px"
     },
-    "ink": {
-      "$type": "color",
-      "amber": {"$value": "#c2701f"},
-      "green": {"$value": "#4f7d5c"},
-      "red": {"$value": "#c23a3a"},
-      "blue": {"$value": "#4f6e9c"},
-      "violet": {"$value": "#6f5db8"}
+    "tile": {
+      "$value": "12px"
     },
-    "mark": {"$type": "gradient", "$value": "linear-gradient(180deg, #6f5db8, #f4a05c)"},
-    "amberpill": {"$type": "gradient", "$value": "linear-gradient(135deg, #ffe7b3, #f2a65a)"},
-    "slip": {"$type": "gradient", "$value": "linear-gradient(180deg, #f7e2c4, #f2c39a 50%, #e39e86)"},
-    "orb": {"$type": "gradient", "$value": "linear-gradient(135deg, #fff4d6, #f7b970 50%, #e37c4e)"},
-    "headline": {
-      "$type": "gradient",
-      "night": {"$value": "linear-gradient(90deg, #fbd08a, #f2b48a 45%, #e393a6)"},
-      "paper": {"$value": "linear-gradient(90deg, #c2701f, #b0456a)"}
+    "box": {
+      "$value": "14px"
     },
-    "pill": {
-      "$type": "gradient",
-      "sun": {"$value": "linear-gradient(180deg, #fbe8c0, #fbd08a 35%, #c9553a)"},
-      "rose": {"$value": "linear-gradient(180deg, #f6d3dc, #e393a6 40%, #6e3a62)"},
-      "lilac": {"$value": "linear-gradient(180deg, #e4dcfa, #a7b2f3 40%, #4a3d6b)"},
-      "down": {"$value": "linear-gradient(90deg, #ff9a78, #e0573f 60%, #c9553a)"}
+    "panel": {
+      "$value": "20px"
     },
-    "font": {
-      "$type": "fontFamily",
-      "display": {"$value": "\"Funnel Display Variable\", \"Avenir Next\", system-ui, sans-serif"},
-      "sans": {"$value": "\"Funnel Sans Variable\", \"Helvetica Neue\", Arial, system-ui, sans-serif"}
-    },
-    "radius": {
-      "$type": "dimension",
-      "part": {"$value": "12px"},
-      "panel": {"$value": "24px"},
-      "key": {"$value": "28px"},
-      "pill": {"$value": "999px"}
+    "hero": {
+      "$value": "22px"
+    }
+  },
+  "size": {
+    "$type": "dimension",
+    "page": {
+      "$value": "1160px"
     }
   }
 }

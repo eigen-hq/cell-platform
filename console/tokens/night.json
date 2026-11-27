@@ -1,75 +1,120 @@
 {
-  "$description": "Meaning layer, night tone (the default when the system has no light preference). Components use only these names.",
+  "$description": "Meaning layer, night tone (dark). Components use only these names; both tones define the same set.",
   "color": {
     "$type": "color",
     "bg": {
-      "$value": "{brand.night.bg}"
+      "$value": "#15161d"
     },
-    "base": {
-      "$value": "{brand.night.base}"
+    "surface": {
+      "$value": "#232633"
     },
-    "panel": {
-      "$value": "{brand.night.panel}"
+    "surface-2": {
+      "$value": "#1c1e27"
     },
-    "sunk": {
-      "$value": "{brand.night.sunk}"
+    "hover": {
+      "$value": "#22242f"
+    },
+    "tile": {
+      "$value": "#262938"
+    },
+    "track": {
+      "$value": "#1f2129"
+    },
+    "logo": {
+      "$value": "#eeeae3"
     },
     "line": {
-      "$value": "{brand.night.line}"
+      "$value": "#2e3140"
+    },
+    "hairline": {
+      "$value": "#282b38"
+    },
+    "line-strong": {
+      "$value": "#363a4c"
+    },
+    "chip-line": {
+      "$value": "#333748"
     },
     "ink": {
-      "$value": "{brand.night.ink}"
+      "$value": "#ecebf2"
+    },
+    "on-ink": {
+      "$value": "#15161d"
+    },
+    "text": {
+      "$value": "#a19fae"
     },
     "muted": {
-      "$value": "{brand.night.muted}"
-    },
-    "dim": {
-      "$value": "{brand.night.dim}"
-    },
-    "on": {
-      "$value": "{brand.paper.ink}"
-    },
-    "selected": {
-      "$value": "{brand.paper.bg}"
-    },
-    "on-selected": {
-      "$value": "{brand.paper.ink}"
+      "$value": "#7f7d8c"
     },
     "ok": {
-      "$value": "{brand.pastel.leaf}"
+      "$value": "#74b088"
     },
-    "wait": {
-      "$value": "{brand.pastel.sun}"
+    "ok-dot": {
+      "$value": "#6f9a76"
     },
-    "bad": {
-      "$value": "{brand.pastel.poppy}"
+    "ok-tile": {
+      "$value": "#1f2e25"
     },
-    "info": {
-      "$value": "{brand.pastel.blue}"
+    "warn": {
+      "$value": "#f2a15e"
     },
-    "focus": {
-      "$value": "{brand.night.ink}"
+    "warn-ink": {
+      "$value": "#f2a15e"
+    },
+    "warn-text": {
+      "$value": "#f0b682"
+    },
+    "warn-bg": {
+      "$value": "#3a2a1c"
+    },
+    "warn-edge": {
+      "$value": "#9a6a42"
+    },
+    "agent": {
+      "$value": "#9f8bd0"
+    },
+    "agent-ink": {
+      "$value": "#c5b6ec"
+    },
+    "agent-tile": {
+      "$value": "#2c2640"
+    },
+    "agent-edge": {
+      "$value": "#3a3150"
+    },
+    "agent-dash": {
+      "$value": "#3f3656"
+    },
+    "agent-wash": {
+      "$value": "#211e2e"
+    },
+    "agent-plus": {
+      "$value": "#2a2440"
+    },
+    "operator": {
+      "$value": "#6a6577"
+    },
+    "spark": {
+      "$value": "#4d6b55"
+    },
+    "stack": {
+      "$value": "#5f5b6b"
     }
   },
-  "paint": {
-    "$type": "gradient",
-    "sky": {
-      "$value": "{brand.night.sky}"
+  "shadow": {
+    "$type": "shadow",
+    "raised": {
+      "$value": "0 1px 2px rgba(0, 0, 0, 0.25), 0 18px 40px -24px rgba(0, 0, 0, 0.5)"
     },
-    "glow": {
-      "$value": "{brand.night.glow}"
+    "tab": {
+      "$value": "0 1px 2px rgba(0, 0, 0, 0.45)"
     },
-    "attention": {
-      "$value": "{brand.amberpill}"
+    "logo": {
+      "$value": "0 0 0 1px #2e3140, 0 8px 18px -10px rgba(0, 0, 0, 0.5)"
     },
-    "headline": {
-      "$value": "{brand.headline.night}"
-    }
-  },
-  "grain": {
-    "$description": "Monotone grain over every surface (Sketches: size 0.5, density 0.55); a CSS background, paths relative to src/lib.",
-    "layer": {
-      "$value": "url(\"./ui/grain-dark.svg\") 0 0 / 240px, url(\"./ui/grain-light.svg\") 0 0 / 240px"
+    "menu": {
+      "$value": "0 0 0 1px #2e3140, 0 18px 40px -12px rgba(0, 0, 0, 0.6)"
     }
   }
 }

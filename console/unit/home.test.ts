@@ -1,7 +1,7 @@
 // Unit checks of plain helpers, run by node (npm run check).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { appState, hero, isDown, lastBackup, reach } from "../src/lib/home.ts";
+import { appState, doneLately, hero, isDown, lastBackup, reach } from "../src/lib/home.ts";
 
 const app = (name: string, phase = "Ready", groups: string[] = [], mode = "oidc", up = phase === "Ready") =>
   ({ name, phase, groups, spec: { access: { auth: { mode } } }, conditions: [{ type: "Ready", status: up ? "True" : "False" }] }) as never;
@@ -54,4 +54,15 @@ test("the app state comes from the health check where the phase is not enough", 
   assert.deepEqual(appState(app("chat", "NeedsAttention")), { label: "Down", tone: "bad" });
   assert.deepEqual(appState(app("chat", "NeedsAttention", [], "oidc", true)).label, "Needs attention");
   assert.deepEqual(appState(app("chat")), { label: "Running", tone: "ok" });
+});
+
+test("two backups finished at the same time stay two lines", () => {
+  const b = (name: string) => ({ name, app: "wiki", phase: "Completed", createdAt: "2026-11-27T02:00:00Z", completedAt: "2026-11-27T02:01:00Z" }) as never;
+  const done = doneLately([], [b("wiki-1"), b("wiki-2")], title, () => "");
+  assert.equal(new Set(done.map((d) => d.key)).size, 2);
+});
+
+test("a change still running is not done yet", () => {
+  const c = (name: string, phase: string) => ({ name, app: "wiki", action: "restart", phase, requester: { kind: "Human", name: "a" }, approval: { required: true, at: null }, createdAt: "2026-11-27T02:00:00Z", startedAt: null, finishedAt: null }) as never;
+  assert.deepEqual(doneLately([c("a", "Running"), c("b", "Succeeded")], [], title, () => "").map((d) => d.key), ["change/b"]);
 });

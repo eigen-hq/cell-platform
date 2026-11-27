@@ -1,6 +1,7 @@
-/* Base of every view: type, page paint and grain. Values come from tokens.css. */
-@import "@fontsource-variable/funnel-display";
-@import "@fontsource-variable/funnel-sans";
+/* Base of every view: type, page paint, shared heads and the motion of live
+   agent work. Values come from tokens.css. */
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
 @import "../tokens.css";
 
 *,
@@ -9,38 +10,36 @@
   box-sizing: border-box;
 }
 html {
-  background: var(--color-base);
+  background: var(--color-bg);
 }
 body {
-  display: flow-root; /* children's margins stay inside, the sky reaches the top */
   margin: 0;
   min-height: 100vh;
-  background: var(--paint-sky);
+  background: var(--color-bg);
   color: var(--color-ink);
-  font: 400 16px/1.5 var(--font-sans);
+  font: 400 14px/1.45 var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
-/* One grain over everything, as on every surface of the brand, kept faint:
-   at full strength it made the page restless. */
-body::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  pointer-events: none;
-  background: var(--grain-layer);
-  opacity: 0.3;
-}
-button {
+button,
+input,
+select,
+textarea {
   font: inherit;
   color: inherit;
+}
+button {
   cursor: pointer;
+}
+button:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 a {
   color: inherit;
+  text-decoration: none;
 }
 :focus-visible {
-  outline: 2px solid var(--color-focus);
+  outline: 2px solid var(--color-agent);
   outline-offset: 2px;
 }
 .vh {
@@ -50,6 +49,259 @@ a {
   overflow: hidden;
   clip-path: inset(50%);
 }
+.mono {
+  font-family: var(--font-mono);
+}
+
+/* A page's head: one sentence that says where things stand, and a line under it. */
+.page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px 24px;
+}
+.page-head > div {
+  flex: 1 1 520px;
+  min-width: 0;
+}
+.page-head h1 {
+  margin: 0;
+  font-size: 46px;
+  line-height: 1.05;
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+.page-head p {
+  margin: 14px 0 0;
+  color: var(--color-text);
+  font-size: 16px;
+}
+@media (max-width: 720px) {
+  .page-head h1 {
+    font-size: 34px;
+  }
+}
+
+/* A section's head: title, a muted count or note, links at the end. */
+.sec {
+  margin-top: 48px;
+}
+.sec-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin-bottom: 12px;
+}
+.sec-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+}
+.sec-head > span {
+  color: var(--color-muted);
+}
+.sec-head > .end {
+  margin-left: auto;
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--color-text);
+}
+.sec-head a:hover {
+  color: var(--color-ink);
+}
+
+/* A list on one surface: rows with a hairline between them. */
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-radius: var(--radius-panel);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-line);
+  overflow: hidden;
+}
+.list > li + li {
+  border-top: 1px solid var(--color-hairline);
+}
+.row {
+  transition: background-color 0.16s ease;
+}
+.row:hover {
+  background: var(--color-hover);
+}
+.empty {
+  padding: 22px 24px;
+  color: var(--color-text);
+}
+
+/* A plain-text link that leads somewhere: plum, with an arrow. */
+.go {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--color-agent-ink);
+  font-weight: 500;
+}
+.go:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.fail {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border-radius: var(--radius-control);
+  background: var(--color-warn-bg);
+  color: var(--color-warn-text);
+}
+
+/* Forms in the views: a label over its field. */
+.field {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--color-text);
+}
+.field input,
+.field select,
+.field textarea,
+.input {
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-size: 14px;
+}
+.field textarea {
+  height: auto;
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.field input:focus,
+.field select:focus,
+.field textarea:focus,
+.input:focus {
+  outline: 2px solid var(--color-agent);
+  outline-offset: -1px;
+}
+
+/* Motion is only for live agent work: the ring of a box an agent may take
+   work from, its glow, step bars that flow, shimmering status lines. */
+.ring {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+.ring-spin {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1240px;
+  height: 1240px;
+  margin: -620px 0 0 -620px;
+  z-index: 0;
+  background: conic-gradient(from 0deg in oklch, transparent 0deg 210deg, var(--color-agent) 285deg, var(--color-warn) 335deg, transparent 360deg);
+  animation: spin 11s linear infinite;
+}
+.ring-fast .ring-spin {
+  animation-duration: 3.2s;
+}
+.glow {
+  position: absolute;
+  z-index: -1;
+  left: 8%;
+  right: 8%;
+  top: 35%;
+  bottom: -22px;
+  border-radius: 48px;
+  background: linear-gradient(90deg in oklch, var(--color-agent), var(--color-warn));
+  filter: blur(36px);
+  opacity: 0.26;
+  animation: breathe 7s ease-in-out infinite;
+}
+.flow {
+  background: linear-gradient(90deg in oklch, var(--color-agent), var(--color-warn), var(--color-agent));
+  background-size: 200% 100%;
+  animation: flow 2.8s linear infinite;
+}
+.shimmer {
+  background: linear-gradient(90deg, var(--color-text) 0%, var(--color-text) 38%, var(--color-agent-ink) 50%, var(--color-text) 62%, var(--color-text) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 3.4s linear infinite;
+}
+.pulse {
+  animation: pulse 2.4s ease-out infinite;
+}
+.pulse-ok {
+  animation: pulse-ok 3s ease-out infinite;
+}
+.spinner {
+  display: inline-block;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg in oklch, transparent, var(--color-agent), var(--color-warn));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), black calc(100% - 2px));
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 0.32;
+  }
+}
+@keyframes flow {
+  to {
+    background-position: 200% 0;
+  }
+}
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-agent) 45%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 7px transparent;
+  }
+}
+@keyframes pulse-ok {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-ok) 40%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -57,49 +309,4 @@ a {
     animation: none !important;
     transition: none !important;
   }
-}
-
-/* Shared parts of every view: its head, section titles, small notes. */
-.view-head {
-  display: grid;
-  gap: 10px;
-  padding: 5vh 0 34px;
-}
-.view-head h1 {
-  margin: 0;
-  font: 600 clamp(2.4rem, 4.4vw, 3.6rem) / 1 var(--font-display);
-  letter-spacing: -0.035em;
-}
-.view-head p {
-  margin: 0;
-  max-width: 62ch;
-  color: var(--color-muted);
-  font-size: 1.15rem;
-}
-.sec-title {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 10px;
-  margin: 0 0 14px;
-  font: 600 1.4rem / 1.2 var(--font-display);
-  letter-spacing: -0.02em;
-}
-.sec-title small {
-  color: var(--color-muted);
-  font: 600 13px var(--font-sans);
-  letter-spacing: 0;
-}
-.chip {
-  display: inline-block;
-  padding: 3px 10px;
-  border-radius: var(--radius-pill);
-  background: var(--color-sunk);
-  color: var(--color-muted);
-  font-size: 12.5px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.fail {
-  color: var(--color-bad);
 }

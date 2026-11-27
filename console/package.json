@@ -10,8 +10,8 @@
     "e2e": "playwright test"
   },
   "dependencies": {
-    "@fontsource-variable/funnel-display": "5.3.0",
-    "@fontsource-variable/funnel-sans": "5.3.0",
+    "@fontsource-variable/geist": "5.3.0",
+    "@fontsource-variable/geist-mono": "5.3.0",
     "openapi-fetch": "0.17.0",
     "svelte": "5.59.1"
   },

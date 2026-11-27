@@ -1,7 +1,7 @@
 // Unit checks of plain helpers, run by node (npm run check).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { backupOf, ended, groupsOf, headline, open, people, safety, trail } from "../src/lib/change.ts";
+import { backupOf, ended, groupsOf, headline, open, people, safety, trail, unsettled, withChange } from "../src/lib/change.ts";
 
 const base = { name: "c", app: "forgejo", requester: { kind: "Human", name: "a" }, reason: "", risk: "medium", approval: { required: true, at: null }, phase: "WaitingForApproval", createdAt: "", startedAt: null, finishedAt: null } as const;
 
@@ -46,4 +46,17 @@ test("a restart promises neither backup nor rollback", () => {
 test("a change is open from the moment the API accepts it until it ends", () => {
   for (const phase of ["", "Pending", "WaitingForApproval", "Running"]) assert.equal(open({ phase } as never), true, phase);
   for (const phase of ["Succeeded", "Failed", "RolledBack", "Rejected"]) assert.equal(open({ phase } as never), false, phase);
+});
+
+test("an accepted change counts before the next reload", () => {
+  const restart = { ...base, name: "r", action: "restart" } as never;
+  const list = withChange([{ ...base, name: "old", phase: "Succeeded" }] as never[], restart);
+  assert.ok(list.some((c) => open(c) && c.action === "restart"));
+  assert.equal(withChange(list, { ...base, name: "r", action: "restart", phase: "Running" } as never).filter((c) => c.name === "r").length, 1);
+});
+
+test("a task page keeps polling for a change it has not read yet", () => {
+  assert.equal(unsettled([null]), true);
+  assert.equal(unsettled([{ ...base, phase: "Succeeded" } as never]), false);
+  assert.equal(unsettled([{ ...base, phase: "Succeeded" } as never, base as never]), true);
 });

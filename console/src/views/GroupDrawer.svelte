@@ -53,25 +53,27 @@
 
 <Drawer title={group.name} subtitle="{members.length} {members.length === 1 ? 'person' : 'people'}{apps.length ? `, gets ${apps.join(', ')}` : ''}" {onclose}>
   {#if note}<p class="note" class:fail={note.bad} role="status">{note.text}</p>{/if}
-  <section>
-    <h3>Members <small>tick who belongs</small></h3>
+  <section aria-labelledby="g-members">
+    <h3 id="g-members">Members <span>tick who belongs</span></h3>
     <ul class="people">
       {#each people as p (p.username)}
         <li>
-          <label class:on={members.includes(p.username)}>
+          <label class="row" class:on={members.includes(p.username)}>
             <input type="checkbox" checked={members.includes(p.username)} disabled={busy} onchange={() => (e = toggle(e, p.username))} />
-            <Avatar name={p.name || p.username} size={24} />
+            <Avatar name={p.name || p.username} size={26} />
             <span><strong>{p.name || p.username}</strong><small>{p.username}</small></span>
           </label>
         </li>
+      {:else}
+        <li class="empty">No person yet.</li>
       {/each}
     </ul>
     {#if edit === "conflict"}
-      <p class="note" role="status">Someone else changed this group meanwhile. Saving applies only your ticks; start over to see who is in it now.</p>
+      <p class="note warn" role="status">Someone else changed this group meanwhile. Saving applies only your ticks; start over to see who is in it now.</p>
     {/if}
-    <div class="row">
+    <div class="buttons">
       <Button onclick={save} disabled={!changed || busy}>{busy ? "Saving" : "Save members"}</Button>
-      {#if edit !== "clean"}<Button kind="quiet" onclick={() => (e = startOver(e))}>Start over</Button>{/if}
+      {#if edit !== "clean"}<Button kind="plain" onclick={() => (e = startOver(e))}>Start over</Button>{/if}
     </div>
   </section>
 </Drawer>
@@ -86,51 +88,66 @@
     align-items: baseline;
     gap: 10px;
     margin: 0;
-    font: 600 1.25rem / 1.2 var(--font-display);
+    font-size: 15px;
+    font-weight: 500;
   }
-  h3 small {
+  h3 span {
+    font-size: 13px;
+    font-weight: 400;
     color: var(--color-muted);
-    font: 600 13px var(--font-sans);
   }
   .people {
-    display: grid;
-    gap: 6px;
     margin: 0;
     padding: 0;
     list-style: none;
+    border-radius: var(--radius-panel);
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-line);
+    overflow: hidden;
+  }
+  .people > li + li {
+    border-top: 1px solid var(--color-hairline);
   }
   label {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 8px 12px;
-    border-radius: var(--radius-part);
-    background: var(--color-sunk);
+    padding: 10px 16px;
     cursor: pointer;
   }
   label.on {
-    outline: 2px solid color-mix(in srgb, var(--color-ok) 70%, transparent);
+    background: var(--color-ok-tile);
+  }
+  input {
+    accent-color: var(--color-ok);
   }
   label strong,
   label small {
     display: block;
   }
-  label small {
-    color: var(--color-muted);
-    font-size: 13px;
+  label strong {
+    font-weight: 500;
   }
-  .row {
+  label small {
+    color: var(--color-text);
+    font-size: 12.5px;
+  }
+  .buttons {
     display: flex;
     gap: 8px;
   }
   .note {
-    margin: 0;
-    padding: 12px 14px;
-    border-radius: var(--radius-part);
-    background: color-mix(in srgb, var(--color-info) 16%, transparent);
-    font-weight: 600;
+    margin: 0 0 16px;
+    padding: 10px 14px;
+    border-radius: var(--radius-control);
+    background: var(--color-ok-tile);
   }
-  .note.fail {
-    background: color-mix(in srgb, var(--color-bad) 16%, transparent);
+  .note.fail,
+  .note.warn {
+    background: var(--color-warn-bg);
+    color: var(--color-warn-text);
+  }
+  .note.warn {
+    margin: 0;
   }
 </style>
