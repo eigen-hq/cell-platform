@@ -67,8 +67,12 @@ func TestCellStatus(t *testing.T) {
 	t.Log(run(t, "go", "run", "./cmd/cellctl", "status"))
 }
 
-// Running the bootstrap a second time changes nothing.
+// Running the bootstrap a second time changes nothing. It is the local
+// cell's bootstrap; a cell from the installer is checked by its update.
 func TestBootstrapIdempotent(t *testing.T) {
+	if _, err := exec.LookPath("k3d"); err != nil {
+		t.Skip("no k3d: not a local cell")
+	}
 	c := kube(t)
 	before := desiredState(t, c)
 	run(t, "deploy/local-up.sh")
