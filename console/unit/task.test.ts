@@ -1,7 +1,7 @@
 // Unit checks of plain helpers, run by node (npm run check).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { transcriptHolds, withTranscript, type Task } from "../src/lib/task.ts";
+import { findingsTitle, looseChanges, optionKey, transcriptHolds, withTranscript, type Task } from "../src/lib/task.ts";
 
 test("the transcript is read only after the task", async () => {
   const order: string[] = [];
@@ -48,4 +48,23 @@ test("a transcript holds until the task moves: a reply from anyone, a step, an a
   const working = { ...done, phase: "Running", finishedAt: null } as Task;
   assert.equal(transcriptHolds(working, { ...working }), false);
   assert.equal(transcriptHolds(done, { ...done, steps: [...done.steps, done.steps[0]] }), false);
+});
+
+test("an option's change shows with the option; the other changes below, once each", () => {
+  const t = {
+    kind: "diagnose",
+    changes: ["a", "b", "a", "c"],
+    answer: { summary: "s", options: [{ title: "Go back", change: "b" }, { title: "Wait" }] },
+  } as unknown as Task;
+  assert.deepEqual(looseChanges(t), ["a", "c"]);
+  assert.deepEqual(looseChanges({ ...t, answer: null }), ["a", "b", "c"]);
+  assert.equal(findingsTitle("diagnose"), "Causes");
+  assert.equal(findingsTitle("ask"), "What it found");
+});
+
+test("an option whose change a follow-up replaced is a new row", () => {
+  assert.notEqual(optionKey({ change: "a" }, 0), optionKey({ change: "b" }, 0));
+  assert.notEqual(optionKey({}, 0), optionKey({ change: "a" }, 0));
+  assert.equal(optionKey({ change: "a" }, 1), optionKey({ change: "a" }, 1));
+  assert.notEqual(optionKey({}, 0), optionKey({}, 1));
 });

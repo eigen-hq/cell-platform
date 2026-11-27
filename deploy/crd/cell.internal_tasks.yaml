@@ -106,6 +106,80 @@ spec:
               rule: self.kind == 'ask' || has(self.app)
           status:
             properties:
+              answer:
+                description: |-
+                  Answer is the agent's answer in parts, when it gave one (E-100):
+                  what it understood, what it found with the steps that show it, and
+                  the options with the one it recommends.
+                properties:
+                  findings:
+                    items:
+                      description: |-
+                        TaskFinding is one thing the agent found, with the steps of the task
+                        whose results show it.
+                      properties:
+                        claim:
+                          maxLength: 1000
+                          minLength: 1
+                          type: string
+                        status:
+                          enum:
+                          - confirmed
+                          - suspected
+                          - ruledOut
+                          type: string
+                        steps:
+                          description: Steps are numbers of the task's steps (from
+                            1).
+                          items:
+                            format: int32
+                            minimum: 1
+                            type: integer
+                          maxItems: 20
+                          type: array
+                      required:
+                      - claim
+                      - status
+                      type: object
+                    maxItems: 12
+                    type: array
+                  options:
+                    items:
+                      description: |-
+                        TaskOption is one way to go on. At most one option of an answer is
+                        recommended and at most one names a change.
+                      properties:
+                        change:
+                          description: Change is the ChangeRequest the agent proposed
+                            in the task for it.
+                          maxLength: 253
+                          type: string
+                        recommended:
+                          type: boolean
+                        title:
+                          maxLength: 200
+                          minLength: 1
+                          type: string
+                        why:
+                          maxLength: 1000
+                          type: string
+                      required:
+                      - title
+                      type: object
+                    maxItems: 4
+                    type: array
+                  summary:
+                    description: Summary is the answer in a few sentences.
+                    maxLength: 2000
+                    minLength: 1
+                    type: string
+                  understood:
+                    description: Understood is what the agent took the task to be.
+                    maxLength: 1000
+                    type: string
+                required:
+                - summary
+                type: object
               assignee:
                 type: string
               finishedAt:
@@ -149,7 +223,8 @@ spec:
               result:
                 description: |-
                   Result is the agent's answer: the cause it found and what it
-                  proposed, or why it could not.
+                  proposed, or why it could not. With an Answer it is the answer as
+                  plain text.
                 maxLength: 16384
                 type: string
               startedAt:

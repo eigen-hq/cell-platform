@@ -80,7 +80,7 @@ flowchart LR
 
 A question without a change ("which machines are nearly full?") ends after Understood and Causes with its answer.
 
-**Today** a task ends with one answer in plain text and, where needed, one proposed change. After approval the change runs the steps of its kind: an update with backup, health check and rollback on failure; a restart without backup and without rollback; an install that does not become healthy stays installed for diagnosis (E-31, E-73).
+**Today** a task ends with an answer in parts (summary, what the agent understood, its causes or findings, its options) and, where needed, one proposed change: the one it recommends (E-100). After approval the change runs the steps of its kind: an update with backup, health check and rollback on failure; a restart without backup and without rollback; an install that does not become healthy stays installed for diagnosis (E-31, E-73).
 
 ### Talking back and forth
 
@@ -101,6 +101,15 @@ Only admins reply. A reply is refused while the agent works, when the agent that
 - **Stop.** An admin can stop a task at any time; the agent stops working on it. A change it proposed that nobody decided yet stays in the change log and can be declined. A change already approved runs to its end like any approved change. Stopping a task also stops the tasks it handed to other agents.
 
 ## What an answer shows
+
+**Runs today** (E-100). The task page shows the answer in this order:
+
+- **Summary**: what is going on and what the agent recommends, in two or three sentences.
+- **Understood as**: the task in one sentence, as the agent read it. If it is wrong, reply and say so.
+- **Causes** (for a diagnosis) or **What it found**: each claim marked *Confirmed*, *Suspected* or *Ruled out*. A confirmed or ruled-out claim links to the steps that show it; the link jumps to the step in *Every step*. A claim without such a step shows *No evidence named*.
+- **Options**: the ways to go on, the recommended one marked, with the change the agent proposed for it, ready to approve or decline.
+
+The platform refuses an answer that names a step the task does not have or a change from another task, and the agent has to correct it. The numbers you see, such as the risk of a change, come from the platform.
 
 *Planned* (backlog: Structured answers, Task page with stages and depth, Answer blocks).
 

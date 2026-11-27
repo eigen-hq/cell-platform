@@ -9,7 +9,7 @@
   import { isUp } from "../lib/home";
   import { newest, STALE } from "../lib/newest";
   import { itemPath } from "../lib/route";
-  import { agents, crew, task as line, taskState, transcriptHolds, withTranscript, type Task } from "../lib/task";
+  import { agents, crew, findingsTitle, findingState, looseChanges, optionKey, task as line, taskState, transcriptHolds, withTranscript, type Task } from "../lib/task";
   import { ago, stamp } from "../lib/time";
   import Avatar from "../lib/ui/Avatar.svelte";
   import Icon from "../lib/ui/Icon.svelte";
@@ -150,9 +150,15 @@
     return s.slice(0, 3);
   });
 
-  // The task page: the changes the task proposed, as the API has them now.
-  let names = $derived([...new Set(t?.changes ?? [])]);
-  let proposed = $derived(names.map((n) => changes.find((c) => c.name === n) ?? null));
+  // The task page: the changes the task proposed that no option names, as
+  // the API has them now.
+  let names = $derived(t ? looseChanges(t) : []);
+  // The step a finding points at, marked in the list of steps.
+  let hit = $state(0);
+  const toStep = (n: number) => {
+    hit = n;
+    document.getElementById(`step-${n}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
   const took = (x: Task) => {
     if (!x.startedAt || !x.finishedAt) return "";
     const s = Math.max(0, Math.round((new Date(x.finishedAt).getTime() - new Date(x.startedAt).getTime()) / 1000));
@@ -183,12 +189,31 @@
   });
   const whoSaid = { brief: "To the agent", reply: "Reply", thought: "Thinking", said: "The agent" } as const;
 
-  // The answer: its first paragraph large, the rest under it.
+  // The answer: its summary large, in parts below (E-100); an answer as text
+  // has its first paragraph large, the rest under it.
+  let ans = $derived(t?.answer ?? null);
   let answer = $derived.by(() => {
+    if (ans) return { first: ans.summary, rest: "" };
     const parts = (t?.result ?? "").trim().split(/\n\s*\n/);
     return { first: parts[0] ?? "", rest: parts.slice(1).join("\n\n") };
   });
 </script>
+
+{#snippet changeRow(n: string)}
+  {@const c = changes.find((x) => x.name === n) ?? null}
+  {#if c && c.phase === "WaitingForApproval"}
+    <!-- keyed by the change: a newer request must not inherit a half-made decision -->
+    <Slip change={c} title={title(c.app)} app={byName.get(c.app)} admin={true} ondecided={reloadTask} />
+  {:else}
+    {@const e = c ? ended(c) : null}
+    <a class="change row" href={itemPath("/changes", n)}>
+      {#if c}<Logo app={byName.get(c.app) ?? { name: c.app }} title={title(c.app)} size={24} />{:else}<Tile icon="changes" size={24} />{/if}
+      <span class="ct">{c ? headline(c, title(c.app)) : n}</span>
+      {#if e}<Tag tone={e.tone === "ok" ? "ok" : e.tone === "bad" ? "warn" : "neutral"}>{e.label}</Tag>{/if}
+      <Icon name="right" size={14} stroke={2} />
+    </a>
+  {/if}
+{/snippet}
 
 {#if open}
   <nav class="crumbs" aria-label="Breadcrumb"><a href="/agents">Agents</a><span aria-hidden="true">/</span><span>Task</span></nav>
@@ -220,6 +245,39 @@
           {:else if !running(t)}
             <p class="more">The agent left no answer.</p>
           {/if}
+          {#if ans?.understood}<p class="understood"><span>Understood as</span> {ans.understood}</p>{/if}
+
+          {#if ans?.findings?.length}
+            <h3>{findingsTitle(t.kind)} <span>{ans.findings.length}</span></h3>
+            <ul class="findings">
+              {#each ans.findings as f, i (i)}
+                <li class={f.status}>
+                  <Tag tone={f.status === "confirmed" ? "agent" : "neutral"}>{findingState[f.status]}</Tag>
+                  <span class="claim">{f.claim}</span>
+                  <span class="refs">
+                    {#each f.steps ?? [] as n, j (j)}
+                      <button type="button" class="ref mono" title={t.steps[n - 1]?.call} onclick={() => toStep(n)}>step {n}</button>
+                    {:else}
+                      {#if f.status !== "suspected"}<span class="none">No evidence named</span>{/if}
+                    {/each}
+                  </span>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+
+          {#if ans?.options?.length}
+            <h3>Options <span>{ans.options.length}</span></h3>
+            <ol class="options">
+              {#each ans.options as o, i (optionKey(o, i))}
+                <li class:rec={o.recommended}>
+                  <div class="ot"><span class="on mono">{i + 1}</span><strong>{o.title}</strong>{#if o.recommended}<Tag tone="agent">Recommended</Tag>{/if}</div>
+                  {#if o.why}<p class="why">{o.why}</p>{/if}
+                  {#if o.change}<div class="oc">{@render changeRow(o.change)}</div>{/if}
+                </li>
+              {/each}
+            </ol>
+          {/if}
 
           {#if running(t)}
             <div class="live">
@@ -239,24 +297,10 @@
           {/if}
 
           {#if names.length}
-            <h3>Changes it proposed <span>{names.length}</span></h3>
+            <h3>{ans?.options?.length ? "Other changes it proposed" : "Changes it proposed"} <span>{names.length}</span></h3>
             <ul class="changes">
-              {#each names as n, i (n)}
-                {@const c = proposed[i]}
-                {#if c && c.phase === "WaitingForApproval"}
-                  <!-- keyed by the change: a newer request must not inherit a half-made decision -->
-                  <li><Slip change={c} title={title(c.app)} app={byName.get(c.app)} admin={true} ondecided={reloadTask} /></li>
-                {:else}
-                  {@const e = c ? ended(c) : null}
-                  <li>
-                    <a class="change row" href={itemPath("/changes", n)}>
-                      {#if c}<Logo app={byName.get(c.app) ?? { name: c.app }} title={title(c.app)} size={24} />{:else}<Tile icon="changes" size={24} />{/if}
-                      <span class="ct">{c ? headline(c, title(c.app)) : n}</span>
-                      {#if e}<Tag tone={e.tone === "ok" ? "ok" : e.tone === "bad" ? "warn" : "neutral"}>{e.label}</Tag>{/if}
-                      <Icon name="right" size={14} stroke={2} />
-                    </a>
-                  </li>
-                {/if}
+              {#each names as n (n)}
+                <li>{@render changeRow(n)}</li>
               {/each}
             </ul>
           {/if}
@@ -272,7 +316,7 @@
             {#if t.steps.length}
               <ol>
                 {#each t.steps as st, i (i)}
-                  <li><time class="mono" datetime={st.at}>{stamp(st.at)}</time><code class="mono">{st.call}</code></li>
+                  <li id="step-{i + 1}" class:hit={hit === i + 1}><span class="sn mono">{i + 1}</span><time class="mono" datetime={st.at}>{stamp(st.at)}</time><code class="mono">{st.call}</code></li>
                 {/each}
               </ol>
             {:else}
@@ -691,6 +735,103 @@
     font-weight: 400;
     color: var(--color-muted);
   }
+  .understood {
+    margin: 12px 0 0;
+    font-size: 13.5px;
+    color: var(--color-text);
+    overflow-wrap: anywhere;
+  }
+  .understood span {
+    color: var(--color-muted);
+  }
+  .findings,
+  .options {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .findings li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px 12px;
+    padding: 10px 0;
+    border-top: 1px solid var(--color-hairline);
+  }
+  .findings li:first-child {
+    border-top: 0;
+  }
+  .claim {
+    flex: 1 1 320px;
+    min-width: 0;
+    font-size: 15px;
+    color: var(--color-ink);
+    overflow-wrap: anywhere;
+  }
+  .ruledOut .claim {
+    color: var(--color-muted);
+  }
+  .refs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .ref {
+    padding: 2px 8px;
+    border: 1px solid var(--color-line);
+    border-radius: 999px;
+    background: none;
+    font-size: 12px;
+    color: var(--color-text);
+    cursor: pointer;
+  }
+  .ref:hover,
+  .ref:focus-visible {
+    border-color: var(--color-agent-edge);
+    color: var(--color-agent-ink);
+  }
+  .none {
+    font-size: 12px;
+    color: var(--color-muted);
+  }
+  .options li {
+    padding: 14px 16px;
+    border-radius: var(--radius-box);
+    border: 1px solid var(--color-line);
+  }
+  .options li + li {
+    margin-top: 8px;
+  }
+  .options li.rec {
+    border-color: var(--color-agent-edge);
+  }
+  .ot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 10px;
+    font-size: 15px;
+  }
+  .ot strong {
+    font-weight: 500;
+    color: var(--color-ink);
+  }
+  .on {
+    font-size: 12px;
+    color: var(--color-muted);
+  }
+  .why {
+    margin: 6px 0 0;
+    font-size: 14px;
+    color: var(--color-text);
+    overflow-wrap: anywhere;
+  }
+  .oc {
+    margin-top: 12px;
+    border-radius: var(--radius-box);
+    border: 1px solid var(--color-hairline);
+    overflow: hidden;
+  }
   .changes {
     margin: 0;
     padding: 0;
@@ -740,6 +881,15 @@
     gap: 14px;
     padding: 5px 0 5px 16px;
     font-size: 12.5px;
+  }
+  .steps li.hit {
+    background: var(--color-agent-wash);
+  }
+  .steps .sn {
+    flex: none;
+    min-width: 2ch;
+    text-align: right;
+    color: var(--color-muted);
   }
   .steps time {
     flex: none;

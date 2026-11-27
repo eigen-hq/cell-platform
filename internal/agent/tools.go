@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -38,6 +40,21 @@ type operation struct {
 	in     map[string]string // where an argument goes: path, query or body
 	body   bool              // the operation takes a JSON body
 }
+
+// answerSchema is the answer tool's arguments: TaskAnswer of the contract.
+var answerSchema = sync.OnceValues(func() (map[string]any, error) {
+	var doc map[string]any
+	if err := yaml.Unmarshal(apidoc.OpenAPI, &doc); err != nil {
+		return nil, fmt.Errorf("openapi.yaml: %w", err)
+	}
+	s, err := inline(doc, map[string]any{"$ref": "#/components/schemas/TaskAnswer"}, 0)
+	if err != nil {
+		return nil, fmt.Errorf("openapi.yaml: %w", err)
+	}
+	m, _ := s.(map[string]any)
+	delete(m, "description") // the tool's own
+	return m, nil
+})
 
 // operations are the agents' tools in the contract, sorted by name so the
 // start of every prompt stays the same for the gateway's cache.
@@ -237,10 +254,14 @@ func (op operation) request(args json.RawMessage) (string, any, error) {
 
 // tools are the agent's tools in task, the ones its Agent names (* for
 // all, E-97): each is one call of the platform API, which records it as a
-// step of the task and decides whether the agent may make it. ask comes
-// last, for every agent.
+// step of the task and decides whether the agent may make it. answer and
+// ask come last, for every agent.
 func (a *Agent) tools(task string, names []string) ([]tool, error) {
 	ops, err := operations()
+	if err != nil {
+		return nil, err
+	}
+	answerParams, err := answerSchema()
 	if err != nil {
 		return nil, err
 	}
@@ -263,12 +284,31 @@ func (a *Agent) tools(task string, names []string) ([]tool, error) {
 				return a.call(ctx, op.Method, path, task, body)
 			}})
 	}
-	return append(tools, ask), nil
+	finish := "/v0/tasks/" + url.PathEscape(task) + "/finish"
+	answer := tool{Name: answerName, Description: answerDescription, Params: answerParams,
+		Run: func(ctx context.Context, args json.RawMessage) (string, error) {
+			code, body, err := a.API.Do(ctx, http.MethodPost, finish, "", map[string]any{"answer": args, "check": true})
+			if err != nil {
+				return "", err
+			}
+			if code != http.StatusOK {
+				return "", fmt.Errorf("the platform refused the answer: HTTP %d: %s", code, body)
+			}
+			return "Checked; the task ends with this answer after this turn.", nil
+		}}
+	return append(tools, answer, ask), nil
 }
+
+// answerName is the tool that ends a task with the answer in parts (E-100).
+const answerName = "answer"
+
+const answerDescription = "End the task with your answer: the summary, what you understood, what you found with the steps that show it, and the options. " +
+	"Call it alone in your last turn, once the results it names are in; the task ends after this call's turn. " +
+	"The platform checks the answer against the task: an error says what to fix, then call it again."
 
 // call makes one API call in task and returns its body for the model.
 func (a *Agent) call(ctx context.Context, method, path, task string, in any) (string, error) {
-	code, body, err := a.API.Do(ctx, method, path, task, in)
+	code, body, h, err := a.API.do(ctx, method, path, task, in)
 	if err != nil {
 		return "", err
 	}
@@ -276,8 +316,13 @@ func (a *Agent) call(ctx context.Context, method, path, task string, in any) (st
 	if len(text) > maxResult {
 		text = text[len(text)-maxResult:] // the end of logs and lists matters most
 	}
-	if code >= 300 {
-		return "", fmt.Errorf("HTTP %d: %s", code, text)
+	// After the cut, which keeps the end: the answer names the step (E-100).
+	step := ""
+	if n, err := strconv.Atoi(h.Get(StepHeader)); err == nil {
+		step = "[step " + strconv.Itoa(n) + "]\n"
 	}
-	return text, nil
+	if code >= 300 {
+		return "", fmt.Errorf("%sHTTP %d: %s", step, code, text)
+	}
+	return step + text, nil
 }

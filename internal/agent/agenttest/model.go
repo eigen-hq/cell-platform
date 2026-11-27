@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
+	"strconv"
 	"sync"
 )
 
@@ -34,8 +36,11 @@ type Conversation struct {
 	// Task is the first user message.
 	Task string
 	// Results are the tool results since the model's last turn; errors
-	// start with "ERROR ".
+	// start with "ERROR ". The step number the agent puts first (E-100) is
+	// in Steps.
 	Results []string
+	// Steps are the step numbers of Results, 0 for a result without one.
+	Steps []int
 	// Notes are the agent's messages after the task since the model's last
 	// turn.
 	Notes []string
@@ -44,6 +49,10 @@ type Conversation struct {
 	// Tools are the names of the tools the agent offers.
 	Tools []string
 }
+
+// stepped is the step number before a tool result, after "ERROR " for an
+// error.
+var stepped = regexp.MustCompile(`^(ERROR )?\[step ([0-9]+)\]\n`)
 
 // Script returns the model's next turn.
 type Script func(Conversation) (Turn, error)
@@ -140,7 +149,7 @@ func (m *Model) answer(r *http.Request, script Script) (map[string]any, error) {
 				return nil, fmt.Errorf("turn %d came back with reasoning %q, signature %q", c.Turn, msg.ReasoningContent, msg.ReasoningSignature)
 			}
 			c.Turn++
-			c.Results, c.Notes = nil, nil
+			c.Results, c.Steps, c.Notes = nil, nil, nil
 			for _, call := range msg.ToolCalls {
 				open[call.ID] = true
 			}
@@ -155,7 +164,12 @@ func (m *Model) answer(r *http.Request, script Script) (map[string]any, error) {
 				return nil, fmt.Errorf("message %d: result for call %q, which is not open", i, msg.ToolCallID)
 			}
 			delete(open, msg.ToolCallID)
-			c.Results = append(c.Results, text)
+			step := 0
+			if m := stepped.FindStringSubmatch(text); m != nil {
+				step, _ = strconv.Atoi(m[2])
+				text = m[1] + text[len(m[0]):]
+			}
+			c.Results, c.Steps = append(c.Results, text), append(c.Steps, step)
 		}
 	}
 	if len(open) > 0 {

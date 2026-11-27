@@ -58,13 +58,61 @@ type TaskStatus struct {
 	// +kubebuilder:validation:MaxItems=200
 	Steps []TaskStep `json:"steps,omitempty"`
 	// Result is the agent's answer: the cause it found and what it
-	// proposed, or why it could not.
+	// proposed, or why it could not. With an Answer it is the answer as
+	// plain text.
 	// +kubebuilder:validation:MaxLength=16384
 	Result string `json:"result,omitempty"`
+	// Answer is the agent's answer in parts, when it gave one (E-100):
+	// what it understood, what it found with the steps that show it, and
+	// the options with the one it recommends.
+	Answer *TaskAnswer `json:"answer,omitempty"`
 	// Reply is a person's last reply: the answer to the agent's question or
 	// a follow-up. The agent adds it to the task's transcript, which keeps
 	// every reply, and goes on (E-99).
 	Reply *TaskReply `json:"reply,omitempty"`
+}
+
+// TaskAnswer is an agent's answer in the parts a consultant's has (E-100).
+type TaskAnswer struct {
+	// Summary is the answer in a few sentences.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=2000
+	Summary string `json:"summary"`
+	// Understood is what the agent took the task to be.
+	// +kubebuilder:validation:MaxLength=1000
+	Understood string `json:"understood,omitempty"`
+	// +kubebuilder:validation:MaxItems=12
+	Findings []TaskFinding `json:"findings,omitempty"`
+	// +kubebuilder:validation:MaxItems=4
+	Options []TaskOption `json:"options,omitempty"`
+}
+
+// TaskFinding is one thing the agent found, with the steps of the task
+// whose results show it.
+type TaskFinding struct {
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=1000
+	Claim string `json:"claim"`
+	// +kubebuilder:validation:Enum=confirmed;suspected;ruledOut
+	Status string `json:"status"`
+	// Steps are numbers of the task's steps (from 1).
+	// +kubebuilder:validation:MaxItems=20
+	// +kubebuilder:validation:items:Minimum=1
+	Steps []int32 `json:"steps,omitempty"`
+}
+
+// TaskOption is one way to go on. At most one option of an answer is
+// recommended and at most one names a change.
+type TaskOption struct {
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=200
+	Title string `json:"title"`
+	// +kubebuilder:validation:MaxLength=1000
+	Why string `json:"why,omitempty"`
+	// Change is the ChangeRequest the agent proposed in the task for it.
+	// +kubebuilder:validation:MaxLength=253
+	Change      string `json:"change,omitempty"`
+	Recommended bool   `json:"recommended,omitempty"`
 }
 
 type TaskReply struct {

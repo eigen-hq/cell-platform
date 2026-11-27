@@ -51,12 +51,14 @@ type task struct {
 	} `json:"reply"`
 }
 
-// answer ends a task: the model's answer, why the task failed, or the
-// model's question to the person, whose reply it needs to go on (E-99).
+// answer ends a task: the model's answer (as text, or in parts from the
+// answer tool, E-100), why the task failed, or the model's question to the
+// person, whose reply it needs to go on (E-99).
 type answer struct {
-	Result  string `json:"result"`
-	Failed  bool   `json:"failed"`
-	Waiting bool   `json:"waiting"`
+	Result  string          `json:"result"`
+	Failed  bool            `json:"failed"`
+	Waiting bool            `json:"waiting"`
+	Answer  json.RawMessage `json:"answer,omitempty"`
 }
 
 func failed(why string) answer { return answer{Result: why, Failed: true} }
@@ -165,7 +167,14 @@ func (a *Agent) Take(ctx context.Context, name string) error {
 	}
 	a.Log.Info("working", "task", t.Name, "kind", t.Kind, "app", t.App)
 	ans := a.work(ctx, t)
-	if err := a.finish(ctx, t.Name, ans); err != nil {
+	err = a.finish(ctx, t.Name, ans)
+	if err != nil && ans.Answer != nil {
+		// The answer passed the check but not the finish: the task changed
+		// in between, for example its change was deleted.
+		ans = failed("the platform refused the answer: " + err.Error())
+		err = a.finish(ctx, t.Name, ans)
+	}
+	if err != nil {
 		return err
 	}
 	a.Log.Info("done", "task", t.Name, "failed", ans.Failed, "waiting", ans.Waiting)
@@ -249,11 +258,22 @@ func (a *Agent) work(ctx context.Context, t task) answer {
 		wg.Wait()
 		outputs := make([]message, len(reply.Calls))
 		var asked []string
+		final := -1 // the turn's last answer the platform checked
 		for i, c := range reply.Calls {
 			outputs[i] = message{Role: "tool", CallID: c.ID, Text: results[i]}
 			if q, err := question(c.Args); c.Name == ask.Name && err == nil {
 				asked = append(asked, q)
 			}
+			if c.Name == answerName && !strings.HasPrefix(results[i], "ERROR ") {
+				if final >= 0 {
+					outputs[final].Text = "ERROR not recorded: a later answer of this turn replaced it"
+				}
+				final = i
+			}
+		}
+		if final >= 0 && len(asked) > 0 {
+			outputs[final].Text = "ERROR not recorded: you asked in the same turn; answer once the reply is in"
+			final = -1
 		}
 		msgs = append(msgs, outputs...)
 		if err := tr.add(ctx, outputs...); err != nil {
@@ -263,6 +283,9 @@ func (a *Agent) work(ctx context.Context, t task) answer {
 		// the turn ran.
 		if len(asked) > 0 {
 			return answer{Result: strings.Join(asked, "\n\n"), Waiting: true}
+		}
+		if final >= 0 {
+			return answer{Answer: reply.Calls[final].Args}
 		}
 	}
 	return failed("stopped before an answer (40 model calls)")

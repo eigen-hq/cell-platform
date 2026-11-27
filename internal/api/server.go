@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -238,6 +239,7 @@ func (s *Server) wrap(rt route) http.HandlerFunc {
 					return
 				}
 				r = r.WithContext(ctx)
+				w.Header().Set(StepHeader, strconv.Itoa(taskOf(ctx).Step))
 				// Checked on every call, after it is recorded: an agent whose
 				// spec an admin narrows stops at its next call. It reads and
 				// changes only the app its task is about: what one app's logs

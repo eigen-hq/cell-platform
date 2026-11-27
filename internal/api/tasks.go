@@ -2,8 +2,10 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -23,6 +25,11 @@ import (
 // before it serves the call, so every agent step is in the change log.
 const TaskHeader = "X-Cell-Task"
 
+// StepHeader answers an agent's call with the number of the step the API
+// recorded it as (from 1), also when it refuses the call: the agent's
+// answer names the steps that show what it found (E-100).
+const StepHeader = "X-Cell-Step"
+
 // maxSteps keeps a runaway agent from growing a task without end.
 const maxSteps = 200
 
@@ -37,8 +44,11 @@ var taskFree = map[string]bool{
 
 type taskKey struct{}
 
-// taskRef is the task an agent's request works in.
-type taskRef struct{ Name, Kind, App string }
+// taskRef is the task an agent's request works in, and the request's step.
+type taskRef struct {
+	Name, Kind, App string
+	Step            int
+}
 
 // taskOf is the task the request's agent works in (zero for people).
 func taskOf(ctx context.Context) taskRef {
@@ -73,6 +83,7 @@ func (s *Server) inTask(r *http.Request, c *Caller) (context.Context, error) {
 			return errorf(http.StatusConflict, "task %s has %d steps, the most a task can have: finish it", name, maxSteps)
 		}
 		t.Status.Steps = append(t.Status.Steps, cellv1.TaskStep{At: metav1.NewTime(s.now()), Call: call})
+		ref.Step = len(t.Status.Steps)
 		return s.Kube.Status().Update(r.Context(), t)
 	})
 	if err != nil {
@@ -109,8 +120,10 @@ type taskView struct {
 	StartedAt  *time.Time    `json:"startedAt"`
 	FinishedAt *time.Time    `json:"finishedAt"`
 	Result     string        `json:"result"`
-	Reply      *replyView    `json:"reply"`
-	Steps      []stepView    `json:"steps"`
+	// Answer is the answer in parts, when the agent gave one (E-100).
+	Answer *cellv1.TaskAnswer `json:"answer"`
+	Reply  *replyView         `json:"reply"`
+	Steps  []stepView         `json:"steps"`
 	// Changes the agent proposed in the task (only for a single task).
 	Changes []string `json:"changes,omitempty"`
 }
@@ -126,7 +139,7 @@ func viewTask(t *cellv1.Task) taskView {
 		Requester: requesterView{Kind: t.Spec.Requester.Kind, Name: t.Spec.Requester.Name},
 		Phase:     string(t.Status.Phase), Assignee: t.Status.Assignee, CreatedAt: t.CreationTimestamp.Time,
 		StartedAt: timePtr(t.Status.StartedAt), FinishedAt: timePtr(t.Status.FinishedAt), Result: t.Status.Result,
-		Steps: []stepView{}}
+		Answer: t.Status.Answer, Steps: []stepView{}}
 	if v.Phase == "" {
 		v.Phase = string(cellv1.RunPending)
 	}
@@ -274,6 +287,7 @@ func (s *Server) claimTask(w http.ResponseWriter, r *http.Request, c *Caller) er
 		// goes on with its other work.
 		t.Status.Phase, t.Status.FinishedAt = cellv1.RunFailed, &now
 		t.Status.Result = "The reply was not taken: " + err.Error() + ". Ask again in a new task."
+		t.Status.Answer = nil
 		if err := s.Kube.Status().Update(r.Context(), t); err != nil && !apierrors.IsConflict(err) {
 			return err
 		}
@@ -297,7 +311,15 @@ type finishTaskRequest struct {
 	// Waiting: the result is a question to the person, whose reply the
 	// agent needs to go on.
 	Waiting bool `json:"waiting"`
+	// Answer is the answer in parts (E-100), in place of Result.
+	Answer *cellv1.TaskAnswer `json:"answer"`
+	// Check only checks Answer against the task and leaves the task as it
+	// is: the agent's answer tool, so the model can correct it.
+	Check bool `json:"check"`
 }
+
+// maxResult is the most of a result the task keeps, in bytes.
+const maxResult = 16384
 
 // finishTask records the agent's answer and ends the task.
 func (s *Server) finishTask(w http.ResponseWriter, r *http.Request, c *Caller) error {
@@ -308,9 +330,13 @@ func (s *Server) finishTask(w http.ResponseWriter, r *http.Request, c *Caller) e
 	if req.Failed && req.Waiting {
 		return errorf(http.StatusBadRequest, "a task fails or waits, not both")
 	}
-	if len(req.Result) > 16384 {
-		req.Result = req.Result[:16384]
+	if req.Answer != nil && (req.Failed || req.Waiting || req.Result != "") {
+		return errorf(http.StatusBadRequest, "an answer ends a task that succeeded, in place of a result")
 	}
+	if req.Check && req.Answer == nil {
+		return errorf(http.StatusBadRequest, "check needs an answer")
+	}
+	req.Result = cut(req.Result, maxResult)
 	var t *cellv1.Task
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		var err error
@@ -320,21 +346,171 @@ func (s *Server) finishTask(w http.ResponseWriter, r *http.Request, c *Caller) e
 		if t.Status.Phase != cellv1.RunRunning || t.Status.Assignee != c.Username {
 			return errorf(http.StatusConflict, "task %s is not running for you (phase %s, assignee %q)", t.Name, t.Status.Phase, t.Status.Assignee)
 		}
+		result := req.Result
+		if req.Answer != nil {
+			if err := s.checkAnswer(r.Context(), t, req.Answer); err != nil {
+				return err
+			}
+			if req.Check {
+				return nil
+			}
+			result = cut(render(req.Answer), maxResult)
+		}
 		now := metav1.NewTime(s.now())
-		t.Status.Phase, t.Status.Result, t.Status.FinishedAt = cellv1.RunSucceeded, req.Result, &now
+		t.Status.Phase, t.Status.Result, t.Status.Answer, t.Status.FinishedAt = cellv1.RunSucceeded, result, req.Answer, &now
 		if req.Failed {
 			t.Status.Phase = cellv1.RunFailed
 		}
 		if req.Waiting {
 			t.Status.Phase = cellv1.RunWaitingForInput
 		}
-		return s.Kube.Status().Update(r.Context(), t)
+		err = s.Kube.Status().Update(r.Context(), t)
+		if apierrors.IsInvalid(err) {
+			return errorf(http.StatusBadRequest, "%v", err)
+		}
+		return err
 	})
 	if err != nil {
 		return err
 	}
 	writeJSON(w, http.StatusOK, viewTask(t))
 	return nil
+}
+
+// cut keeps at most n bytes of s, ending on a whole character.
+func cut(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
+}
+
+// checkAnswer refuses an answer the task cannot keep or the console could
+// not show: too long, steps the task does not have, more than one
+// recommended option, a change of another task (E-100).
+func (s *Server) checkAnswer(ctx context.Context, t *cellv1.Task, a *cellv1.TaskAnswer) error {
+	long := func(what, v string, most int) error {
+		if n := utf8.RuneCountInString(v); n > most {
+			return errorf(http.StatusBadRequest, "%s has %d characters, at most %d", what, n, most)
+		}
+		return nil
+	}
+	bad := func(format string, args ...any) error { return errorf(http.StatusBadRequest, format, args...) }
+	if strings.TrimSpace(a.Summary) == "" {
+		return bad("the answer needs a summary")
+	}
+	if err := long("the summary", a.Summary, 2000); err != nil {
+		return err
+	}
+	if err := long("understood", a.Understood, 1000); err != nil {
+		return err
+	}
+	if len(a.Findings) > 12 || len(a.Options) > 4 {
+		return bad("an answer has at most 12 findings and 4 options")
+	}
+	for i, f := range a.Findings {
+		if strings.TrimSpace(f.Claim) == "" {
+			return bad("finding %d needs a claim", i+1)
+		}
+		if err := long(fmt.Sprintf("finding %d", i+1), f.Claim, 1000); err != nil {
+			return err
+		}
+		switch f.Status {
+		case "confirmed", "suspected", "ruledOut":
+		default:
+			return bad("finding %d: status must be confirmed, suspected or ruledOut", i+1)
+		}
+		if len(f.Steps) > 20 {
+			return bad("finding %d names more than 20 steps", i+1)
+		}
+		for _, n := range f.Steps {
+			if n < 1 || int(n) > len(t.Status.Steps) {
+				return bad("finding %d names step %d; the task has steps 1 to %d", i+1, n, len(t.Status.Steps))
+			}
+		}
+	}
+	recommended, changes := 0, 0
+	for i, o := range a.Options {
+		if strings.TrimSpace(o.Title) == "" {
+			return bad("option %d needs a title", i+1)
+		}
+		if err := long(fmt.Sprintf("option %d's title", i+1), o.Title, 200); err != nil {
+			return err
+		}
+		if err := long(fmt.Sprintf("option %d's why", i+1), o.Why, 1000); err != nil {
+			return err
+		}
+		if o.Recommended {
+			recommended++
+		}
+		if o.Change == "" {
+			continue
+		}
+		// ponytail: one option per change; options that exclude each other
+		// need approvals that know of each other
+		if changes++; changes > 1 {
+			return bad("at most one option names a change")
+		}
+		// One message for a change that does not exist and one of another
+		// task: an agent learns no names of changes outside its task.
+		var cr cellv1.ChangeRequest
+		err := s.Kube.Get(ctx, client.ObjectKey{Name: o.Change}, &cr)
+		if err != nil && !apierrors.IsNotFound(err) && !apierrors.IsInvalid(err) {
+			return err
+		}
+		if err != nil || cr.Spec.Task != t.Name {
+			return bad("option %d names change %q, which this task did not propose", i+1, o.Change)
+		}
+	}
+	if recommended > 1 {
+		return bad("at most one option is recommended")
+	}
+	return nil
+}
+
+// render is an answer as plain text, the task's result.
+func render(a *cellv1.TaskAnswer) string {
+	var b strings.Builder
+	b.WriteString(strings.TrimSpace(a.Summary))
+	if a.Understood != "" {
+		b.WriteString("\n\nUnderstood: " + a.Understood)
+	}
+	if len(a.Findings) > 0 {
+		b.WriteString("\n\nFound:")
+	}
+	for _, f := range a.Findings {
+		fmt.Fprintf(&b, "\n- [%s] %s", f.Status, f.Claim)
+		if len(f.Steps) > 0 {
+			steps := make([]string, len(f.Steps))
+			for i, n := range f.Steps {
+				steps[i] = strconv.Itoa(int(n))
+			}
+			label := " (steps "
+			if len(steps) == 1 {
+				label = " (step "
+			}
+			b.WriteString(label + strings.Join(steps, ", ") + ")")
+		}
+	}
+	if len(a.Options) > 0 {
+		b.WriteString("\n\nOptions:")
+	}
+	for i, o := range a.Options {
+		fmt.Fprintf(&b, "\n%d. %s", i+1, o.Title)
+		if o.Recommended {
+			b.WriteString(" (recommended)")
+		}
+		if o.Why != "" {
+			b.WriteString(": " + o.Why)
+		}
+		if o.Change != "" {
+			b.WriteString(" Change: " + o.Change)
+		}
+	}
+	return b.String()
 }
 
 type replyRequest struct {

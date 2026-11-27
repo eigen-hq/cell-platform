@@ -2,6 +2,7 @@
 import type { components } from "./api/schema";
 
 export type Task = components["schemas"]["Task"];
+export type Finding = NonNullable<components["schemas"]["TaskAnswer"]["findings"]>[number];
 
 /** The longest request the ask box sends (the API's limit). */
 export const MAX_ASK = 4000;
@@ -65,6 +66,23 @@ export function transcriptHolds(seen: Task | null, now: Task): boolean {
     seen.finishedAt === now.finishedAt &&
     (seen.reply?.at ?? "") === (now.reply?.at ?? "")
   );
+}
+
+/** The heading of an answer's findings: the causes, for a diagnosis. */
+export const findingsTitle = (kind: Task["kind"]) => (kind === "diagnose" ? "Causes" : "What it found");
+
+/** A finding's status in plain words. */
+export const findingState: Record<Finding["status"], string> = { confirmed: "Confirmed", suspected: "Suspected", ruledOut: "Ruled out" };
+
+/** The key of an option in the list: a later answer that puts another
+ * change in its place gets a fresh row, so no half-made decision on the
+ * old change carries over to the new one. */
+export const optionKey = (o: { change?: string }, i: number) => `${i}:${o.change ?? ""}`;
+
+/** The changes the task proposed that no option of its answer names (E-100), in order. */
+export function looseChanges(t: Task): string[] {
+  const named = new Set((t.answer?.options ?? []).map((o) => o.change));
+  return [...new Set(t.changes ?? [])].filter((n) => !named.has(n));
 }
 
 /** Where a task stands. */

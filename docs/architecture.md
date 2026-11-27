@@ -136,7 +136,7 @@ Agents reach their language model only through the cell's model gateway (E-80): 
 
 ## Agent harness
 
-Planned (E-88 to E-90). What runs today is the loop of E-32 on our own Chat Completions client (E-94), without a provider SDK, with the transcript in the platform database (E-98) and replies and questions (E-99): an admin's reply sets the task pending for the same agent, which rebuilds the conversation from the transcript and goes on; the model asks with the tool `ask`, and the task waits as `WaitingForInput`. How people use it is in `agents.md`; the order of the work is in `backlog.md`.
+Planned (E-88 to E-90). What runs today is the loop of E-32 on our own Chat Completions client (E-94), without a provider SDK, with the transcript in the platform database (E-98) and replies and questions (E-99): an admin's reply sets the task pending for the same agent, which rebuilds the conversation from the transcript and goes on; the model asks with the tool `ask`, and the task waits as `WaitingForInput`. The model ends a task with the tool `answer`, in parts the API checks against the task: findings name the task's steps, which every tool result carries, and options the changes of the task (E-100). How people use it is in `agents.md`; the order of the work is in `backlog.md`.
 
 ```mermaid
 flowchart LR

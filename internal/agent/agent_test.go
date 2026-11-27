@@ -667,3 +667,71 @@ func TestReplyAfterRestart(t *testing.T) {
 		t.Errorf("another agent's task %+v", got.Status)
 	}
 }
+
+// The model ends a task with the answer tool (E-100): every tool result
+// starts with its step, a refused answer goes back as an error to fix, the
+// turn's last checked answer wins, and the task keeps the answer in parts.
+func TestAnswer(t *testing.T) {
+	found := map[string]any{"summary": "Board runs 1.0.", "findings": []any{map[string]any{"claim": "getApp shows 1.0.", "status": "confirmed", "steps": []int{1}}}}
+	c := newCell(t, func(conv agenttest.Conversation) (agenttest.Turn, error) {
+		switch conv.Turn {
+		case 0:
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "getApp", Input: map[string]any{"name": "board"}}}}, nil
+		case 1:
+			if err := want(slices.Equal(conv.Steps, []int{1}) && strings.HasPrefix(conv.Results[0], "{"), "steps %v, results %q", conv.Steps, conv.Results); err != nil {
+				return agenttest.Turn{}, err
+			}
+			bad := map[string]any{"summary": "x", "findings": []any{map[string]any{"claim": "c", "status": "confirmed", "steps": []int{2}}}}
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "answer", Input: bad}}}, nil
+		case 2:
+			if err := want(len(conv.Results) == 1 && strings.HasPrefix(conv.Results[0], "ERROR the platform refused the answer: HTTP 400") &&
+				strings.Contains(conv.Results[0], "names step 2"), "results %q", conv.Results); err != nil {
+				return agenttest.Turn{}, err
+			}
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "answer", Input: map[string]any{"summary": "first"}}, {Tool: "answer", Input: found}}}, nil
+		}
+		return agenttest.Turn{}, fmt.Errorf("turn %d", conv.Turn)
+	}, board.DeepCopy(), askTask("Which version runs?"))
+	c.once(t)
+	got, calls := c.task(t, "board-ask-1")
+	if got.Status.Phase != cellv1.RunSucceeded || got.Status.Answer == nil || got.Status.Answer.Summary != "Board runs 1.0." ||
+		got.Status.Result != "Board runs 1.0.\n\nFound:\n- [confirmed] getApp shows 1.0. (step 1)" || !slices.Equal(calls, []string{"GET /v0/apps/board"}) {
+		t.Fatalf("task %+v, steps %q", got.Status, calls)
+	}
+	items, _ := c.items.Items(context.Background(), "uid-board-ask-1")
+	var replaced bool
+	for _, it := range items {
+		replaced = replaced || strings.Contains(string(it.Item), "not recorded: a later answer of this turn replaced it")
+	}
+	if !replaced {
+		t.Error("the earlier answer of the last turn is not marked as replaced")
+	}
+}
+
+// An answer in the turn that asks is not recorded: the task waits for the
+// reply, and the model answers after it.
+func TestAnswerWhileAsking(t *testing.T) {
+	c := newCell(t, func(conv agenttest.Conversation) (agenttest.Turn, error) {
+		switch conv.Turn {
+		case 0:
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "ask", Input: map[string]any{"question": "To which version?"}},
+				{Tool: "answer", Input: map[string]any{"summary": "Too early."}}}}, nil
+		case 1:
+			if err := want(len(conv.Results) == 2 && conv.Results[1] == "ERROR not recorded: you asked in the same turn; answer once the reply is in",
+				"results %q", conv.Results); err != nil {
+				return agenttest.Turn{}, err
+			}
+			return agenttest.Turn{Text: "Proposed nothing: 2.0 is not out."}, nil
+		}
+		return agenttest.Turn{}, fmt.Errorf("turn %d", conv.Turn)
+	}, board.DeepCopy(), askTask("Update board."))
+	c.once(t)
+	if got, _ := c.task(t, "board-ask-1"); got.Status.Phase != cellv1.RunWaitingForInput || got.Status.Answer != nil || got.Status.Result != "To which version?" {
+		t.Fatalf("task %+v", got.Status)
+	}
+	c.reply(t, "board-ask-1", "alice", "2.0")
+	c.once(t)
+	if got, _ := c.task(t, "board-ask-1"); got.Status.Phase != cellv1.RunSucceeded || got.Status.Answer != nil || got.Status.Result != "Proposed nothing: 2.0 is not out." {
+		t.Errorf("task %+v", got.Status)
+	}
+}

@@ -224,6 +224,7 @@ func failTask(ctx context.Context, c client.Client, key client.ObjectKey) error 
 		now := metav1.Now()
 		t.Status.Phase, t.Status.FinishedAt = cellv1.RunFailed, &now
 		t.Status.Result = fmt.Sprintf("interrupted: agent %s was deleted or made again while it worked on this; ask again", name)
+		t.Status.Answer = nil
 		return c.Status().Update(ctx, &t)
 	})
 }

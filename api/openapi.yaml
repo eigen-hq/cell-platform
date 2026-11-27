@@ -563,7 +563,7 @@ paths:
     parameters: [{$ref: "#/components/parameters/task"}]
     post:
       operationId: finishTask
-      description: "The agent that works on the task ends it with its answer, or with a question to the person (waiting): the task then waits for a reply."
+      description: "The agent that works on the task ends it with its answer (a result, or an answer in parts), or with a question to the person (waiting): the task then waits for a reply. With check, the API only checks the answer against the task (400 with what is wrong) and leaves the task as it is."
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: "#/components/schemas/TaskResult"}}}
@@ -1091,7 +1091,7 @@ components:
     Task:
       type: object
       additionalProperties: false
-      required: [name, kind, app, input, requester, phase, assignee, createdAt, startedAt, finishedAt, result, reply, steps]
+      required: [name, kind, app, input, requester, phase, assignee, createdAt, startedAt, finishedAt, result, answer, reply, steps]
       properties:
         name: {type: string}
         kind: {type: string, enum: [diagnose, package, ask]}
@@ -1109,7 +1109,11 @@ components:
         createdAt: {type: string, format: date-time}
         startedAt: {type: string, format: date-time, nullable: true}
         finishedAt: {type: string, format: date-time, nullable: true}
-        result: {type: string, description: "The agent's answer: the cause and what it proposed, or why it could not; its question while the task waits for input."}
+        result: {type: string, description: "The agent's answer: the cause and what it proposed, or why it could not; its question while the task waits for input. With an answer, the answer as plain text."}
+        answer:
+          allOf: [{$ref: "#/components/schemas/TaskAnswer"}]
+          nullable: true
+          description: "The answer in parts, when the agent gave one (E-100)."
         reply:
           type: object
           nullable: true
@@ -1187,11 +1191,45 @@ components:
     TaskResult:
       type: object
       additionalProperties: false
-      required: [result]
       properties:
         result: {type: string}
         failed: {type: boolean, default: false}
         waiting: {type: boolean, default: false, description: "The result is a question to the person; the task waits for a reply. Not together with failed."}
+        answer: {$ref: "#/components/schemas/TaskAnswer"}
+        check: {type: boolean, default: false, description: "Only check the answer; the task stays as it is."}
+    TaskAnswer:
+      type: object
+      additionalProperties: false
+      description: "Your answer to the task, in the parts a consultant's has. The person reads the summary first and decides on the options; everything else backs them."
+      required: [summary]
+      properties:
+        summary: {type: string, maxLength: 2000, description: "The answer in two or three plain sentences: what is going on and what you recommend. No diffs, no risk ratings."}
+        understood: {type: string, maxLength: 1000, description: "What you took the task to be, in one sentence, so the person sees a misunderstanding at once."}
+        findings:
+          type: array
+          maxItems: 12
+          description: "What you found, the cause first for a diagnosis. Also what you ruled out, when the person would suspect it."
+          items:
+            type: object
+            additionalProperties: false
+            required: [claim, status]
+            properties:
+              claim: {type: string, maxLength: 1000, description: "One thing you found, in one or two sentences."}
+              status: {type: string, enum: [confirmed, suspected, ruledOut], description: "confirmed: a result shows it; suspected: likely, not shown; ruledOut: a result shows it is not so."}
+              steps: {type: array, maxItems: 20, items: {type: integer, minimum: 1}, description: "The numbers of the steps whose results show it: every tool result starts with its step number, [step N]. Name them for confirmed and ruled-out findings."}
+        options:
+          type: array
+          maxItems: 4
+          description: "The ways to go on, when there is a choice: the recommended one first. A task with one obvious way has one option or none."
+          items:
+            type: object
+            additionalProperties: false
+            required: [title]
+            properties:
+              title: {type: string, maxLength: 200, description: "The option in a few words, as an action."}
+              why: {type: string, maxLength: 1000, description: "What it does and costs, and why you recommend it or not."}
+              change: {type: string, maxLength: 253, description: "The change you proposed in this task for this option. At most one option names a change."}
+              recommended: {type: boolean, description: "The option you recommend; at most one."}
     Node:
       type: object
       additionalProperties: false

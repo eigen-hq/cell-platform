@@ -16,6 +16,10 @@ import (
 // the call as a step of it (internal/api.TaskHeader).
 const TaskHeader = "X-Cell-Task"
 
+// StepHeader is the number of the step the API recorded a call as
+// (internal/api.StepHeader).
+const StepHeader = "X-Cell-Step"
+
 // API is the platform API as the agent's account sees it. The account logs
 // in with username and app password (client credentials grant).
 type API struct {
@@ -68,21 +72,27 @@ func (c *API) bearer(ctx context.Context) (string, error) {
 // Do calls the API on behalf of task ("" outside a task) and returns status
 // and body.
 func (c *API) Do(ctx context.Context, method, path, task string, in any) (int, []byte, error) {
+	code, body, _, err := c.do(ctx, method, path, task, in)
+	return code, body, err
+}
+
+// do is Do with the answer's headers.
+func (c *API) do(ctx context.Context, method, path, task string, in any) (int, []byte, http.Header, error) {
 	var payload []byte
 	if in != nil {
 		var err error
 		if payload, err = json.Marshal(in); err != nil {
-			return 0, nil, err
+			return 0, nil, nil, err
 		}
 	}
 	for attempt := 0; ; attempt++ {
 		token, err := c.bearer(ctx)
 		if err != nil {
-			return 0, nil, err
+			return 0, nil, nil, err
 		}
 		req, err := http.NewRequestWithContext(ctx, method, c.URL+path, bytes.NewReader(payload))
 		if err != nil {
-			return 0, nil, err
+			return 0, nil, nil, err
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
 		if in != nil {
@@ -93,14 +103,14 @@ func (c *API) Do(ctx context.Context, method, path, task string, in any) (int, [
 		}
 		resp, err := c.HTTP.Do(req)
 		if err != nil {
-			return 0, nil, err
+			return 0, nil, nil, err
 		}
 		// The platform's own API bounds what it answers (logs, events); the
 		// tools cap what reaches the model. A cap here would break lists.
 		body, err := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		if err != nil {
-			return 0, nil, err
+			return 0, nil, nil, err
 		}
 		// A token the identity revoked early: log in again, once.
 		if resp.StatusCode == http.StatusUnauthorized && attempt == 0 {
@@ -109,6 +119,6 @@ func (c *API) Do(ctx context.Context, method, path, task string, in any) (int, [
 			c.mu.Unlock()
 			continue
 		}
-		return resp.StatusCode, body, nil
+		return resp.StatusCode, body, resp.Header, nil
 	}
 }

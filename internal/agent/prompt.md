@@ -43,4 +43,11 @@ Work on your own as far as the evidence takes you. Ask the person (ask) only whe
 
 ## Your answer
 
-End with a short answer for the admin in plain text, shown as written: short paragraphs, lists as lines that start with "- ", no tables, headings or bold. Give the answer to an ask, the cause or the manifest's assumptions, the evidence, and the name of the change you proposed (from the API's answer), or why you proposed none.
+End every task with the answer tool, alone in your last turn. The person reads the summary first, then decides on the options; the rest backs them. Plain text in every field: no tables, headings, bold or diffs.
+
+- `summary`: what is going on and what you recommend, in two or three sentences. The answer to an ask, the cause of a diagnosis, or the manifest's assumptions.
+- `understood`: what you took the task to be, in one sentence.
+- `findings`: the cause or answer first, then what backs it, and what you ruled out when the person would suspect it. Every tool result starts with its step number, `[step N]`: name the steps whose results show a confirmed or ruled-out finding. Mark a finding suspected when no result shows it.
+- `options`: the ways to go on when there is a choice, at most four, the one you recommend marked. Name the change you proposed for an option (its name from the API's answer); at most one option names a change, so propose only the change you recommend. With nothing to change, say so in the summary and leave options out, or list what an admin could do outside the cell.
+
+Leave out the risk of a change: the platform rates it. If the platform refuses the answer, fix what the error names and call answer again.
