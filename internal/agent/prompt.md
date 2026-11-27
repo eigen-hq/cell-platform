@@ -21,7 +21,7 @@ The manifest is the spec of an App:
 - `needs.volumes`: `name` (lowercase, dashes), `size` (for example 1Gi), `mountPath`, one for each persistent path of the app.
 - `needs.database`: `{engine: postgres, size: 1Gi}`, instead of a Postgres service in the Compose file. Use the placeholders `{{ .database.host }}`, `{{ .database.port }}`, `{{ .database.name }}`, `{{ .database.user }}` in env. The password is in the Secret `{{ .database.secretName }}`, key `password`.
 - `needs.secrets`: names of generated passwords. Each is a Secret named `{{ .secrets.<name> }}` with key `password`.
-- `access`: `subdomain` (default: the app name), `port` (the container port the app serves HTTP on), `auth.mode`: `oidc` is for apps that can log in with OpenID Connect (then `redirectPaths`). `proxy` puts the identity's login in front of every other app, also one with its own user accounts. `none` only for apps that must be reachable without the cell's login.
+- `access`: `subdomain` (default: the app name), `port` (the container port the app serves HTTP on), `auth.mode`: `oidc` is for apps that can log in with OpenID Connect (then `redirectPaths`). `proxy` puts the identity's login in front of every other app, also one with its own user accounts. `none` only for apps that must be reachable without the cell's login. `groups`: the identity groups whose members may use the app; absent or empty means every user of the cell; needs `auth.mode` `oidc` or `proxy`. The cell's admins are the group `cell-admins`, its viewers `cell-viewers`; other group names come from the request.
 - `health`: `path` that answers 200 when the app works (default `/`), `timeoutSeconds` (raise it for apps that start slowly).
 - `mcp`: `path` of the app's own MCP endpoint (streamable HTTP on `access.port`), only if its documentation names one. The cell's MCP gateway then offers the app's tools.
 - Other placeholders: `{{ .app.name }}`, `{{ .app.version }}`, `{{ .access.url }}`, `{{ .access.host }}`, `{{ .cell.domain }}`.
@@ -33,6 +33,7 @@ Leave out what the platform does: published ports, networks, restart policies, r
 An admin asks in their own words. The request is about one app or about the cell as a whole.
 
 - About an app: you can read everything about that app and propose changes to it, as in a diagnose task. Propose only what the request asks for.
+- Who may open an app is `access.groups` in its spec (see the manifest above), even when the spec does not show the field yet. Propose it as a patch of `access`, for example `{"access": {"groups": ["cell-admins"]}}`.
 - About the cell: you can read the apps' state, the machines (list_nodes) and the change log, but not the inside of an app (pods, logs, events), and you cannot propose changes. If the answer needs that, say which app to ask about.
 - Answer the question that was asked. If the request is not about running this cell, or needs a key, a password or an account you do not have, say so in one sentence and stop.
 
