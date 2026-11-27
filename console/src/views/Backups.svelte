@@ -8,6 +8,7 @@
   import type { components } from "../lib/api/schema";
   import { checking, hetznerEndpoint, hetznerRegions, plainHttp, requestOf, shown, type TargetForm } from "../lib/backup";
   import { lastBackup } from "../lib/home";
+  import { follow } from "../lib/live";
   import { newest, STALE } from "../lib/newest";
   import { itemPath } from "../lib/route";
   import { ago } from "../lib/time";
@@ -77,6 +78,22 @@
   $effect(() => {
     const t = setInterval(loadCopies, copying ? 5000 : 15000);
     return () => clearInterval(t);
+  });
+  // A backup or restore that changes reloads the copies at once.
+  $effect(() => {
+    let soon: ReturnType<typeof setTimeout> | undefined;
+    const stop = follow(
+      (signal) => api.GET("/v0/events", { parseAs: "stream", signal }),
+      () => {
+        clearTimeout(soon);
+        soon = setTimeout(loadCopies, 300);
+      },
+      () => {},
+    );
+    return () => {
+      clearTimeout(soon);
+      stop();
+    };
   });
 
   let form = $state<TargetForm>({ provider: "hetzner", region: "fsn1", endpoint: "", otherRegion: "", bucket: "", accessKey: "", secretKey: "", prefix: "", privateNetwork: false });

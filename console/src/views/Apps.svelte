@@ -5,6 +5,7 @@
   import { api, must } from "../lib/api/client";
   import type { components } from "../lib/api/schema";
   import { appState, isUp } from "../lib/home";
+  import { follow } from "../lib/live";
   import { newest, STALE } from "../lib/newest";
   import { itemPath } from "../lib/route";
   import { ago } from "../lib/time";
@@ -55,12 +56,6 @@
     }
   }
 
-  $effect(() => {
-    load();
-    const t = setInterval(load, 5000);
-    return () => clearInterval(t);
-  });
-
   async function install(e: Entry) {
     asked[e.name] = { text: "Asking" };
     try {
@@ -90,6 +85,30 @@
         .map((c) => [c.app, c.phase === "WaitingForApproval" ? "Waits for approval" : "Installing"]),
     ),
   );
+
+  // Live events reload at once (a burst counts once); the poll covers a
+  // stream that is away, quickly while an app or an install moves.
+  const moving = $derived(underway.size > 0 || (apps?.some((a) => a.phase !== "Ready" && a.phase !== "NeedsAttention") ?? false));
+  $effect(() => {
+    load();
+    const t = setInterval(load, moving ? 5000 : 15000);
+    return () => clearInterval(t);
+  });
+  $effect(() => {
+    let soon: ReturnType<typeof setTimeout> | undefined;
+    const stop = follow(
+      (signal) => api.GET("/v0/events", { parseAs: "stream", signal }),
+      () => {
+        clearTimeout(soon);
+        soon = setTimeout(load, 300);
+      },
+      () => {},
+    );
+    return () => {
+      clearTimeout(soon);
+      stop();
+    };
+  });
 </script>
 
 {#if failed}<p class="fail" role="alert">{failed}</p>{/if}

@@ -2,9 +2,9 @@
   // The machines of the cell: each one with its load, its apps and its
   // facts, a few key figures, and adding one more (E-44). Shows only what
   // the API delivers.
-  import { onDestroy, onMount } from "svelte";
   import { api, must } from "../lib/api/client";
   import type { components } from "../lib/api/schema";
+  import { follow } from "../lib/live";
   import { newest, STALE } from "../lib/newest";
   import { itemPath } from "../lib/route";
   import { machineName } from "../lib/text";
@@ -31,7 +31,6 @@
   let join = $state<Join | null>(null);
   let joinError = $state("");
   let joining = $state(false);
-  let timer: ReturnType<typeof setInterval> | undefined;
 
   const guard = newest();
   async function load() {
@@ -72,12 +71,28 @@
     setTimeout(() => (copied = null), 1600);
   }
 
-  onMount(() => {
+  // Live events reload at once (a burst counts once). Machines are not on
+  // the stream: the poll finds them, quickly while a join key is out.
+  $effect(() => {
     load();
-    // New machines show up while the join command runs.
-    timer = setInterval(load, 5000);
+    const t = setInterval(load, join ? 5000 : 15000);
+    return () => clearInterval(t);
   });
-  onDestroy(() => clearInterval(timer));
+  $effect(() => {
+    let soon: ReturnType<typeof setTimeout> | undefined;
+    const stop = follow(
+      (signal) => api.GET("/v0/events", { parseAs: "stream", signal }),
+      () => {
+        clearTimeout(soon);
+        soon = setTimeout(load, 300);
+      },
+      () => {},
+    );
+    return () => {
+      clearTimeout(soon);
+      stop();
+    };
+  });
 
   // What each machine used over the span, read again every minute.
   let span = $state<Span>("24h");

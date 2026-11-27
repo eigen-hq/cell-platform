@@ -7,6 +7,7 @@
   import type { components } from "../lib/api/schema";
   import { ended, headline, open, withChange, type Change } from "../lib/change";
   import { appState, isDown, isUp } from "../lib/home";
+  import { follow } from "../lib/live";
   import { newest, STALE } from "../lib/newest";
   import { audience, authMode } from "../lib/phase";
   import { itemPath } from "../lib/route";
@@ -73,10 +74,28 @@
     }
   }
 
+  // Live events reload at once (a burst counts once). Pods are not on the
+  // stream: the poll reads them, quickly while the app is not ready.
+  const settled = $derived((app.phase === "Ready" || app.phase === "NeedsAttention") && isUp(app));
   $effect(() => {
     load();
-    const t = setInterval(load, 5000);
+    const t = setInterval(load, settled ? 15000 : 5000);
     return () => clearInterval(t);
+  });
+  $effect(() => {
+    let soon: ReturnType<typeof setTimeout> | undefined;
+    const stop = follow(
+      (signal) => api.GET("/v0/events", { parseAs: "stream", signal }),
+      () => {
+        clearTimeout(soon);
+        soon = setTimeout(load, 300);
+      },
+      () => {},
+    );
+    return () => {
+      clearTimeout(soon);
+      stop();
+    };
   });
 
   // What all of the app's containers used over the span, for admins,
