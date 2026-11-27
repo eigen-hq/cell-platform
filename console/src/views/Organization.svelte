@@ -463,7 +463,16 @@
       <p class="mail-line"><small>No mail server yet. Invites come back as links to hand over, and warnings stay in the console.</small></p>
     {/if}
     {#if mail?.ownServer && !editingMail}
-      <p class="mail-line"><small>The cell's own server needs these records, or receivers file its mail as spam. Set the PTR at the hosting provider, the others in your DNS.</small></p>
+      {#if mail.own}
+        <p class="mail-line"><small>Keep these records: without them receivers file the cell's mail as spam.</small></p>
+      {:else}
+        <ol class="mail-steps">
+          <li>Ask your hosting provider to allow outgoing mail on port 25. Many block it for new servers until asked.</li>
+          <li>Set the PTR record below at the hosting provider, in the server's network settings.</li>
+          <li>Add the other records below in your DNS. Each shows Set once DNS answers with it.</li>
+          <li>Press <em>Use the cell's own server</em>. The cell first checks that it reaches your people's mail servers and changes nothing if it does not.</li>
+        </ol>
+      {/if}
       <ul class="records">
         {#each mail.ownServer.records as r (r.type + r.name)}
           <li>
@@ -653,6 +662,14 @@
     align-items: center;
     gap: 10px;
     margin: 0;
+  }
+  .mail-steps {
+    display: grid;
+    gap: 4px;
+    margin: 0;
+    padding-left: 20px;
+    font-size: 13px;
+    color: var(--color-muted);
   }
   .records {
     display: grid;

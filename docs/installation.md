@@ -12,7 +12,7 @@ Duration: about 30 minutes, of which about 20 minutes are spent waiting for the 
 4. [Sign in](#3-sign-in)
 5. [Set up backups](#4-set-up-backups)
 
-Afterwards, as needed: [more machines](#add-more-machines), [devices in the mesh](#connect-devices).
+Afterwards, as needed: [system mail](#set-up-system-mail), [more machines](#add-more-machines), [devices in the mesh](#connect-devices).
 
 ## Requirements
 
@@ -100,6 +100,27 @@ Without a backup target, the cell backs up nothing. Set it up before you put dat
 
 You can also set the target without the console, for example from a script or by an AI agent with an admin token: see [Backup target through the API](#backup-target-through-the-api).
 
+## Set up system mail
+
+The cell mails invites to new people and warns admins when an app needs attention. Without mail, nothing breaks: invites come back as links you hand over yourself, and warnings stay in the console.
+
+You set mail up in the console under *Organization*, *System mail*, in one of two ways.
+
+### The cell's own mail server
+
+The cell has its own send-only mail server. It needs no outside service, but receivers take its mail only when the server is set up like a proper mail server. This takes a few days the first time, because the hosting provider has to act.
+
+1. **Open port 25 outbound.** Many providers, Hetzner among them, block outgoing mail on new servers. Ask their support to allow outgoing port 25 for your server.
+2. **Set the reverse DNS (PTR).** At the hosting provider, set the server's reverse DNS to `mail.cell.example.com`. In the Hetzner Cloud Console it is under the server, *Networking*, the edit button next to the IP address.
+3. **Add the DNS records.** The console shows each record under *System mail* with its exact value: SPF and DMARC as TXT records, the DKIM key as a TXT record at `mail._domainkey.cell.example.com`, and an A record for `mail.cell.example.com`. Add them at your domain provider. Each record shows *Set* once DNS answers with it.
+4. **Switch on.** Give at least one person a mail address, then press *Use the cell's own server*. The cell first checks that it reaches the mail servers of your people's addresses on port 25. If it does not, it changes nothing and tells you why.
+
+A cell behind NAT, without a public address of its own, has no own mail server: use another server.
+
+### Another mail server
+
+Any mail service with SMTP works, for example your company's mail server or a mail delivery service. Press *Set up* (or *Use another server*) and enter server, port, sender address, login and password. The cell signs in once as a test and saves the settings only if that works. The connection must use TLS: STARTTLS on port 587, or TLS from the start on port 465.
+
 ## Add more machines
 
 Prerequisite: the new machine meets the [requirements](#requirements) (x86_64 or arm64). In the same private network as the first one, it needs no open ports. Without a private network, the machines talk over their public addresses; then open TCP 6443, 10250, 5001 and UDP 51820 on every machine, **only for the addresses of the other machines**.
@@ -149,6 +170,8 @@ If an error occurs, the installation shows the failed step, the reason and the l
 | `Let's Encrypt could not check auth...` (step *Login page*) | Port 80 does not reach the server from the internet, so Let's Encrypt cannot verify the domain. Check the provider's firewall and the server's own (ufw, nftables rules that drop forwarded traffic), then run the installation again: it requests the certificate at once. |
 | SSH connection dropped during the run | The run goes on. Follow it with `sudo tail -f /var/log/cell-install.log`. A second run started meanwhile stops with "another installation is running". |
 | New machine does not appear | It is not in the private network of the first machine, or, over public addresses, the firewall blocks the ports between the machines. |
+| System mail: "port 25 ... is not reachable from the cell" | The hosting provider blocks outgoing mail. Ask their support to open port 25, or use another mail server. |
+| Mail from the cell lands in spam | A record under *System mail* shows *Missing*, or the PTR does not name `mail.cell.example.com`. |
 | Backup target: test fails | The console gives the reason, usually a wrong key, a wrong bucket name or a read-only key. |
 | Initial password not written down | On the server: `sudo k3s kubectl -n cell-system get secret identity -o jsonpath='{.data.AUTHENTIK_BOOTSTRAP_PASSWORD}' \| base64 -d` (valid until you change it) |
 | Backup key not written down | On the server: `sudo k3s kubectl -n cell-system get secret backup-target -o jsonpath='{.data.password}' \| base64 -d` |
@@ -164,6 +187,7 @@ You can run the installation again at any time; it changes only what is missing.
 | 80/TCP | Internet | Let's Encrypt verifies the domain; redirect to HTTPS |
 | 443/TCP | Internet | Console, sign-in, API, all apps, mesh |
 | 3478/UDP | Internet | Mesh: direct connections between devices and cell |
+| 25/TCP outbound | The cell to the internet | The cell's own mail server delivers mail; many providers open it only on request |
 | 6443, 10250, 5001/TCP, 51820/UDP | Other machines of the cell only | Traffic between the machines (private network or public addresses). Never open to the internet. |
 
 ### Settings
