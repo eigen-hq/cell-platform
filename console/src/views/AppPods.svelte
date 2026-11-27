@@ -56,7 +56,7 @@
   // Use next to the most the container may take: memory past the limit
   // ends it (OOMKilled), processor past it is only slowed.
   const mb = (b: number) => (b >= 1 << 30 ? `${(b / (1 << 30)).toFixed(1)} GB` : `${Math.round(b / (1 << 20))} MB`);
-  const cores = (v: number) => (v < 0.1 ? `${Math.round(v * 1000)}m` : v.toFixed(2).replace(/\.?0+$/, ""));
+  const cores = (v: number) => (v < 0.1 ? v.toFixed(3) : v.toFixed(2)).replace(/\.?0+$/, "");
   function usage(c: Pod["containers"][number]) {
     const part = (used: string | undefined, limit: string | undefined, unit: string) =>
       used ? `${used}${limit ? ` of ${limit}` : ""} ${unit}` : limit ? `at most ${limit} ${unit}` : "";
