@@ -56,7 +56,7 @@ What the console shows comes from the API. Without an endpoint there is no UI, n
 | Default set: apps a new cell starts with (among them parts of the office UI), installed and updated like any catalog app | open | First setup |
 | Own domain per app (e.g. the office UI on `eigen-office.com`): DNS check, certificate, login redirects and the app's base URL follow the domain; the cell address stays as a fallback | open | |
 | Own clients per app (mobile, desktop, CLI): the manifest declares them, each gets its own login client (public, PKCE) and reaches the app on its domain | open | Own domain per app |
-| Model access for apps: an app declares it in the manifest and gets the cell's model gateway with its own key and budget, no provider key in the app | built (E-81), not yet verified on a cell | Model gateway |
+| Model access for apps: an app declares it in the manifest and gets the cell's model gateway with its own key and budget, no provider key in the app | running (E-81, verified on the test cell 2026-11-27) | Model gateway |
 | Packaging of an open-source project by an agent (Compose) | running | Helm charts: O-15 |
 | Update and remove | running (update by hand; update policy: O-09) | O-09 |
 | Enforce data access per app: which people, which data | open | |
@@ -148,7 +148,7 @@ What is wanted and tried out happens in the office UI; the platform builds, oper
 | Feature | Status | Depends on |
 |---|---|---|
 | Agent tasks with all steps | running | |
-| Free-form tasks for the ops agent from the console (ask box on Home and per app, E-85), acting through the API, with approval | built, not yet verified on a cell; credentials and cell-level changes open (O-32) | |
+| Free-form tasks for the ops agent from the console (ask box on Home and per app, E-85), acting through the API, with approval | running (asks about the cell verified on the test cell); credentials and cell-level changes open (O-32) | |
 | Agents as accounts with permissions per app | open | |
 | Autonomy levels | open | |
 | Tool gateway for all apps | API running | O-18, O-19, O-20 |
