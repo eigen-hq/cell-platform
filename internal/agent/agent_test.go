@@ -136,17 +136,17 @@ func TestDiagnose(t *testing.T) {
 			if err := want(strings.Contains(conv.Task, "board-diagnose-1") && strings.Contains(conv.Task, "connection refused"), "brief %q", conv.Task); err != nil {
 				return agenttest.Turn{}, err
 			}
-			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "get_app", Input: map[string]any{"app": "board"}}, {Tool: "get_pods", Input: map[string]any{"app": "board"}}}}, nil
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "getApp", Input: map[string]any{"name": "board"}}, {Tool: "listPods", Input: map[string]any{"name": "board"}}}}, nil
 		case 1:
 			if err := want(len(conv.Results) == 2 && strings.Contains(conv.Results[0], "NeedsAttention") && strings.Contains(conv.Results[1], "board-1"), "results %q", conv.Results); err != nil {
 				return agenttest.Turn{}, err
 			}
-			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "get_logs", Input: map[string]any{"app": "board", "tail": 50}}}}, nil
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "appLogs", Input: map[string]any{"name": "board", "tail": 50}}}}, nil
 		case 2:
 			if err := want(slices.Equal(conv.Results, []string{"fake logs"}), "logs %q", conv.Results); err != nil {
 				return agenttest.Turn{}, err
 			}
-			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "propose_update", Input: map[string]any{"app": "board",
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "updateApp", Input: map[string]any{"name": "board",
 				"patch": map[string]any{"source": map[string]any{"image": map[string]any{"env": nil}}}, "reason": "PORT=8080 moves the app off its port 80"}}}}, nil
 		case 3:
 			var cr struct {
@@ -198,7 +198,7 @@ func TestPackage(t *testing.T) {
 			if err := want(strings.Contains(conv.Task, "example/memo:0.25.3"), "brief %q", conv.Task); err != nil {
 				return agenttest.Turn{}, err
 			}
-			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "get_catalog_entry", Input: map[string]any{"name": "whoami"}}}}, nil
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "getCatalogEntry", Input: map[string]any{"name": "whoami"}}}}, nil
 		case 1:
 			if err := want(len(conv.Results) == 1 && strings.Contains(conv.Results[0], "traefik/whoami"), "catalog %q", conv.Results); err != nil {
 				return agenttest.Turn{}, err
@@ -207,12 +207,12 @@ func TestPackage(t *testing.T) {
 			for k, v := range manifest {
 				wrong[k] = v
 			}
-			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "propose_install", Input: map[string]any{"app": "memo", "manifest": wrong, "reason": "from Compose"}}}}, nil
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "installApp", Input: map[string]any{"name": "memo", "manifest": wrong, "reason": "from Compose"}}}}, nil
 		case 2:
 			if err := want(len(conv.Results) == 1 && strings.HasPrefix(conv.Results[0], "ERROR") && strings.Contains(conv.Results[0], "ports"), "refusal %q", conv.Results); err != nil {
 				return agenttest.Turn{}, err
 			}
-			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "propose_install", Input: map[string]any{"app": "memo", "manifest": manifest, "reason": "from Compose"}}}}, nil
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "installApp", Input: map[string]any{"name": "memo", "manifest": manifest, "reason": "from Compose"}}}}, nil
 		case 3:
 			return agenttest.Turn{Text: "Packaged memo."}, nil
 		}
@@ -247,8 +247,8 @@ func TestCutTurn(t *testing.T) {
 				Spec: cellv1.TaskSpec{Kind: "diagnose", App: "board", Requester: cellv1.Requester{Kind: "Operator", Name: "cell-operator"}}}
 			c := newCell(t, func(conv agenttest.Conversation) (agenttest.Turn, error) {
 				if len(conv.Notes) == 0 || again {
-					return agenttest.Turn{Finish: finish, Text: "The cause is", Calls: []agenttest.Call{{Tool: "propose_update",
-						Input: map[string]any{"app": "board", "patch": map[string]any{"version": "2.0"}, "reason": "cut"}}}}, nil
+					return agenttest.Turn{Finish: finish, Text: "The cause is", Calls: []agenttest.Call{{Tool: "updateApp",
+						Input: map[string]any{"name": "board", "patch": map[string]any{"version": "2.0"}, "reason": "cut"}}}}, nil
 				}
 				// Turn 0 again: the cut turn did not go back.
 				if err := want(conv.Turn == 0 && len(conv.Notes) == 1 && strings.Contains(conv.Notes[0], "("+finish+")"), "turn %d, notes %q", conv.Turn, conv.Notes); err != nil {

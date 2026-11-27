@@ -153,10 +153,10 @@ If a check fails on a change that no task belongs to, for example one made by ha
 
 **Today** the cell has two agents, *Ops* (diagnosis and asks) and *Packer* (packaging). They share the account `cell-agent` in the group `cell-agents` and may:
 
-- read the cell's apps and machines, an app's pods, events, logs, backups and change log, and the catalog;
-- propose an update or an install, only for the app of their task. An ask about the whole cell may read the cell's state but not an app's logs, and may not propose changes.
+- read the cell's apps and machines with their usage over time, an app's pods, events, logs, backups and change log, and the catalog;
+- propose an update, a restart or an install, and, when you ask for it, removing an app or bringing back a backup, only for the app of their task. An ask about the whole cell may read the cell's state but not an app's logs, and may not propose changes.
 
-The account would allow more (people and groups, usage, remove, restore, restart, who may open an app), but no tool uses it yet.
+Their tools are the operations of the platform API marked for agents (E-96). They cannot see people and groups, mail, models or other tasks.
 
 They may not approve and have no access to the cluster. They cannot read the cell's Secrets, but a log or a manifest can contain anything an app prints or holds, a password too; the agent and its model provider then see it (E-62).
 

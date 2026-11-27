@@ -163,17 +163,17 @@ func TestAgentRepairsApp(t *testing.T) {
 	a := tc.opsAgent(t, func(c agenttest.Conversation) (agenttest.Turn, error) {
 		switch c.Turn {
 		case 0:
-			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "get_app", Input: map[string]any{"app": "ailing"}}, {Tool: "get_pods", Input: map[string]any{"app": "ailing"}}}}, nil
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "getApp", Input: map[string]any{"name": "ailing"}}, {Tool: "listPods", Input: map[string]any{"name": "ailing"}}}}, nil
 		case 1:
 			if err := check(len(c.Results) == 2 && strings.Contains(c.Results[0], "WHOAMI_PORT_NUMBER") && strings.Contains(c.Results[1], "ailing-"), "app and pods %q", c.Results); err != nil {
 				return agenttest.Turn{}, err
 			}
-			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "get_logs", Input: map[string]any{"app": "ailing"}}}}, nil
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "appLogs", Input: map[string]any{"name": "ailing"}}}}, nil
 		case 2:
 			if err := check(len(c.Results) == 1 && strings.Contains(c.Results[0], "Starting up on port 8080"), "logs %q", c.Results); err != nil {
 				return agenttest.Turn{}, err
 			}
-			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "propose_update", Input: map[string]any{"app": "ailing",
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "updateApp", Input: map[string]any{"name": "ailing",
 				"patch":  map[string]any{"source": map[string]any{"image": map[string]any{"env": nil}}},
 				"reason": "WHOAMI_PORT_NUMBER=8080 moves whoami off port 80, where the platform routes and checks it (log: Starting up on port 8080)"}}}}, nil
 		case 3:
@@ -246,7 +246,7 @@ func TestAgentPackagesApp(t *testing.T) {
 			if err := check(strings.Contains(c.Task, "neosmemo/memos:26.11.1"), "brief %q", c.Task); err != nil {
 				return agenttest.Turn{}, err
 			}
-			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "get_catalog_entry", Input: map[string]any{"name": "whoami"}}}}, nil
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "getCatalogEntry", Input: map[string]any{"name": "whoami"}}}}, nil
 		case 1:
 			// A first try with a subdomain of the cell's: the cluster's own
 			// rules refuse it before anyone approves.
@@ -255,12 +255,12 @@ func TestAgentPackagesApp(t *testing.T) {
 				wrong[k] = v
 			}
 			wrong["access"] = map[string]any{"subdomain": "api", "port": 5230, "auth": map[string]any{"mode": "proxy"}}
-			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "propose_install", Input: map[string]any{"app": "memos", "manifest": wrong, "reason": "e2e"}}}}, nil
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "installApp", Input: map[string]any{"name": "memos", "manifest": wrong, "reason": "e2e"}}}}, nil
 		case 2:
 			if err := check(len(c.Results) == 1 && strings.HasPrefix(c.Results[0], "ERROR") && strings.Contains(c.Results[0], "belong to the cell"), "refusal %q", c.Results); err != nil {
 				return agenttest.Turn{}, err
 			}
-			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "propose_install", Input: map[string]any{"app": "memos", "manifest": manifest,
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "installApp", Input: map[string]any{"name": "memos", "manifest": manifest,
 				"reason": "Memos from its Compose file: one container, data in /var/opt/memos, behind the cell's login"}}}}, nil
 		case 3:
 			var cr struct{ Name string }

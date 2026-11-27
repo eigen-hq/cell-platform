@@ -46,6 +46,9 @@ type task struct {
 
 // Run works on tasks until ctx ends.
 func (a *Agent) Run(ctx context.Context) error {
+	if _, err := operations(); err != nil {
+		return err
+	}
 	if a.Model == nil {
 		a.Log.Warn("no key to the model gateway (Secret cell-agent, key modelKey): tasks wait for an agent that has one")
 		<-ctx.Done()
@@ -172,7 +175,10 @@ func (a *Agent) finish(ctx context.Context, name, result string, failed bool) er
 
 // work lets the model work on a claimed task and returns its answer.
 func (a *Agent) work(ctx context.Context, t task) (string, bool) {
-	tools := a.tools(t.Name)
+	tools, err := a.tools(t.Name)
+	if err != nil {
+		return "tools: " + err.Error(), true
+	}
 	msgs := []message{{Role: "system", Text: systemPrompt}, {Role: "user", Text: brief(t)}}
 	cuts := 0
 	// ponytail: a fixed turn limit, a token budget per task if costs need a cap

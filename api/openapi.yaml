@@ -37,6 +37,8 @@ info:
     the header `X-Cell-Task`; the API records the call as a step of the
     task before it serves it, and changes the agent proposes name the task.
     An agent proposes changes only for the app of its task (403 otherwise).
+    Operations marked `x-agent` are the agents' tools: each becomes a tool
+    with its description and its parameters and request body as arguments.
     A call outside a running task of the agent is refused (400, 404, 409);
     that is why every operation can answer with an error. Tasks are for
     agents and admins: results can quote logs.
@@ -79,6 +81,8 @@ paths:
   /v0/catalog:
     get:
       operationId: listCatalog
+      x-agent: true
+      description: "The catalog of maintained apps; each installs by its name."
       responses:
         default: {$ref: "#/components/responses/Error"}
         "200":
@@ -89,6 +93,8 @@ paths:
     parameters: [{$ref: "#/components/parameters/name"}]
     get:
       operationId: getCatalogEntry
+      x-agent: true
+      description: "A catalog entry with its full manifest, a working example of a manifest."
       responses:
         default: {$ref: "#/components/responses/Error"}
         "200":
@@ -99,6 +105,8 @@ paths:
   /v0/apps:
     get:
       operationId: listApps
+      x-agent: true
+      description: "The cell's apps with phase and conditions."
       responses:
         default: {$ref: "#/components/responses/Error"}
         "200":
@@ -107,6 +115,7 @@ paths:
         "401": {$ref: "#/components/responses/Error"}
     post:
       operationId: installApp
+      x-agent: true
       description: |
         Proposes to install an app from the catalog or from a manifest (an
         agent packaged it). The cluster checks the app against its schema
@@ -130,6 +139,8 @@ paths:
     parameters: [{$ref: "#/components/parameters/name"}]
     get:
       operationId: getApp
+      x-agent: true
+      description: "An app: phase, conditions with the operator's messages, and its spec (the manifest)."
       responses:
         default: {$ref: "#/components/responses/Error"}
         "200": {description: The app., content: {application/json: {schema: {$ref: "#/components/schemas/App"}}}}
@@ -137,6 +148,7 @@ paths:
         "404": {$ref: "#/components/responses/Error"}
     patch:
       operationId: updateApp
+      x-agent: true
       description: |
         Proposes a JSON merge patch on the app's manifest, for example a new
         version. The API rates the risk: a change of access groups only is
@@ -155,13 +167,14 @@ paths:
         "409": {$ref: "#/components/responses/Error"}
     delete:
       operationId: removeApp
+      x-agent: true
       description: |
         Proposes to remove the app after a backup. Its data stays in the cell
         for a reinstall, unless deleteData is true; its backups stay in the
         bucket either way.
       parameters:
         - {name: deleteData, in: query, schema: {type: boolean, default: false}}
-        - {name: reason, in: query, schema: {type: string}}
+        - {name: reason, in: query, description: "Why, for the person who reviews the change.", schema: {type: string}}
       responses:
         default: {$ref: "#/components/responses/Error"}
         "202": {$ref: "#/components/responses/Change"}
@@ -173,6 +186,8 @@ paths:
     parameters: [{$ref: "#/components/parameters/name"}]
     get:
       operationId: listBackups
+      x-agent: true
+      description: "The app's backups, newest first: when they ran and whether they succeeded."
       responses:
         default: {$ref: "#/components/responses/Error"}
         "200":
@@ -194,6 +209,7 @@ paths:
     parameters: [{$ref: "#/components/parameters/name"}]
     post:
       operationId: restoreApp
+      x-agent: true
       description: Proposes to bring back the data of a backup; the current state is backed up first.
       requestBody:
         required: true
@@ -209,6 +225,7 @@ paths:
     parameters: [{$ref: "#/components/parameters/name"}]
     post:
       operationId: restartApp
+      x-agent: true
       description: >-
         Proposes to roll out new pods of every workload of the app. Spec and
         data stay as they are, so the change takes no backup and has nothing
@@ -423,7 +440,8 @@ paths:
     parameters: [{$ref: "#/components/parameters/name"}]
     get:
       operationId: listPods
-      description: The app's pods, newest first, with container states, restarts and last exit.
+      x-agent: true
+      description: "The app's pods, newest first, with container states, restarts, last exit, and per container the CPU and memory in use next to its requests and limits."
       responses:
         default: {$ref: "#/components/responses/Error"}
         "200":
@@ -436,6 +454,7 @@ paths:
     parameters: [{$ref: "#/components/parameters/name"}]
     get:
       operationId: appLogs
+      x-agent: true
       description: The end of a container's log, at most 512 KiB.
       parameters:
         - {name: pod, in: query, description: "Default: the app's newest pod.", schema: {type: string}}
@@ -455,6 +474,7 @@ paths:
     parameters: [{$ref: "#/components/parameters/name"}]
     get:
       operationId: appEvents
+      x-agent: true
       description: The newest Kubernetes events (at most 100) in the app's namespace.
       responses:
         default: {$ref: "#/components/responses/Error"}
@@ -468,6 +488,7 @@ paths:
     parameters: [{$ref: "#/components/parameters/name"}]
     get:
       operationId: appUsage
+      x-agent: true
       description: What all containers of the app used over a span, from the cell's metrics store (E-87).
       parameters:
         - {name: range, in: query, schema: {type: string, enum: [1h, 24h, 7d], default: 24h}}
@@ -552,6 +573,8 @@ paths:
   /v0/changes:
     get:
       operationId: listChanges
+      x-agent: true
+      description: "The change log, newest first: proposed and finished changes with risk and outcome."
       parameters:
         - {name: app, in: query, schema: {type: string}}
       responses:
@@ -564,6 +587,8 @@ paths:
     parameters: [{$ref: "#/components/parameters/change"}]
     get:
       operationId: getChange
+      x-agent: true
+      description: "A change with its patch, state and outcome."
       responses:
         default: {$ref: "#/components/responses/Error"}
         "200": {description: The change., content: {application/json: {schema: {$ref: "#/components/schemas/ChangeRequest"}}}}
@@ -605,6 +630,7 @@ paths:
   /v0/nodes:
     get:
       operationId: listNodes
+      x-agent: true
       description: The machines of the cell, the server first.
       responses:
         default: {$ref: "#/components/responses/Error"}
@@ -617,6 +643,7 @@ paths:
     parameters: [{$ref: "#/components/parameters/name"}]
     get:
       operationId: nodeUsage
+      x-agent: true
       description: What the machine used over a span, from the cell's metrics store (E-87).
       parameters:
         - {name: range, in: query, schema: {type: string, enum: [1h, 24h, 7d], default: 24h}}
@@ -703,6 +730,7 @@ components:
       name: name
       in: path
       required: true
+      description: The name the path is about (an app, catalog entry, machine or user).
       schema: {type: string, pattern: "^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$", maxLength: 63}
     change:
       name: name
@@ -805,32 +833,32 @@ components:
         name: {type: string, description: "Name of the app (default: the catalog name, or metadata.name of manifestYaml; required with a manifest)."}
         subdomain: {type: string}
         groups: {type: array, items: {type: string}, description: Groups who may use the app (empty means everyone).}
-        reason: {type: string}
+        reason: {type: string, description: "Why, for the person who reviews the change: the cause with its evidence and what the change does."}
     UpdateRequest:
       type: object
       additionalProperties: false
       required: [patch]
       properties:
-        patch: {type: object, additionalProperties: true, description: JSON merge patch on the app's manifest.}
-        reason: {type: string}
+        patch: {type: object, additionalProperties: true, description: "JSON merge patch on the app's manifest: null removes a field, a list replaces the whole list."}
+        reason: {type: string, description: "Why, for the person who reviews the change: the cause with its evidence and what the change does."}
     RestoreRequest:
       type: object
       additionalProperties: false
       properties:
         backup: {type: string, description: "Backup name; default: the newest completed backup of the app in this cell."}
-        reason: {type: string}
+        reason: {type: string, description: "Why, for the person who reviews the change: the cause with its evidence and what the change does."}
     RestartRequest:
       type: object
       additionalProperties: false
       properties:
-        reason: {type: string}
+        reason: {type: string, description: "Why, for the person who reviews the change: the cause with its evidence and what the change does."}
     Access:
       type: object
       additionalProperties: false
       required: [groups]
       properties:
         groups: {type: array, items: {type: string}}
-        reason: {type: string}
+        reason: {type: string, description: "Why, for the person who reviews the change: the cause with its evidence and what the change does."}
     ChangeRequest:
       type: object
       additionalProperties: false
