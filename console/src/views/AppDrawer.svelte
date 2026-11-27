@@ -462,6 +462,10 @@
     flex: none;
     color: var(--color-muted);
   }
+  .log span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
   .log .warn span {
     color: var(--color-wait);
   }

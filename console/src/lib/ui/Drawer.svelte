@@ -53,8 +53,10 @@
   dialog::backdrop {
     background: color-mix(in srgb, var(--color-base) 62%, transparent);
   }
+  /* One column no content can widen past the panel. */
   .inner {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 26px;
     padding: 22px 22px 40px;
   }
