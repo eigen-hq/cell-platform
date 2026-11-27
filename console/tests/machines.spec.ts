@@ -15,7 +15,7 @@ test("the admin sees the machines and gets a join command", async ({ page, baseU
   const plate = page.getByRole("article").filter({ hasText: /runs the cell, / });
   await expect(plate).toHaveCount(1);
   await expect(plate.getByText("cell services")).toBeVisible();
-  await expect(plate.getByText("Processor")).toBeVisible();
+  await expect(plate.getByText("Processor").first()).toBeVisible();
   await expect(plate.getByText("Kubernetes")).toBeVisible();
 
   // A cell that takes no more machines refuses a join; the console says why.
