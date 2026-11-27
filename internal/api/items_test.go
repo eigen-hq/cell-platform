@@ -13,7 +13,8 @@ import (
 
 // Agents record the transcripts of their tasks (E-98): only in a task they
 // work on, at positions that make a repeated call harmless, and only items
-// of the four kinds. Who may read the task reads its transcript.
+// of the four kinds. People who may read the task read its transcript, an
+// agent only the transcripts of its own tasks.
 func TestTranscripts(t *testing.T) {
 	running := func(name, uid, assignee string) *cellv1.Task {
 		tk := pendingTask(name)
@@ -22,7 +23,7 @@ func TestTranscripts(t *testing.T) {
 		return tk
 	}
 	other := &cellv1.Agent{ObjectMeta: metav1.ObjectMeta{Name: "other", UID: "other-1"},
-		Spec: cellv1.AgentSpec{Kinds: []string{"package"}, Apps: []string{"*"}, Tools: []string{"*"}}}
+		Spec: cellv1.AgentSpec{Kinds: []string{"diagnose", "package"}, Apps: []string{"*"}, Tools: []string{"*"}}}
 	h := newHarness(t, running("notes-diagnose-1", "u-1", opsAccount), running("notes-diagnose-2", "u-2", "cell-agent-other.other-1"), other)
 	h.agentTask = ""
 	path := "/v0/tasks/notes-diagnose-1/items"
@@ -54,6 +55,8 @@ func TestTranscripts(t *testing.T) {
 		{path, 3, []any{map[string]any{"type": "image"}}, 400},
 		{path, 3, []any{map[string]any{"type": "function_call_output", "callId": "c2", "output": strings.Repeat("x", maxItemSize)}}, 400},
 		{path, 3, []any{}, 400},
+		// Postgres refuses NUL in jsonb; an app's log may hold one.
+		{path, 3, []any{map[string]any{"type": "function_call_output", "callId": "c2", "output": "a\x00b"}}, 204},
 		{path, maxItems, []any{msg("user", "x")}, 400},
 		{"/v0/tasks/notes-diagnose-2/items", 0, []any{msg("user", "brief")}, 409},
 	} {
@@ -64,8 +67,8 @@ func TestTranscripts(t *testing.T) {
 
 	code, body := h.do("GET", path, "admin", nil)
 	items, _ := body.([]any)
-	if code != 200 || len(items) != 3 || field(items[1], "item", "name") != "getApp" || field(items[2], "item", "output") != "ok" ||
-		field(items[2], "seq") != 2.0 {
+	if code != 200 || len(items) != 4 || field(items[1], "item", "name") != "getApp" || field(items[2], "item", "output") != "ok" ||
+		field(items[2], "seq") != 2.0 || field(items[3], "item", "output") != "a\uFFFDb" {
 		t.Errorf("transcript: %d %v", code, body)
 	}
 	if code, _ := h.do("GET", path, "agent", nil); code != 200 {

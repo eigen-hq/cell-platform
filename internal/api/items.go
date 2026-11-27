@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	cellv1 "github.com/eigen-hq/cell-platform/api/v1alpha1"
 	"github.com/eigen-hq/cell-platform/internal/store"
@@ -43,6 +44,18 @@ type item struct {
 type part struct {
 	MediaType string `json:"mediaType"`
 	Text      string `json:"text"`
+}
+
+// clean replaces NUL, which Postgres refuses in jsonb: a tool output that
+// holds one (an app's log, say) must not fail the task.
+func (it *item) clean() {
+	for _, s := range []*string{&it.Type, &it.Role, &it.CallID, &it.Name, &it.Arguments, &it.Output, &it.Text, &it.Signature} {
+		*s = strings.ReplaceAll(*s, "\x00", "\uFFFD")
+	}
+	for i := range it.Parts {
+		it.Parts[i].MediaType = strings.ReplaceAll(it.Parts[i].MediaType, "\x00", "\uFFFD")
+		it.Parts[i].Text = strings.ReplaceAll(it.Parts[i].Text, "\x00", "\uFFFD")
+	}
 }
 
 // check refuses an item that lacks what its kind needs. Fields of other
@@ -117,6 +130,7 @@ func (s *Server) appendItems(w http.ResponseWriter, r *http.Request, c *Caller) 
 	}
 	raw := make([]json.RawMessage, len(req.Items))
 	for i, it := range req.Items {
+		it.clean()
 		if err := it.check(); err != nil {
 			return errorf(http.StatusBadRequest, "item %d: %v", i, err)
 		}
@@ -148,7 +162,9 @@ func (s *Server) appendItems(w http.ResponseWriter, r *http.Request, c *Caller) 
 	return nil
 }
 
-// listItems is a task's transcript, for whoever may read the task.
+// listItems is a task's transcript, for people who may read the task and
+// for the agent it runs for: it holds the outputs of that agent's tools,
+// which another agent may not be allowed to call.
 func (s *Server) listItems(w http.ResponseWriter, r *http.Request, c *Caller) error {
 	ts, err := s.transcripts()
 	if err != nil {
@@ -158,8 +174,8 @@ func (s *Server) listItems(w http.ResponseWriter, r *http.Request, c *Caller) er
 	if err != nil {
 		return err
 	}
-	if !agentSees(r.Context(), c, t) {
-		return mayTake(agentOf(r.Context()), t.Spec.Kind, t.Spec.App)
+	if agentOf(r.Context()) != nil && t.Status.Assignee != c.Username {
+		return errorf(http.StatusForbidden, "an agent reads only the transcripts of its own tasks")
 	}
 	key, err := transcriptOf(t)
 	if err != nil {
