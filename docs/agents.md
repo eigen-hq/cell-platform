@@ -165,7 +165,7 @@ They may not approve and have no access to the cluster. They cannot read the cel
 - Each agent becomes an account of its own, with the apps, tools, model and budget an admin gives it.
 - An agent may hand part of a task to another agent. That task shows up as a child of the first, with at most the rights and budget of its parent.
 - An agent working on your request has only the rights that both you and it have.
-- Agents apply a change themselves when the platform can undo it: an update, a configuration change, a restart, an app from the catalog. Each runs with a snapshot first, its checks and automatic rollback, and shows up in the change log, the task's receipt and a daily summary; you can undo it in one click. You decide what cannot be undone or reaches past the cell: deleting data or backups, uninstalling, restoring over the current state, apps from a manifest outside the catalog, changes that cost money or reach outside the cell, and who gets which rights, agents included. Admins can tighten this per agent and kind of change (E-95).
+- Agents apply a change themselves when the platform can undo it: an update, a configuration change, a restart, an app from the catalog. Each runs with a snapshot first, its checks and automatic rollback, and shows up in the change log, the task's receipt and a daily summary; you can undo it in one click. You decide what cannot be undone or reaches past the cell: deleting data or backups, uninstalling, restoring over the current state, apps from a manifest outside the catalog or a new image, changes that cost money or reach outside the cell, and who gets which rights, agents included. Admins can tighten this per agent and kind of change (E-95).
 
 ## Models
 
