@@ -8,6 +8,6 @@ export function packageProblem(name: string, compose: string, taken: Set<string>
   if (name && !NAME.test(name)) return "Starts with a letter; lowercase letters, digits and dashes, up to 40.";
   if (taken.has(name)) return "An app with this name is installed.";
   // Kubernetes counts characters, not bytes.
-  if ([...compose].length > MAX_CHARS) return "The Compose file is longer than 65,536 characters.";
+  if ([...compose].length > MAX_CHARS) return "The file is longer than 65,536 characters.";
   return "";
 }

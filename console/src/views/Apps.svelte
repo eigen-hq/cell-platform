@@ -140,7 +140,7 @@
   </section>
 
   <section>
-    <h2 class="sec-title">From an open-source project <small>any project with a Compose file; Packer turns it into an app</small></h2>
+    <h2 class="sec-title">From a Compose file or a manifest <small>Packer turns a Compose file into an app; a manifest installs as written</small></h2>
     <PackageForm taken={installed} />
   </section>
   {/if}

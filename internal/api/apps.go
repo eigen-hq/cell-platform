@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"io/fs"
 	"net/http"
 	"path"
@@ -14,6 +16,7 @@ import (
 	"time"
 
 	jsonpatch "github.com/evanphx/json-patch/v5"
+	yamlv3 "go.yaml.in/yaml/v3"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -24,6 +27,34 @@ import (
 
 	cellv1 "github.com/eigen-hq/cell-platform/api/v1alpha1"
 )
+
+// oneYAMLDocument returns the single document of a YAML file as JSON. A
+// repeated key or a second document is an error: either would drop part of
+// what the person wrote without a word. The yaml.v3 decoder splits the
+// stream, whatever its line endings; the document is then converted as
+// Kubernetes converts YAML, so a date stays the text it was.
+func oneYAMLDocument(file string) ([]byte, error) {
+	dec := yamlv3.NewDecoder(strings.NewReader(file))
+	var doc yamlv3.Node
+	if err := dec.Decode(&doc); err != nil {
+		if errors.Is(err, io.EOF) {
+			return []byte("null"), nil
+		}
+		return nil, err
+	}
+	var more yamlv3.Node
+	if err := dec.Decode(&more); !errors.Is(err, io.EOF) {
+		if err != nil {
+			return nil, err
+		}
+		return nil, errors.New("one YAML document only")
+	}
+	one, err := yamlv3.Marshal(&doc)
+	if err != nil {
+		return nil, err
+	}
+	return yaml.YAMLToJSONStrict(one)
+}
 
 // --- catalog ---------------------------------------------------------------
 
@@ -273,17 +304,47 @@ var appName = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,38}[a-z0-9])?$`)
 type installRequest struct {
 	Catalog string `json:"catalog"`
 	// Manifest is an app spec from elsewhere (an agent packaged it).
-	Manifest  json.RawMessage `json:"manifest"`
-	Name      string          `json:"name"`
-	Subdomain string          `json:"subdomain"`
-	Groups    []string        `json:"groups"`
-	Reason    string          `json:"reason"`
+	Manifest json.RawMessage `json:"manifest"`
+	// ManifestYAML is a manifest file as people write it and as the
+	// catalog keeps it: an App with apiVersion, kind, metadata and spec.
+	ManifestYAML string   `json:"manifestYaml"`
+	Name         string   `json:"name"`
+	Subdomain    string   `json:"subdomain"`
+	Groups       []string `json:"groups"`
+	Reason       string   `json:"reason"`
 }
 
 func (s *Server) installApp(w http.ResponseWriter, r *http.Request, c *Caller) error {
 	var req installRequest
 	if err := readJSON(r, &req); err != nil {
 		return err
+	}
+	if req.ManifestYAML != "" {
+		if len(req.Manifest) > 0 {
+			return errorf(http.StatusBadRequest, "give manifest or manifestYaml, not both")
+		}
+		var doc struct {
+			APIVersion string `json:"apiVersion"`
+			Kind       string `json:"kind"`
+			Metadata   struct {
+				Name string `json:"name"`
+			} `json:"metadata"`
+			Spec json.RawMessage `json:"spec"`
+		}
+		js, err := oneYAMLDocument(req.ManifestYAML)
+		if err != nil {
+			return errorf(http.StatusBadRequest, "manifest: %v", err)
+		}
+		if err := json.Unmarshal(js, &doc); err != nil {
+			return errorf(http.StatusBadRequest, "manifest: %v", err)
+		}
+		if doc.APIVersion != cellv1.GroupVersion.String() || doc.Kind != "App" || len(doc.Spec) == 0 || string(doc.Spec) == "null" {
+			return errorf(http.StatusBadRequest, "manifest: an App with apiVersion %s, kind App and a spec, as in the catalog", cellv1.GroupVersion)
+		}
+		if req.Name == "" {
+			req.Name = doc.Metadata.Name
+		}
+		req.Manifest = doc.Spec
 	}
 	var spec cellv1.AppSpec
 	name, risk := req.Name, "low"

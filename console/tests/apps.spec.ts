@@ -44,7 +44,7 @@ test("the admin sees the apps, the catalog and one app in the drawer", async ({ 
 test("the package form checks the name and needs a Compose file", async ({ page, baseURL }) => {
   const errors = watchErrors(page, baseURL!);
   await signIn(page, env("CONSOLE_ADMIN_USER"), env("CONSOLE_ADMIN_PASSWORD"), "/apps");
-  await expect(page.getByRole("heading", { name: /^From an open-source project/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^From a Compose file or a manifest/ })).toBeVisible();
   const submit = page.getByRole("button", { name: "Let Packer package it" });
   await page.getByLabel("Name of the app").fill("Bad Name");
   await expect(page.getByText("Starts with a letter; lowercase letters, digits and dashes, up to 40.")).toBeVisible();

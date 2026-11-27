@@ -356,6 +356,34 @@ func TestInstallFromManifest(t *testing.T) {
 		field(body, "patch", "access", "port") != 5230.0 || !strings.Contains(field(body, "reason").(string), "not in the catalog") {
 		t.Fatalf("install from a manifest: %d %v", code, body)
 	}
+	// A manifest file as people write it: the name comes from its
+	// metadata, the spec goes through the same checks.
+	file := "apiVersion: cell.internal/v1alpha1\nkind: App\nmetadata:\n  name: memo2\nspec:\n  version: \"1.0\"\n" +
+		"  source:\n    image:\n      repository: example/memo\n  access:\n    subdomain: memo2\n    port: 5230\n    auth:\n      mode: proxy\n"
+	for name, req := range map[string]map[string]any{
+		"both":                             {"manifest": spec, "manifestYaml": file},
+		"not yaml":                         {"manifestYaml": "spec: [unclosed"},
+		"not an app":                       {"manifestYaml": "services:\n  memo:\n    image: example/memo\n"},
+		"no spec":                          {"manifestYaml": "apiVersion: cell.internal/v1alpha1\nkind: App\nmetadata:\n  name: memo2\n"},
+		"unknown spec":                     {"manifestYaml": file + "  ports: [\"5230:5230\"]\n"},
+		"repeated key":                     {"manifestYaml": file + "  access:\n    subdomain: memo3\n    port: 5230\n"},
+		"two documents":                    {"manifestYaml": file + "---\n" + file},
+		"two documents, old Mac line ends": {"manifestYaml": strings.ReplaceAll(file+"---\n"+file, "\n", "\r")},
+	} {
+		if code, body := h.do("POST", "/v0/apps", "admin", req); code != 400 {
+			t.Errorf("%s: %d %v", name, code, body)
+		}
+	}
+	code, body = h.do("POST", "/v0/apps", "admin", map[string]any{"manifestYaml": file})
+	if code != 202 || field(body, "app") != "memo2" || field(body, "risk") != "high" || field(body, "patch", "access", "port") != 5230.0 {
+		t.Fatalf("install from a manifest file: %d %v", code, body)
+	}
+	// A date as the version stays the text it was, as kubectl reads it.
+	dated := strings.NewReplacer("name: memo2", "name: memo3", "subdomain: memo2", "subdomain: memo3", `version: "1.0"`, "version: 2026-11-27").Replace(file)
+	code, body = h.do("POST", "/v0/apps", "admin", map[string]any{"manifestYaml": dated})
+	if code != 202 || field(body, "patch", "version") != "2026-11-27" {
+		t.Fatalf("install from a manifest file with a date as version: %d %v", code, body)
+	}
 	if code, _ := h.do("POST", "/v0/apps", "admin", map[string]any{"catalog": "notes", "name": "notes2", "subdomain": "notes2"}); code != 202 {
 		t.Errorf("catalog install: %d", code)
 	}

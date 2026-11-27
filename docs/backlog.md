@@ -52,7 +52,7 @@ What the console shows comes from the API. Without an endpoint there is no UI, n
 | Feature | Status | Depends on |
 |---|---|---|
 | Installed apps with state, version, address | running | |
-| Install by IT: catalog, own manifest | running (catalog); manifest: API running, console open | |
+| Install by IT: catalog, own manifest | running | |
 | Default set: apps a new cell starts with (among them parts of the office UI), installed and updated like any catalog app | open | First setup |
 | Own domain per app (e.g. the office UI on `eigen-office.com`): DNS check, certificate, login redirects and the app's base URL follow the domain; the cell address stays as a fallback | open | |
 | Own clients per app (mobile, desktop, CLI): the manifest declares them, each gets its own login client (public, PKCE) and reaches the app on its domain | open | Own domain per app |
@@ -82,7 +82,7 @@ What is wanted and tried out happens in the office UI; the platform builds, oper
 |---|---|---|
 | Diagnosis of an app: pods, logs, events | running | |
 | Diagnosis by the ops agent | running | |
-| Metrics: CPU, RAM, disk per app and cell, history | open | Metrics component |
+| Metrics: CPU, RAM, disk per app and cell, history | current CPU and memory per container and machine running; disk and history open | Metrics component |
 | Availability and response times per app | open | |
 | Map: wiring, traffic, outbound connections, agents | open | Metrics |
 | Findings with an agent action (e.g. unused or duplicate apps) | open | Usage numbers |

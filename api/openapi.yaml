@@ -763,11 +763,12 @@ components:
     InstallRequest:
       type: object
       additionalProperties: false
-      description: Exactly one of catalog and manifest.
+      description: Exactly one of catalog, manifest and manifestYaml.
       properties:
         catalog: {type: string, description: Catalog entry to install.}
         manifest: {type: object, additionalProperties: true, description: An app manifest (App spec) that is not in the catalog.}
-        name: {type: string, description: "Name of the app (default: the catalog name; required with a manifest)."}
+        manifestYaml: {type: string, description: "A manifest file as in the catalog: YAML of an App with apiVersion cell.internal/v1alpha1, kind, metadata.name and spec."}
+        name: {type: string, description: "Name of the app (default: the catalog name, or metadata.name of manifestYaml; required with a manifest)."}
         subdomain: {type: string}
         groups: {type: array, items: {type: string}, description: Groups who may use the app (empty means everyone).}
         reason: {type: string}

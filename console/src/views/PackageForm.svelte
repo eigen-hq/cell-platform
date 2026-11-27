@@ -1,7 +1,9 @@
 <script lang="ts">
   // Any open-source project with a Compose file becomes an app: Packer
   // turns the file into a manifest and proposes the install, which waits
-  // for approval like every change (Figma: 06 Apps, "Add an app").
+  // for approval like every change (Figma: 06 Apps, "Add an app"). A
+  // manifest someone already wrote goes to the API as it is; the API
+  // checks it and answers with what is wrong.
   import { api, must } from "../lib/api/client";
   import { MAX_CHARS, packageProblem } from "../lib/package";
   import { itemPath } from "../lib/route";
@@ -9,10 +11,11 @@
 
 
   let { taken }: { taken: Set<string> } = $props();
+  let kind = $state<"compose" | "manifest">("compose");
   let name = $state("");
   let compose = $state("");
   let busy = $state(false);
-  let note = $state<{ text: string; bad?: boolean; task?: string } | null>(null);
+  let note = $state<{ text: string; bad?: boolean; task?: string; approvals?: boolean } | null>(null);
 
   const problem = $derived(packageProblem(name, compose, taken));
 
@@ -26,7 +29,7 @@
     }
     try {
       compose = await file.text();
-      if (!name) name = file.name.replace(/\.(ya?ml)$/i, "").replace(/^(docker-)?compose$/i, "").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
+      if (!name && kind === "compose") name = file.name.replace(/\.(ya?ml)$/i, "").replace(/^(docker-)?compose$/i, "").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
       note = null;
     } catch (err) {
       note = { text: err instanceof Error ? err.message : String(err), bad: true };
@@ -39,8 +42,13 @@
     busy = true;
     note = null;
     try {
-      const t = must(await api.POST("/v0/tasks", { body: { kind: "package", app: name, input: compose } }));
-      note = { text: `Packer is on ${name}. It proposes the install; you approve it like every change.`, task: t.name };
+      if (kind === "manifest") {
+        const c = must(await api.POST("/v0/apps", { body: { manifestYaml: compose, ...(name ? { name } : {}), reason: "installed from a manifest in the console" } }));
+        note = { text: `The install of ${c.app} waits for your approval.`, approvals: true };
+      } else {
+        const t = must(await api.POST("/v0/tasks", { body: { kind: "package", app: name, input: compose } }));
+        note = { text: `Packer is on ${name}. It proposes the install; you approve it like every change.`, task: t.name };
+      }
       name = "";
       compose = "";
     } catch (err) {
@@ -61,17 +69,29 @@
     </svg>
   </div>
   <div class="fields">
-    <label>Name of the app <input bind:value={name} autocomplete="off" spellcheck="false" placeholder="wiki" aria-invalid={!!problem} /></label>
-    <label class="file">Compose file <input type="file" accept=".yml,.yaml,text/yaml" onchange={pick} /></label>
-    <label class="text">or paste it <textarea bind:value={compose} rows="6" spellcheck="false" placeholder={"services:\n  wiki:\n    image: ..."}></textarea></label>
+    <fieldset class="kind">
+      <legend>What you have</legend>
+      <label><input type="radio" bind:group={kind} value="compose" /> A Compose file <small>Packer makes the manifest</small></label>
+      <label><input type="radio" bind:group={kind} value="manifest" /> An app manifest <small>installs as written</small></label>
+    </fieldset>
+    <label>Name of the app{kind === "manifest" ? " (optional)" : ""}
+      <input bind:value={name} autocomplete="off" spellcheck="false" placeholder={kind === "manifest" ? "from metadata.name" : "wiki"} aria-invalid={!!problem} /></label>
+    <label class="file">{kind === "manifest" ? "Manifest file" : "Compose file"} <input type="file" accept=".yml,.yaml,text/yaml" onchange={pick} /></label>
+    <label class="text">or paste it <textarea bind:value={compose} rows="6" spellcheck="false"
+        placeholder={kind === "manifest" ? "apiVersion: cell.internal/v1alpha1\nkind: App\nmetadata:\n  name: wiki\nspec: ..." : "services:\n  wiki:\n    image: ..."}></textarea></label>
     {#if problem}<small class="fail">{problem}</small>{/if}
     <div class="row">
-      <Button type="submit" disabled={busy || !name || !compose.trim() || !!problem}>{busy ? "Asking Packer" : "Let Packer package it"}</Button>
+      {#if kind === "manifest"}
+        <Button type="submit" disabled={busy || !compose.trim() || !!problem}>{busy ? "Checking" : "Propose the install"}</Button>
+      {:else}
+        <Button type="submit" disabled={busy || !name || !compose.trim() || !!problem}>{busy ? "Asking Packer" : "Let Packer package it"}</Button>
+      {/if}
     </div>
     {#if note}
       <p class="note" class:fail={note.bad} role="status">
         {note.text}
         {#if note.task}<a href={itemPath("/agents", note.task)}>Follow Packer</a>{/if}
+        {#if note.approvals}<a href="/approvals">Open Approvals</a>{/if}
       </p>
     {/if}
   </div>
@@ -156,6 +176,30 @@
   }
   .note {
     margin: 0;
+  }
+  .kind {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+  .kind legend {
+    margin-bottom: 6px;
+    padding: 0;
+    color: var(--color-muted);
+    font-size: 0.85rem;
+  }
+  .kind label {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    color: var(--color-ink);
+    font-size: 0.95rem;
+  }
+  .kind small {
+    color: var(--color-muted);
   }
   .note a {
     margin-left: 6px;
