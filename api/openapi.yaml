@@ -479,9 +479,11 @@ paths:
     post:
       operationId: createTask
       description: |
-        Asks an agent for work: diagnose an installed app, or package a
-        Compose file as a new app. The operator creates diagnose tasks by
-        itself when an app needs attention.
+        Asks an agent for work: diagnose an installed app, package a
+        Compose file as a new app, or do what a person asks (ask), about one
+        app or the cell. The operator creates diagnose tasks by itself when
+        an app needs attention. What an agent wants changed it proposes as a
+        change, which an admin approves.
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: "#/components/schemas/TaskRequest"}}}
@@ -952,9 +954,9 @@ components:
       required: [name, kind, app, input, requester, phase, assignee, createdAt, startedAt, finishedAt, result, steps]
       properties:
         name: {type: string}
-        kind: {type: string, enum: [diagnose, package]}
-        app: {type: string}
-        input: {type: string, description: "What the operator saw (diagnose) or the Compose file (package)."}
+        kind: {type: string, enum: [diagnose, package, ask]}
+        app: {type: string, description: "The app the task is about; empty for an ask about the cell."}
+        input: {type: string, description: "What the operator saw (diagnose), the Compose file (package) or the person's request (ask)."}
         requester:
           type: object
           additionalProperties: false
@@ -982,11 +984,11 @@ components:
     TaskRequest:
       type: object
       additionalProperties: false
-      required: [kind, app]
+      required: [kind]
       properties:
-        kind: {type: string, enum: [diagnose, package]}
-        app: {type: string, description: "The app to diagnose, or the name of the app to package."}
-        input: {type: string, description: "package: the Compose file."}
+        kind: {type: string, enum: [diagnose, package, ask]}
+        app: {type: string, description: "The app to diagnose, the name of the app to package, or the app an ask is about (optional for ask)."}
+        input: {type: string, maxLength: 65536, description: "package: the Compose file. ask: the request in plain words, at most 4000 characters; an ask without an app sees the cell (apps, machines, changes) but not the inside of an app, and can propose no change."}
     TaskResult:
       type: object
       additionalProperties: false

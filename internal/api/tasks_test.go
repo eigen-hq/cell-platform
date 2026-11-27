@@ -181,6 +181,10 @@ func TestCreateTask(t *testing.T) {
 		{"admin", map[string]any{"kind": "package", "app": "memo"}, 400},
 		{"admin", map[string]any{"kind": "package", "app": "notes", "input": compose}, 409},
 		{"admin", map[string]any{"kind": "repair", "app": "notes"}, 400},
+		{"admin", map[string]any{"kind": "ask", "input": " "}, 400},
+		{"admin", map[string]any{"kind": "ask", "input": strings.Repeat("\u00e4", maxAsk+1)}, 400},
+		{"admin", map[string]any{"kind": "ask", "app": "gone", "input": "why is it slow?"}, 404},
+		{"viewer", map[string]any{"kind": "ask", "input": "why is it slow?"}, 403},
 	} {
 		if code, body := h.do("POST", "/v0/tasks", c.token, c.req); code != c.code {
 			t.Errorf("%s %v: %d %v, want %d", c.token, c.req, code, body, c.code)
@@ -193,6 +197,33 @@ func TestCreateTask(t *testing.T) {
 	_, body = h.do("GET", "/v0/tasks?app=memo", "admin", nil)
 	if len(body.([]any)) != 1 {
 		t.Errorf("tasks of memo: %v", body)
+	}
+	// The limit counts characters, not bytes.
+	if code, _ := h.do("POST", "/v0/tasks", "admin", map[string]any{"kind": "ask", "app": "notes", "input": strings.Repeat("\u00e4", maxAsk)}); code != 201 {
+		t.Errorf("ask of %d two-byte characters: %d", maxAsk, code)
+	}
+	code, body = h.do("POST", "/v0/tasks", "admin", map[string]any{"kind": "ask", "app": "notes", "input": "why is notes slow?"})
+	if code != 201 || !strings.HasPrefix(field(body, "name").(string), "notes-ask-") {
+		t.Errorf("ask about an app: %d %v", code, body)
+	}
+	// An ask about the cell sees the cell, not the inside of an app.
+	code, body = h.do("POST", "/v0/tasks", "admin", map[string]any{"kind": "ask", "input": "which machine is fullest?"})
+	if code != 201 || field(body, "app") != "" || !strings.HasPrefix(field(body, "name").(string), "ask-") {
+		t.Fatalf("ask about the cell: %d %v", code, body)
+	}
+	ask := field(body, "name").(string)
+	if code, _ := h.do("POST", "/v0/tasks/"+ask+"/claim", "agent", nil); code != 200 {
+		t.Fatalf("claim ask: %d", code)
+	}
+	h.agentTask = ask
+	if code, _ := h.do("GET", "/v0/apps", "agent", nil); code != 200 {
+		t.Errorf("ask lists apps: %d", code)
+	}
+	if code, _ := h.do("GET", "/v0/apps/notes/logs", "agent", nil); code != 403 {
+		t.Errorf("ask about the cell reads an app's logs: %d", code)
+	}
+	if code, _ := h.do("PATCH", "/v0/apps/notes", "agent", map[string]any{"patch": map[string]any{"version": "2"}, "reason": "x"}); code != 403 {
+		t.Errorf("ask about the cell proposes a change: %d", code)
 	}
 }
 

@@ -6,7 +6,7 @@
   import { api, must } from "../lib/api/client";
   import type { components } from "../lib/api/schema";
   import { headline, type Change } from "../lib/change";
-  import { agents, task as line, taskState, type Task } from "../lib/task";
+  import { agents, crew, task as line, taskState, type Task } from "../lib/task";
   import { ago } from "../lib/time";
   import AgentFace from "../lib/ui/AgentFace.svelte";
   import Avatar from "../lib/ui/Avatar.svelte";
@@ -88,10 +88,11 @@
     </div>
 
     <ul class="who">
-      {#each Object.entries(agents) as [kind, a] (kind)}
+      {#each crew as a (a.name)}
+        {@const n = a.kinds.reduce((sum, k) => sum + count(k), 0)}
         <li>
           <AgentFace name={a.name} size={44} />
-          <div><strong>{a.name}</strong><small>{a.does}</small><span>{count(kind as Task["kind"])} {count(kind as Task["kind"]) === 1 ? "task" : "tasks"}</span></div>
+          <div><strong>{a.name}</strong><small>{a.does}</small><span>{n} {n === 1 ? "task" : "tasks"}</span></div>
         </li>
       {/each}
       <li>

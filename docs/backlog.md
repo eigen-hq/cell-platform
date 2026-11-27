@@ -148,7 +148,7 @@ What is wanted and tried out happens in the office UI; the platform builds, oper
 | Feature | Status | Depends on |
 |---|---|---|
 | Agent tasks with all steps | running | |
-| Free-form tasks for the ops agent from the console (e.g. "set up backups to this bucket"), acting through the API, with approval | open | |
+| Free-form tasks for the ops agent from the console (ask box on Home and per app, E-85), acting through the API, with approval | built, not yet verified on a cell; credentials and cell-level changes open (O-32) | |
 | Agents as accounts with permissions per app | open | |
 | Autonomy levels | open | |
 | Tool gateway for all apps | API running | O-18, O-19, O-20 |

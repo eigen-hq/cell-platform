@@ -4,7 +4,9 @@ import (
 	"context"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -169,8 +171,12 @@ type createTaskRequest struct {
 	Input string `json:"input"`
 }
 
-// createTask asks an agent for work: diagnose an installed app, or package
-// a Compose file as a new app.
+// maxAsk bounds a person's request: a request, not a document.
+const maxAsk = 4000
+
+// createTask asks an agent for work: diagnose an installed app, package
+// a Compose file as a new app, or do what a person asks, about one app or
+// the cell.
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request, c *Caller) error {
 	var req createTaskRequest
 	if err := readJSON(r, &req); err != nil {
@@ -188,10 +194,26 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request, c *Caller) e
 		if _, err := s.app(r.Context(), req.App); err == nil {
 			return errorf(http.StatusConflict, "app %q is already installed", req.App)
 		}
+	case "ask":
+		if strings.TrimSpace(req.Input) == "" {
+			return errorf(http.StatusBadRequest, "an ask task needs the request as input")
+		}
+		if n := utf8.RuneCountInString(req.Input); n > maxAsk {
+			return errorf(http.StatusBadRequest, "the request has %d characters, at most %d", n, maxAsk)
+		}
+		if req.App != "" {
+			if _, err := s.app(r.Context(), req.App); err != nil {
+				return err
+			}
+		}
 	default:
-		return errorf(http.StatusBadRequest, "kind must be diagnose or package")
+		return errorf(http.StatusBadRequest, "kind must be diagnose, package or ask")
 	}
-	t := &cellv1.Task{ObjectMeta: metav1.ObjectMeta{GenerateName: req.App + "-" + req.Kind + "-"},
+	prefix := req.App + "-" + req.Kind + "-"
+	if req.App == "" {
+		prefix = req.Kind + "-"
+	}
+	t := &cellv1.Task{ObjectMeta: metav1.ObjectMeta{GenerateName: prefix},
 		Spec: cellv1.TaskSpec{Kind: req.Kind, App: req.App, Input: req.Input, Requester: cellv1.Requester{Kind: "Human", Name: c.Username}}}
 	if err := s.Kube.Create(r.Context(), t); err != nil {
 		if apierrors.IsInvalid(err) {

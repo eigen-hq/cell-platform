@@ -13,6 +13,7 @@
   import { open } from "../lib/change";
   import { newest, STALE } from "../lib/newest";
   import AppPods from "./AppPods.svelte";
+  import Ask from "./Ask.svelte";
 
   type App = components["schemas"]["App"];
   type Backup = components["schemas"]["Backup"];
@@ -164,6 +165,10 @@
   </dl>
 
   {#if note}<p class="note" class:fail={note.bad} role="status">{note.text}</p>{/if}
+
+  {#if admin}
+    {#key app.name}<Ask app={app.name} title={app.title || app.name} />{/key}
+  {/if}
 
   {#if trouble.length}
     <section class="trouble">

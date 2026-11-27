@@ -248,6 +248,11 @@ func brief(t task) string {
 	switch t.Kind {
 	case "package":
 		return fmt.Sprintf("Task %s: package this Compose file as app %q and propose installing it.\n\n```yaml\n%s\n```", t.Name, t.App, t.Input)
+	case "ask":
+		if t.App == "" {
+			return fmt.Sprintf("Task %s: an admin asks about the cell:\n\n%s", t.Name, t.Input)
+		}
+		return fmt.Sprintf("Task %s: an admin asks about app %q:\n\n%s", t.Name, t.App, t.Input)
 	default:
 		return fmt.Sprintf("Task %s: app %q needs attention. The operator reports:\n\n%s\n\nFind the cause and propose the repair.", t.Name, t.App, t.Input)
 	}

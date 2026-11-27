@@ -81,6 +81,15 @@ func (a *Agent) tools(task string) ([]anthropic.BetaTool, error) {
 			return app("get_pods", "The app's pods with container states, restarts and last exit.", "/pods")
 		},
 		func() (anthropic.BetaTool, error) {
+			return app("get_backups", "The app's backups: when they ran and whether they succeeded.", "/backups")
+		},
+		func() (anthropic.BetaTool, error) {
+			return toolrunner.NewBetaToolFromJSONSchema("list_nodes", "The cell's machines: role, readiness, CPU, memory and disk.",
+				func(ctx context.Context, _ none) (anthropic.BetaToolResultBlockParamContentUnion, error) {
+					return call(ctx, http.MethodGet, "/v0/nodes", nil)
+				})
+		},
+		func() (anthropic.BetaTool, error) {
 			return app("get_events", "Recent Kubernetes events in the app's namespace (scheduling, probes, image pulls).", "/events")
 		},
 		func() (anthropic.BetaTool, error) {

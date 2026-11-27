@@ -10,12 +10,13 @@
   import { follow } from "../lib/live";
   import { newest, STALE } from "../lib/newest";
     import { itemPath } from "../lib/route";
-  import { agents, type Task } from "../lib/task";
+  import { crew, type Task } from "../lib/task";
   import { ago } from "../lib/time";
   import AgentFace from "../lib/ui/AgentFace.svelte";
   import Avatar from "../lib/ui/Avatar.svelte";
   import StatStrip, { type Stat } from "../lib/ui/StatStrip.svelte";
   import Status from "../lib/ui/Status.svelte";
+  import Ask from "./Ask.svelte";
   import Slip from "./Slip.svelte";
 
   type App = components["schemas"]["App"];
@@ -166,6 +167,8 @@
     {/if}
   </section>
 
+  {#if admin}<Ask />{/if}
+
   <div class="grid">
     <section aria-labelledby="needs">
       <header>
@@ -268,12 +271,12 @@
     {#if admin}
     <section aria-labelledby="operators">
       <header>
-        <h2 id="operators" class="sec-title">Who works here <small>{Object.keys(agents).length} agents, the rules, {people.length} people</small></h2>
+        <h2 id="operators" class="sec-title">Who works here <small>{crew.length} agents, the rules, {people.length} people</small></h2>
         <a href="/agents">agents</a>
       </header>
       <ul class="rows">
-        {#each Object.entries(agents) as [kind, a] (kind)}
-          {@const at = busyTasks.filter((t) => t.kind === kind).length}
+        {#each crew as a (a.name)}
+          {@const at = busyTasks.filter((t) => a.kinds.includes(t.kind)).length}
           <li>
             <a href="/agents">
               <AgentFace name={a.name} size={30} />

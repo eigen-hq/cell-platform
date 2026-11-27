@@ -5,7 +5,7 @@ import (
 )
 
 // Task is work for an agent that no rule covers: find out why an app needs
-// attention, or turn a Compose file into a manifest. An agent claims it,
+// attention, turn a Compose file into a manifest, or do what a person asked. An agent claims it,
 // works only through the platform API, and the API records every call it
 // makes as a step, so the task is the agent's part of the change log. What
 // the agent wants changed it proposes as ChangeRequests that name the task.
@@ -27,16 +27,19 @@ type Task struct {
 }
 
 // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="a task is immutable; create a new one"
+// +kubebuilder:validation:XValidation:rule="self.kind == 'ask' || has(self.app)",message="diagnose and package tasks name an app"
 type TaskSpec struct {
 	// Kind: diagnose (find the cause of an app's trouble and propose the
-	// repair) or package (make a manifest from Input and propose installing
-	// it as App).
-	// +kubebuilder:validation:Enum=diagnose;package
+	// repair), package (make a manifest from Input and propose installing
+	// it as App) or ask (do what a person asked in Input, about App if set).
+	// +kubebuilder:validation:Enum=diagnose;package;ask
 	Kind string `json:"kind"`
-	// App to diagnose, or the name the packaged app gets.
+	// App to diagnose, the name the packaged app gets, or the app an ask is
+	// about. An ask without one sees the cell, not the inside of an app.
 	// +kubebuilder:validation:Pattern=`^[a-z]([a-z0-9-]{0,38}[a-z0-9])?$`
-	App string `json:"app"`
-	// Input: what the operator saw (diagnose) or the Compose file (package).
+	App string `json:"app,omitempty"`
+	// Input: what the operator saw (diagnose), the Compose file (package)
+	// or the person's request (ask).
 	// +kubebuilder:validation:MaxLength=65536
 	Input     string    `json:"input,omitempty"`
 	Requester Requester `json:"requester"`
