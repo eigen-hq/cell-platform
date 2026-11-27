@@ -226,9 +226,11 @@ func TestAgentRepairsApp(t *testing.T) {
 	for _, it := range items {
 		kinds = append(kinds, field(it, "item", "type").(string))
 	}
-	if !slices.Equal(kinds, []string{"message", "function_call", "function_call", "function_call_output", "function_call_output",
-		"function_call", "function_call_output", "function_call", "function_call_output", "message"}) ||
-		field(items[0], "item", "role") != "user" || field(items[9], "item", "role") != "assistant" {
+	// Each turn of the scripted model starts with its reasoning, passed back
+	// unchanged.
+	if !slices.Equal(kinds, []string{"message", "reasoning", "function_call", "function_call", "function_call_output", "function_call_output",
+		"reasoning", "function_call", "function_call_output", "reasoning", "function_call", "function_call_output", "reasoning", "message"}) ||
+		field(items[0], "item", "role") != "user" || field(items[13], "item", "role") != "assistant" {
 		t.Errorf("transcript %v", items)
 	}
 	cr := admin.do(t, http.MethodGet, "/v0/changes/"+change, nil, http.StatusOK)
