@@ -16,36 +16,39 @@ data:
   # sha256("<gateway key>:<key id>") (see internal/controller). The archive
   # is an rclone crypt remote at <root>/apps/<app>/crypt, keyed by the
   # backup password and the app alone: a fresh cell with the same backup
-  # key reads it.
+  # key reads it. Its one bucket, postgres, always exists: the database
+  # tools create a bucket only when a database starts (barman 3.20.1), and
+  # an empty one is gone on a new target or after a gateway restart. A
+  # combine remote serves it as a fixed directory; nothing is written
+  # before the key is checked.
   proxy: |
     #!/bin/sh
     set -eu
     user=$(tr -d '\n' | sed -n 's/.*"user" *: *"\([^"]*\)".*/\1/p')
     app=${user%.db}
     case "$app" in '' | *[!a-z0-9-]* | -* | *-) echo "bad access key id" >&2; exit 1 ;; esac
+    # A JSON string value: backslash and quote escaped.
+    json() { printf %s "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
     key=$(cat /target/gatewayKey)
     root=$(cat /target/root)
     secret=$(printf '%s:%s' "$key" "$user" | sha256sum | cut -c1-64)
     if [ "$user" = "$app" ]; then
-      printf '{"type":"alias","remote":"target:%s/apps/%s","_root":"","_secret_access_key":"%s"}\n' "$root" "$app" "$secret"
+      printf '{"type":"alias","remote":"target:%s/apps/%s","_root":"","_secret_access_key":"%s"}\n' "$(json "$root")" "$app" "$secret"
       exit
     fi
     password=$(cat /target/password)
     [ -n "$password" ] || { echo "no backup password" >&2; exit 1; }
     pass=$(printf 'crypt:%s:%s' "$app" "$password" | sha256sum | cut -c1-64)
     salt=$(printf 'crypt-salt:%s:%s' "$app" "$password" | sha256sum | cut -c1-64)
-    # The archive's bucket: the database tools create it only when a
-    # database starts (barman 3.20.1), and the gateway keeps a bucket it
-    # made but holds nothing in only until it restarts. A file in it keeps
-    # it on a new or empty target, of any kind: a plain write, again each
-    # time, works on every remote. Without it no key: the gateway would
-    # keep the key and drop this error.
-    export RCLONE_CONFIG_ARCHIVE_TYPE=crypt RCLONE_CONFIG_ARCHIVE_REMOTE="target:$root/apps/$app/crypt"
-    RCLONE_CONFIG_ARCHIVE_PASSWORD=$(rclone obscure "$pass")
-    RCLONE_CONFIG_ARCHIVE_PASSWORD2=$(rclone obscure "$salt")
-    export RCLONE_CONFIG_ARCHIVE_PASSWORD RCLONE_CONFIG_ARCHIVE_PASSWORD2
-    echo bucket | rclone rcat archive:postgres/.bucket >&2 || { echo "no archive bucket for $app" >&2; exit 1; }
-    printf '{"type":"crypt","remote":"target:%s/apps/%s/crypt","password":"%s","password2":"%s","_obscure":"password,password2","_root":"","_secret_access_key":"%s"}\n' "$root" "$app" "$pass" "$salt" "$secret"
+    # The upstream is one entry of a space-separated list, so it is quoted
+    # as a whole with its double quotes doubled; inside, a single quote in a
+    # quoted value is doubled. The passwords are obscured here, not by rclone.
+    pass=$(rclone obscure "$pass")
+    salt=$(rclone obscure "$salt")
+    qroot=$(printf %s "$root" | sed "s/'/''/g")
+    upstream="postgres=:crypt,remote='target:$qroot/apps/$app/crypt',password='$pass',password2='$salt':postgres"
+    upstream=\"$(printf %s "$upstream" | sed 's/"/""/g')\"
+    printf '{"type":"combine","upstreams":"%s","_root":"","_secret_access_key":"%s"}\n' "$(json "$upstream")" "$secret"
 ---
 apiVersion: apps/v1
 kind: Deployment

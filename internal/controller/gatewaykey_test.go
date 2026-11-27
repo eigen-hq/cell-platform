@@ -29,8 +29,8 @@ func TestAppSecret(t *testing.T) {
 
 // The gateway's auth proxy gives an app's key its plain directory and the
 // "<app>.db" key the encrypted database archive, keyed by the backup
-// password alone (E-67), with its bucket in place, and refuses any other
-// key id.
+// password alone (E-67), with its bucket always there, and refuses any
+// other key id. It writes nothing: the key is checked after it ran.
 func TestGatewayProxy(t *testing.T) {
 	raw, err := os.ReadFile("../../deploy/base/backup-gateway.yaml")
 	if err != nil {
@@ -48,10 +48,9 @@ func TestGatewayProxy(t *testing.T) {
 		}
 	}
 	script := strings.ReplaceAll(cm.Data["proxy"], "/target/", dir+"/")
-	// rclone records what the proxy has it do.
-	calls := filepath.Join(dir, "calls")
+	// rclone only obscures.
 	fakeRclone := `#!/bin/sh
-case $1 in obscure) echo "obscured-$2" ;; *) [ -z "$FAIL" ] || exit 1; echo "$* $RCLONE_CONFIG_ARCHIVE_TYPE $RCLONE_CONFIG_ARCHIVE_REMOTE $RCLONE_CONFIG_ARCHIVE_PASSWORD" >> ` + calls + ` ;; esac
+[ "$1" = obscure ] && echo "obscured-$2"
 `
 	bin := filepath.Join(dir, "bin")
 	if err := os.Mkdir(bin, 0o700); err != nil {
@@ -60,15 +59,9 @@ case $1 in obscure) echo "obscured-$2" ;; *) [ -z "$FAIL" ] || exit 1; echo "$* 
 	if err := os.WriteFile(filepath.Join(bin, "rclone"), []byte(fakeRclone), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	called := func() string {
-		b, _ := os.ReadFile(calls)
-		_ = os.Remove(calls)
-		return strings.TrimSpace(string(b))
-	}
-	fail := ""
 	proxy := func(user string) (map[string]string, error) {
 		cmd := exec.Command("sh", "-c", script)
-		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "FAIL="+fail)
+		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
 		cmd.Stdin = strings.NewReader(`{"user": "` + user + `", "pass": "x"}`)
 		out, err := cmd.Output()
 		if err != nil {
@@ -85,23 +78,29 @@ case $1 in obscure) echo "obscured-$2" ;; *) [ -z "$FAIL" ] || exit 1; echo "$* 
 		plain["_secret_access_key"] != gk.appSecret("notes") {
 		t.Errorf("app key: %v %v", plain, err)
 	}
-	if c := called(); c != "" {
-		t.Errorf("app key ran %q", c)
-	}
 	db, err := proxy("notes.db")
-	if err != nil || db["type"] != "crypt" || db["remote"] != "target:bucket/cell/apps/notes/crypt" ||
-		db["_secret_access_key"] != gk.appSecret("notes.db") || db["_obscure"] != "password,password2" ||
-		db["password"] != sum("crypt:notes:pw") || db["password2"] != sum("crypt-salt:notes:pw") {
+	upstream := func(root string) string {
+		return `"postgres=:crypt,remote='target:` + root + `/apps/notes/crypt',password='obscured-` + sum("crypt:notes:pw") +
+			"',password2='obscured-" + sum("crypt-salt:notes:pw") + `':postgres"`
+	}
+	if err != nil || db["type"] != "combine" || db["upstreams"] != upstream("bucket/cell") || db["_secret_access_key"] != gk.appSecret("notes.db") {
 		t.Errorf("database key: %v %v", db, err)
 	}
-	if c, want := called(), "rcat archive:postgres/.bucket crypt target:bucket/cell/apps/notes/crypt obscured-"+sum("crypt:notes:pw"); c != want {
-		t.Errorf("database key ran %q, want %q", c, want)
+	// Any root a target may have: quoted for the list, the connection
+	// string and JSON.
+	if err := os.WriteFile(filepath.Join(dir, "root"), []byte(`my "bucket"/O'Reilly\x`), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	fail = "1"
-	if out, err := proxy("notes.db"); err == nil {
-		t.Errorf("database key without its bucket: %v", out)
+	plain, err = proxy("notes")
+	if err != nil || plain["remote"] != `target:my "bucket"/O'Reilly\x/apps/notes` {
+		t.Errorf("app key under a root with quotes: %v %v", plain, err)
 	}
-	fail = ""
+	if db, err := proxy("notes.db"); err != nil || db["upstreams"] != upstream(`my ""bucket""/O''Reilly\x`) {
+		t.Errorf("database key under a root with quotes: %v %v", db, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "root"), []byte(files["root"]), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	for _, bad := range []string{"", ".db", "notes.db.db", "Notes", "-notes", "notes-.db", "a/b"} {
 		if out, err := proxy(bad); err == nil {
 			t.Errorf("key id %q accepted: %v", bad, out)
