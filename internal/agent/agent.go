@@ -14,10 +14,12 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go/v2"
+	"github.com/anthropics/anthropic-sdk-go/v2/option"
 )
 
 //go:embed prompt.md
@@ -194,7 +196,7 @@ func (a *Agent) work(ctx context.Context, t task) (string, bool) {
 	})
 	msg, err := runner.RunToCompletion(ctx)
 	if err != nil {
-		return "model: " + err.Error(), true
+		return "model: " + modelError(err), true
 	}
 	var text []string
 	for _, b := range msg.Content {
@@ -207,6 +209,38 @@ func (a *Agent) work(ctx context.Context, t task) (string, bool) {
 		return fmt.Sprintf("stopped before an answer (%s). %s", msg.StopReason, answer), true
 	}
 	return answer, false
+}
+
+// NoLongRetry keeps the model client from sleeping on the cell's token
+// limit: the gateway's 429 asks to wait until the hour refills (E-81), and
+// the SDK would hold the task that long. A short wait, such as one the
+// provider asks for, is still retried.
+func NoLongRetry(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
+	res, err := next(req)
+	if err == nil && res.StatusCode == http.StatusTooManyRequests {
+		if s, perr := strconv.Atoi(res.Header.Get("Retry-After")); perr == nil && s > 60 {
+			res.Header.Set("X-Should-Retry", "false")
+		}
+	}
+	return res, err
+}
+
+// modelError explains the cell's token limit: the gateway's 429 with none
+// of its tokens left. A provider's 429 carries the gateway's headers too,
+// with tokens left; it and any other error stay as the SDK words them.
+func modelError(err error) string {
+	var e *anthropic.Error
+	if errors.As(err, &e) && e.StatusCode == http.StatusTooManyRequests && e.Response != nil {
+		h := e.Response.Header
+		if limit := h.Get("X-Ratelimit-Limit"); limit != "" && h.Get("X-Ratelimit-Remaining") == "0" {
+			wait := "later"
+			if s, perr := strconv.Atoi(h.Get("X-Ratelimit-Reset")); perr == nil {
+				wait = fmt.Sprintf("in %d minutes", (s+59)/60)
+			}
+			return fmt.Sprintf("the cell's limit of %s tokens per hour is used up; ask again %s, or raise the limit under Organization, Models", limit, wait)
+		}
+	}
+	return err.Error()
 }
 
 // brief is the task as the model reads it.

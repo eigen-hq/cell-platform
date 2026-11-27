@@ -381,3 +381,40 @@ func TestNoProvider(t *testing.T) {
 		t.Errorf("task without a provider %+v", got.Status)
 	}
 }
+
+// The cell's token limit fails a task at once, with what to do; a short
+// wait the provider asks for is retried, and its 429 is not the cell's limit.
+func TestTokenLimit(t *testing.T) {
+	var calls atomic.Int32
+	var header atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		for k, v := range header.Load().(map[string]string) {
+			w.Header().Set(k, v)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"rate_limit_error","message":"rate limited"}}`))
+	}))
+	t.Cleanup(srv.Close)
+	m := anthropic.NewClient(option.WithAuthToken("test"), option.WithBaseURL(srv.URL), option.WithMiddleware(NoLongRetry))
+	ask := func(h map[string]string) (int32, error) {
+		calls.Store(0)
+		header.Store(h)
+		_, err := m.Messages.New(context.Background(), anthropic.MessageNewParams{Model: "default", MaxTokens: 5,
+			Messages: []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("x"))}})
+		return calls.Load(), err
+	}
+	start := time.Now()
+	n, err := ask(map[string]string{"Retry-After": "3000", "X-Ratelimit-Limit": "30", "X-Ratelimit-Remaining": "0", "X-Ratelimit-Reset": "3000"})
+	if err == nil || n != 1 || time.Since(start) > 5*time.Second {
+		t.Fatalf("limit: %v after %d calls in %v", err, n, time.Since(start))
+	}
+	if got := modelError(err); !strings.Contains(got, "30 tokens per hour") || !strings.Contains(got, "in 50 minutes") {
+		t.Errorf("limit message: %s", got)
+	}
+	n, err = ask(map[string]string{"Retry-After": "0", "X-Ratelimit-Limit": "30", "X-Ratelimit-Remaining": "5"})
+	if err == nil || n != 3 || strings.Contains(modelError(err), "tokens per hour") {
+		t.Errorf("provider's 429: %v after %d calls", err, n)
+	}
+}

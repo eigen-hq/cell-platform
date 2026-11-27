@@ -46,7 +46,7 @@ func run(log *slog.Logger) error {
 		Poll:    10 * time.Second,
 	}
 	if key := os.Getenv("ANTHROPIC_AUTH_TOKEN"); key != "" {
-		opts := []option.RequestOption{option.WithAuthToken(key)}
+		opts := []option.RequestOption{option.WithAuthToken(key), option.WithMiddleware(agent.NoLongRetry)}
 		if u := os.Getenv("ANTHROPIC_BASE_URL"); u != "" {
 			opts = append(opts, option.WithBaseURL(u))
 		}
