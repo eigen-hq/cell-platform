@@ -153,24 +153,7 @@ func (a *Agent) Take(ctx context.Context, name string) error {
 // finish ends a task. It retries while the API is unreachable or failing,
 // to keep the answer; abandon ends the task otherwise.
 func (a *Agent) finish(ctx context.Context, name, result string, failed bool) error {
-	delay := time.Second
-	for {
-		code, body, err := a.API.Do(ctx, http.MethodPost, "/v0/tasks/"+url.PathEscape(name)+"/finish", "",
-			map[string]any{"result": result, "failed": failed})
-		if err == nil && code == http.StatusOK {
-			return nil
-		}
-		if err == nil && code < http.StatusInternalServerError {
-			return fmt.Errorf("finish task %s: HTTP %d: %s", name, code, body)
-		}
-		a.Log.Warn("finish task, retrying", "task", name, "status", code, "error", err)
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(delay):
-		}
-		delay = min(2*delay, time.Minute)
-	}
+	return a.send(ctx, "/v0/tasks/"+url.PathEscape(name)+"/finish", map[string]any{"result": result, "failed": failed}, http.StatusOK, 0)
 }
 
 // work lets the model work on a claimed task and returns its answer.
@@ -197,6 +180,10 @@ func (a *Agent) work(ctx context.Context, t task) (string, bool) {
 		prompt = strings.TrimRight(prompt, "\n") + "\n\n## Instructions of this cell\n\n" + me.Agent.Instructions + "\n"
 	}
 	msgs := []message{{Role: "system", Text: prompt}, {Role: "user", Text: brief(t)}}
+	tr := &transcript{a: a, path: "/v0/tasks/" + url.PathEscape(t.Name) + "/items"}
+	if err := tr.add(ctx, msgs[1]); err != nil {
+		return err.Error(), true
+	}
 	cuts := 0
 	// ponytail: a fixed turn limit, a token budget per task if costs need a cap
 	for range 40 {
@@ -214,11 +201,18 @@ func (a *Agent) work(ctx context.Context, t task) (string, bool) {
 			if cuts++; cuts == 2 {
 				return fmt.Sprintf("stopped before an answer (%s, twice in a row). %s", stop, answer), true
 			}
-			msgs = append(msgs, message{Role: "user", Text: fmt.Sprintf(cutNote, stop)})
+			note := message{Role: "user", Text: fmt.Sprintf(cutNote, stop)}
+			msgs = append(msgs, note)
+			if err := tr.add(ctx, note); err != nil {
+				return err.Error(), true
+			}
 			continue
 		}
 		cuts = 0
 		msgs = append(msgs, reply)
+		if err := tr.add(ctx, reply); err != nil {
+			return err.Error(), true
+		}
 		if len(reply.Calls) == 0 {
 			return answer, false
 		}
@@ -230,8 +224,13 @@ func (a *Agent) work(ctx context.Context, t task) (string, bool) {
 			wg.Go(func() { results[i] = run(ctx, tools, c) })
 		}
 		wg.Wait()
+		outputs := make([]message, len(reply.Calls))
 		for i, c := range reply.Calls {
-			msgs = append(msgs, message{Role: "tool", CallID: c.ID, Text: results[i]})
+			outputs[i] = message{Role: "tool", CallID: c.ID, Text: results[i]}
+		}
+		msgs = append(msgs, outputs...)
+		if err := tr.add(ctx, outputs...); err != nil {
+			return err.Error(), true
 		}
 	}
 	return "stopped before an answer (40 model calls)", true

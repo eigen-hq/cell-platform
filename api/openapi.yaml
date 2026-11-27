@@ -575,6 +575,35 @@ paths:
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
         "409": {$ref: "#/components/responses/Error"}
+  /v0/tasks/{name}/items:
+    parameters: [{$ref: "#/components/parameters/task"}]
+    get:
+      operationId: listTaskItems
+      description: "The task's transcript (E-98): what the agent and the model said and did, in order. For whoever may read the task."
+      responses:
+        default: {$ref: "#/components/responses/Error"}
+        "200":
+          description: The transcript, oldest first.
+          content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/TranscriptEntry"}}}}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+    post:
+      operationId: appendTaskItems
+      description: "The agent that works on the task records items of its transcript at positions from on. A position held already keeps its item, so the same call again changes nothing; a gap is refused."
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/AppendTaskItems"}}}
+      responses:
+        default: {$ref: "#/components/responses/Error"}
+        "204": {description: Recorded.}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
   /v0/changes:
     get:
       operationId: listChanges
@@ -1078,6 +1107,45 @@ components:
         kind: {type: string, enum: [diagnose, package, ask]}
         app: {type: string, description: "The app to diagnose, the name of the app to package, or the app an ask is about (optional for ask)."}
         input: {type: string, maxLength: 65536, description: "package: the Compose file. ask: the request in plain words, at most 4000 characters; an ask without an app sees the cell (apps, machines, changes) but not the inside of an app, and can propose no change."}
+    TranscriptItem:
+      type: object
+      additionalProperties: false
+      description: "An item named after Open Responses: a message, a tool call (function_call) and its output, or the provider's reasoning, kept as the provider sent it."
+      required: [type]
+      properties:
+        type: {type: string, enum: [message, function_call, function_call_output, reasoning]}
+        role: {type: string, enum: [user, assistant], description: Of a message.}
+        parts:
+          type: array
+          description: Of a message.
+          items:
+            type: object
+            additionalProperties: false
+            required: [mediaType, text]
+            properties:
+              mediaType: {type: string, enum: [text/plain]}
+              text: {type: string}
+        callId: {type: string, description: Of a function_call and its output.}
+        name: {type: string, description: The tool of a function_call.}
+        arguments: {type: string, description: "A function_call's arguments as the model sent them, JSON unless it erred."}
+        output: {type: string, description: Of a function_call_output.}
+        text: {type: string, description: Of reasoning.}
+        signature: {type: string, description: "Of reasoning, opaque."}
+    TranscriptEntry:
+      type: object
+      additionalProperties: false
+      required: [seq, at, item]
+      properties:
+        seq: {type: integer, description: "The position, from 0."}
+        at: {type: string, format: date-time}
+        item: {$ref: "#/components/schemas/TranscriptItem"}
+    AppendTaskItems:
+      type: object
+      additionalProperties: false
+      required: [from, items]
+      properties:
+        from: {type: integer, minimum: 0, description: The position of the first item.}
+        items: {type: array, minItems: 1, items: {$ref: "#/components/schemas/TranscriptItem"}}
     TaskResult:
       type: object
       additionalProperties: false

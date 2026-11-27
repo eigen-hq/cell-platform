@@ -384,6 +384,10 @@ apply metrics.yaml
 kubectl -n cell-system rollout status deploy/cell-metrics --timeout=5m >/dev/null
 kubectl -n cell-system rollout status ds/cell-metrics-collector --timeout=5m >/dev/null
 
+step "Platform database"
+retry apply cell-db.yaml
+retry kubectl -n cell-system wait cluster/cell-db --for=condition=Ready --timeout=10s >/dev/null
+
 step "Platform API"
 apply change-approval.yaml
 # The mesh (E-56) only on a cell with an address of its own: its devices

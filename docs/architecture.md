@@ -72,7 +72,7 @@ A cell is a k3s cluster with everything a customer needs, on one or more machine
 | Object storage | S3 for apps that need it | Open, only on demand |
 | Backup | Daily backup outside the cell, restore | Volume backups and database archive into an S3 bucket |
 | Platform API | The only door for UI, CLI and agents | Own development, thin layer over the resources |
-| Platform database | Records that are not desired state: task conversations, model usage, later memory and the context index | CloudNativePG cluster `cell-db`, reached only by the API, except own apps writing to the context index (planned, E-92) |
+| Platform database | Records that are not desired state: task conversations, model usage, later memory and the context index | CloudNativePG cluster `cell-db`, reached only by the API, except own apps writing to the context index (planned, E-92); today it holds the transcripts of tasks (E-98) |
 | MCP gateway | One endpoint for the tools of all apps, with permission check | agentgateway, configuration by the operator (E-36) |
 | Model gateway | One open model API for agents and apps, any provider behind it | agentgateway in standalone mode, `cell-models` (E-80) |
 | Ops agents | Diagnosis, asks, packaging; later more agents | Own development in Go: an own loop on one open model API, Chat Completions (E-88, E-94), see [Agent harness](#agent-harness) |
@@ -84,7 +84,7 @@ All are in the API group `cell.internal`.
 - **`App`**: an installed app. The spec is the manifest plus the customer's inputs; the status shows phase, version, URL and last backup. For the structure see `app-manifest.md`.
 - **`ChangeRequest`**: a proposed or executed change. It holds the originator (human, agent, operator), the diff on the `App` spec, the reason, risk level, snapshot reference and result. The sum of all `ChangeRequest`s is the change log.
 - **`Backup`** and **`Restore`**: a backup or a restore of an app, respectively.
-- **`Task`**: a job for an agent (diagnosis, ask or packaging), with every API call of the agent as a step and its answer. Together with the `ChangeRequest`s it names, it belongs to the change log (E-34). Planned (E-89): the `Task` stays the header of a conversation (state, stage, links); its turns, items and steps live in the platform database.
+- **`Task`**: a job for an agent (diagnosis, ask or packaging), with every API call of the agent as a step and its answer. Together with the `ChangeRequest`s it names, it belongs to the change log (E-34). Its transcript, the items of the conversation, lives in the platform database (E-98). Planned (E-89): the `Task` stays the header of a conversation (state, stage, links); its turns and steps move there too.
 
 The catalog is a folder in the repo (`catalog/<app>/manifest.yaml`), not a resource of its own.
 

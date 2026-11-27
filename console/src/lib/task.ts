@@ -32,6 +32,23 @@ export function task(t: Task, title: string): string {
     }
   }
 }
+/**
+ * A task, then its transcript. The agent posts its last items before it
+ * finishes the task, so a transcript read after a finished task is whole.
+ * A transcript that cannot be read leaves the task readable.
+ */
+export async function withTranscript<T, I>(
+  task: () => Promise<T>,
+  items: () => Promise<I>,
+): Promise<{ task: T; items: I | null; err: string }> {
+  const t = await task();
+  try {
+    return { task: t, items: await items(), err: "" };
+  } catch (e) {
+    return { task: t, items: null, err: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 /** Where a task stands. */
 export function taskState(t: Task): { label: string; tone: "ok" | "wait" | "bad" } {
   switch (t.phase) {

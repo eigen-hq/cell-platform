@@ -33,7 +33,7 @@ What the console shows comes from the API. Without an endpoint there is no UI, n
 | Live events | running (overview) | |
 | Light and dark tone | running | |
 | First setup of a new cell | open | |
-| Platform database: one Postgres (`cell-db`) for records that are not desired state (task conversations, model usage, later memory and the context index); only the API reaches it, except own apps writing to the context index; backed up like an app's database, restored by `make dr-test`; after a restore, conversations whose header is gone come back read-only and no run resumes, and the test proves that no finished change runs again; today's tasks move in once | open | |
+| Platform database: one Postgres (`cell-db`) for records that are not desired state (task conversations, model usage, later memory and the context index); only the API reaches it, except own apps writing to the context index; backed up like an app's database, restored by `make dr-test`; after a restore, conversations whose header is gone come back read-only and no run resumes, and the test proves that no finished change runs again; today's tasks move in once | built: `cell-db` with the transcripts of tasks (E-98); backup, `make dr-test`, model usage and the move of today's tasks open | |
 
 ### Approvals
 

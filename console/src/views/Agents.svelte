@@ -9,7 +9,7 @@
   import { isUp } from "../lib/home";
   import { newest, STALE } from "../lib/newest";
   import { itemPath } from "../lib/route";
-  import { agents, crew, task as line, taskState, type Task } from "../lib/task";
+  import { agents, crew, task as line, taskState, withTranscript, type Task } from "../lib/task";
   import { ago, stamp } from "../lib/time";
   import Avatar from "../lib/ui/Avatar.svelte";
   import Icon from "../lib/ui/Icon.svelte";
@@ -21,6 +21,7 @@
   import Slip from "./Slip.svelte";
 
   type App = components["schemas"]["App"];
+  type Entry = components["schemas"]["TranscriptEntry"];
 
   let { open }: { open?: string; onnavigate: (href: string) => void } = $props();
   let tasks = $state<Task[] | null>(null);
@@ -31,6 +32,9 @@
   // The task page: the one task, loaded on its own.
   let t = $state<Task | null>(null);
   let taskFailed = $state("");
+  // Its transcript, from the platform database: the task shows without it.
+  let entries = $state<Entry[] | null>(null);
+  let entriesFailed = $state("");
 
   const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -67,10 +71,20 @@
   const taskGuard = newest();
   async function loadTask(name: string) {
     try {
-      const answer = await taskGuard(Promise.all([api.GET("/v0/tasks/{name}", { params: { path: { name } } }), context()]));
+      const answer = await taskGuard(
+        Promise.all([
+          withTranscript(
+            () => api.GET("/v0/tasks/{name}", { params: { path: { name } } }).then(must),
+            () => api.GET("/v0/tasks/{name}/items", { params: { path: { name } } }).then(must),
+          ),
+          context(),
+        ]),
+      );
       if (answer === STALE) return;
-      t = must(answer[0]);
+      t = answer[0].task;
       keep(answer[1]);
+      entries = answer[0].items;
+      entriesFailed = answer[0].err;
       taskFailed = "";
     } catch (e) {
       taskFailed = msg(e);
@@ -78,8 +92,9 @@
   }
   const reloadTask = () => open && loadTask(open);
 
-  // The list polls; a task page polls while the task runs or one of its
-  // changes is still open, so a decision made elsewhere shows up.
+  // The list polls; a task page polls while the task runs, one of its
+  // changes is still open (a decision made elsewhere shows up) or its
+  // transcript could not be read.
   $effect(() => {
     const name = open;
     if (!name) {
@@ -89,9 +104,11 @@
     }
     t = null;
     taskFailed = "";
+    entries = null;
+    entriesFailed = "";
     loadTask(name);
     const i = setInterval(() => {
-      if (!t || running(t) || unsettled(proposed)) loadTask(name);
+      if (!t || running(t) || unsettled(proposed) || entriesFailed) loadTask(name);
     }, 5000);
     return () => clearInterval(i);
   });
@@ -132,6 +149,30 @@
     const s = Math.max(0, Math.round((new Date(x.finishedAt).getTime() - new Date(x.startedAt).getTime()) / 1000));
     return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
   };
+  // The transcript as the page shows it: a call with its output under it.
+  type Said = { at: string; who: "brief" | "thought" | "said"; text: string };
+  type Called = { at: string; who: "call"; name: string; args: string; output: string | null };
+  let talk = $derived.by(() => {
+    const out: (Said | Called)[] = [];
+    const calls = new Map<string, Called>();
+    for (const { at, item: it } of entries ?? []) {
+      const text = (it.parts ?? []).map((p) => p.text).join("\n");
+      if (it.type === "message") out.push({ at, who: it.role === "user" ? "brief" : "said", text });
+      else if (it.type === "reasoning") out.push({ at, who: "thought", text: it.text || "Kept by the model's provider, not readable." });
+      else if (it.type === "function_call") {
+        const c: Called = { at, who: "call", name: it.name ?? "", args: it.arguments ?? "", output: null };
+        calls.set(it.callId ?? "", c);
+        out.push(c);
+      } else {
+        const c = calls.get(it.callId ?? "");
+        if (c) c.output = it.output ?? "";
+        else out.push({ at, who: "said", text: it.output ?? "" });
+      }
+    }
+    return out;
+  });
+  const whoSaid = { brief: "To the agent", thought: "Thinking", said: "The agent" } as const;
+
   // The answer: its first paragraph large, the rest under it.
   let answer = $derived.by(() => {
     const parts = (t?.result ?? "").trim().split(/\n\s*\n/);
@@ -221,6 +262,33 @@
               </ol>
             {:else}
               <p class="more">No calls yet.</p>
+            {/if}
+          </div>
+
+          <div class="talk">
+            <h3>The conversation <span>{entries ? plural(talk.length, "entry", "entries") + ", with the model" : ""}</span></h3>
+            {#if entriesFailed}
+              <p class="more">The transcript is not readable now: {entriesFailed}</p>
+            {:else if !entries}
+              <p class="more">Reading the transcript</p>
+            {:else if !talk.length}
+              <p class="more">Nothing said yet.</p>
+            {:else}
+              <ol>
+                {#each talk as e, i (i)}
+                  <li class={e.who}>
+                    <time class="mono" datetime={e.at}>{stamp(e.at)}</time>
+                    {#if e.who === "call"}
+                      <details>
+                        <summary><code class="mono">{e.name}</code><span class="args mono">{e.args}</span>{#if e.output === null}<span class="wait">waiting</span>{/if}</summary>
+                        {#if e.output !== null}<pre class="mono wrap">{e.output || "empty"}</pre>{/if}
+                      </details>
+                    {:else}
+                      <div class="said"><span class="by">{whoSaid[e.who]}</span><p class:wrap={true}>{e.text}</p></div>
+                    {/if}
+                  </li>
+                {/each}
+              </ol>
             {/if}
           </div>
         </section>
@@ -663,6 +731,66 @@
     min-width: 0;
     color: var(--color-ink);
     overflow-wrap: anywhere;
+  }
+  .talk ol {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border-left: 1px solid var(--color-agent-edge);
+  }
+  .talk li {
+    display: flex;
+    gap: 14px;
+    padding: 6px 0 6px 16px;
+    font-size: 12.5px;
+  }
+  .talk time {
+    flex: none;
+    padding-top: 1px;
+    color: var(--color-muted);
+  }
+  .talk details,
+  .said {
+    flex: 1;
+    min-width: 0;
+  }
+  .talk summary {
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    cursor: pointer;
+  }
+  .talk summary code {
+    flex: none;
+    color: var(--color-ink);
+  }
+  .args {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--color-muted);
+  }
+  .wait {
+    flex: none;
+    color: var(--color-agent);
+  }
+  .talk pre {
+    margin-top: 8px;
+    max-height: 240px;
+  }
+  .by {
+    font-weight: 500;
+    color: var(--color-ink);
+  }
+  .said p {
+    margin: 2px 0 0;
+    color: var(--color-text);
+    line-height: 1.55;
+  }
+  .thought .said p {
+    color: var(--color-muted);
+    font-style: italic;
   }
   .facts {
     border-radius: var(--radius-panel);

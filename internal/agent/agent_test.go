@@ -20,22 +20,26 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	apidoc "github.com/eigen-hq/cell-platform/api"
 	cellv1 "github.com/eigen-hq/cell-platform/api/v1alpha1"
 	"github.com/eigen-hq/cell-platform/catalog"
 	"github.com/eigen-hq/cell-platform/internal/agent/agenttest"
 	cellapi "github.com/eigen-hq/cell-platform/internal/api"
+	"github.com/eigen-hq/cell-platform/internal/store"
 )
 
 // cell is the platform API over a fake cluster, with the agent's account.
 type cell struct {
 	kube  client.WithWatch
 	agent *Agent
+	items *store.Memory
 }
 
 // opsAccount is the account of the cell's agent, Agent ops (E-97).
@@ -51,6 +55,7 @@ func newCell(t *testing.T, script agenttest.Script, objs ...client.Object) *cell
 		if p, ok := o.(*corev1.Pod); ok {
 			pods = append(pods, p)
 		}
+		withUID(o)
 	}
 	// The agent's Agent, unless the test brings its own.
 	if !slices.ContainsFunc(objs, func(o client.Object) bool { _, ok := o.(*cellv1.Agent); return ok }) {
@@ -59,10 +64,16 @@ func newCell(t *testing.T, script agenttest.Script, objs ...client.Object) *cell
 	}
 	// The operator tells that a provider is set.
 	objs = append(objs, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: "cell-system", Name: "cell-models-status"}, Data: map[string]string{"models.json": `{"configured":true}`}})
+	// The fake gives no UIDs; a transcript is keyed by its task's.
 	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).
-		WithStatusSubresource(&cellv1.App{}, &cellv1.Task{}, &cellv1.ChangeRequest{}).Build()
+		WithStatusSubresource(&cellv1.App{}, &cellv1.Task{}, &cellv1.ChangeRequest{}).
+		WithInterceptorFuncs(interceptor.Funcs{Create: func(ctx context.Context, c client.WithWatch, o client.Object, opts ...client.CreateOption) error {
+			withUID(o)
+			return c.Create(ctx, o, opts...)
+		}}).Build()
+	items := &store.Memory{}
 	api := httptest.NewServer((&cellapi.Server{
-		Kube: kube, Pods: k8sfake.NewSimpleClientset(pods...).CoreV1(), Catalog: catalog.FS, OpenAPI: apidoc.OpenAPI,
+		Kube: kube, Pods: k8sfake.NewSimpleClientset(pods...).CoreV1(), Catalog: catalog.FS, OpenAPI: apidoc.OpenAPI, Transcripts: items,
 		Authenticate: func(_ context.Context, token string) (*cellapi.Caller, error) {
 			if token != "agent-token" {
 				return nil, errors.New("bad token")
@@ -87,11 +98,36 @@ func newCell(t *testing.T, script agenttest.Script, objs ...client.Object) *cell
 			t.Errorf("model: %v", err)
 		}
 	})
-	return &cell{kube: kube, agent: &Agent{
+	return &cell{kube: kube, items: items, agent: &Agent{
 		API:   &API{URL: api.URL, TokenURL: identity.URL, ClientID: "cell-api", Username: opsAccount, Password: "app-password", HTTP: http.DefaultClient},
 		Model: &Model{URL: model.URL, Key: "test", Name: "scripted", HTTP: http.DefaultClient},
 		Log:   slog.New(slog.DiscardHandler), Poll: time.Second,
 	}}
+}
+
+func withUID(o client.Object) {
+	if o.GetUID() == "" {
+		o.SetUID(types.UID("uid-" + o.GetName()))
+	}
+}
+
+// transcript is a task's transcript, one "type:detail" per item.
+func (c *cell) transcript(t *testing.T, task string) []string {
+	t.Helper()
+	items, err := c.items.Items(context.Background(), "uid-"+task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for i, it := range items {
+		var v item
+		if err := json.Unmarshal(it.Item, &v); err != nil || it.Seq != i {
+			t.Fatalf("item %d: %v, seq %d", i, err, it.Seq)
+		}
+		detail := map[string]string{"message": v.Role, "reasoning": v.Signature, "function_call": v.Name, "function_call_output": v.CallID}[v.Type]
+		out = append(out, v.Type+":"+detail)
+	}
+	return out
 }
 
 func (c *cell) task(t *testing.T, name string) (*cellv1.Task, []string) {
@@ -189,6 +225,15 @@ func TestDiagnose(t *testing.T) {
 		string(crs[0].Spec.Patch.Raw) != `{"source":{"image":{"env":null}}}` {
 		t.Errorf("changes %+v", crs)
 	}
+	// The transcript (E-98): the brief, then each turn with its reasoning
+	// and calls, and the calls' outputs; not the system prompt.
+	if got, want := c.transcript(t, "board-diagnose-1"), []string{"message:user",
+		"reasoning:sig-0", "function_call:getApp", "function_call:listPods", "function_call_output:call_1_0", "function_call_output:call_1_1",
+		"reasoning:sig-1", "function_call:appLogs", "function_call_output:call_2_0",
+		"reasoning:sig-2", "function_call:updateApp", "function_call_output:call_3_0",
+		"reasoning:sig-3", "message:assistant"}; !slices.Equal(got, want) {
+		t.Errorf("transcript %q, want %q", got, want)
+	}
 }
 
 // Scenario B: the agent packages a Compose file; the API refuses its
@@ -276,6 +321,29 @@ func TestCutTurn(t *testing.T) {
 				t.Errorf("%s, again %v: task %+v, steps %q", finish, again, got.Status, calls)
 			}
 		}
+	}
+}
+
+// The outputs of one turn can outgrow the API's 1 MiB body (36 tool results
+// of 30000 bytes): they go in several posts, at the next positions.
+func TestTranscriptPosts(t *testing.T) {
+	task := &cellv1.Task{ObjectMeta: metav1.ObjectMeta{Name: "board-diagnose-1"},
+		Spec:   cellv1.TaskSpec{Kind: "diagnose", App: "board", Requester: cellv1.Requester{Kind: "Operator", Name: "cell-operator"}},
+		Status: cellv1.TaskStatus{Phase: cellv1.RunRunning, Assignee: opsAccount}}
+	c := newCell(t, nil, task)
+	tr := &transcript{a: c.agent, path: "/v0/tasks/board-diagnose-1/items"}
+	var outputs []message
+	for i := range 40 {
+		outputs = append(outputs, message{Role: "tool", CallID: fmt.Sprintf("c%d", i), Text: strings.Repeat("x", 30000)})
+	}
+	if err := tr.add(context.Background(), outputs...); err != nil {
+		t.Fatal(err)
+	}
+	if err := tr.add(context.Background(), message{Role: "assistant", Text: "done"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.transcript(t, "board-diagnose-1"); len(got) != 41 || got[39] != "function_call_output:c39" || got[40] != "message:assistant" {
+		t.Errorf("transcript %d items, ending %q", len(got), got[max(0, len(got)-2):])
 	}
 }
 

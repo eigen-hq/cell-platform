@@ -1,0 +1,40 @@
+# The platform database (E-98): what the platform keeps that is not desired
+# state, today the transcripts of tasks. The database operator creates its
+# credentials in Secret cell-db-app; they never leave the cell.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: cell-db
+  namespace: cell-system
+spec:
+  imageName: ghcr.io/cloudnative-pg/postgresql:${POSTGRES_VERSION}
+  instances: 1
+  storage:
+    size: 2Gi
+  bootstrap:
+    initdb:
+      database: cell
+      owner: cell
+---
+# Only the platform API and the database operator reach it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cell-db
+  namespace: cell-system
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: cell-db
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cell-api
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: cell-db
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system

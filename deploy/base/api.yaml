@@ -353,6 +353,12 @@ spec:
                 secretKeyRef:
                   name: identity-platform
                   key: token
+            # The platform database (E-98), from the database operator.
+            - name: CELL_DB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: cell-db-app
+                  key: uri
             # The mesh's login client (E-56); without it, the cell has no mesh.
             - name: MESH_CLIENT_SECRET
               valueFrom:

@@ -219,6 +219,18 @@ func TestAgentRepairsApp(t *testing.T) {
 		!slices.Equal(field(done, "changes").([]any), []any{change}) || !strings.Contains(field(done, "result").(string), change) {
 		t.Fatalf("task %v", done)
 	}
+	// The transcript in the platform database: the brief, four calls with
+	// their outputs, the answer.
+	var kinds []string
+	items, _ := admin.do(t, http.MethodGet, "/v0/tasks/"+task+"/items", nil, http.StatusOK).([]any)
+	for _, it := range items {
+		kinds = append(kinds, field(it, "item", "type").(string))
+	}
+	if !slices.Equal(kinds, []string{"message", "function_call", "function_call", "function_call_output", "function_call_output",
+		"function_call", "function_call_output", "function_call", "function_call_output", "message"}) ||
+		field(items[0], "item", "role") != "user" || field(items[9], "item", "role") != "assistant" {
+		t.Errorf("transcript %v", items)
+	}
 	cr := admin.do(t, http.MethodGet, "/v0/changes/"+change, nil, http.StatusOK)
 	if field(cr, "requester", "kind") != "Agent" || field(cr, "task") != task || field(cr, "risk") != "high" {
 		t.Errorf("change %v", cr)

@@ -26,10 +26,12 @@ const TaskHeader = "X-Cell-Task"
 const maxSteps = 200
 
 // taskFree are the calls an agent makes outside a task: finding, claiming
-// and finishing tasks, and whether there is a model to work with.
+// and finishing tasks, recording their transcripts, and whether there is a
+// model to work with.
 var taskFree = map[string]bool{
 	"GET /v0/whoami": true, "GET /v0/tasks": true, "GET /v0/tasks/{name}": true,
 	"POST /v0/tasks/{name}/claim": true, "POST /v0/tasks/{name}/finish": true, "GET /v0/models": true,
+	"GET /v0/tasks/{name}/items": true, "POST /v0/tasks/{name}/items": true,
 }
 
 type taskKey struct{}

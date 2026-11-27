@@ -28,6 +28,7 @@ import (
 	cellapi "github.com/eigen-hq/cell-platform/internal/api"
 	"github.com/eigen-hq/cell-platform/internal/authentik"
 	"github.com/eigen-hq/cell-platform/internal/cell"
+	"github.com/eigen-hq/cell-platform/internal/store"
 )
 
 // The identity's OAuth2 clients (and their slugs): cell-api for logins with
@@ -78,6 +79,15 @@ func run(log *slog.Logger) error {
 	if domain == "" {
 		return fmt.Errorf("CELL_DOMAIN is not set")
 	}
+	dbURI := os.Getenv("CELL_DB_URI")
+	if dbURI == "" {
+		return fmt.Errorf("CELL_DB_URI is not set")
+	}
+	db, err := store.Open(ctx, dbURI)
+	if err != nil {
+		return fmt.Errorf("platform database: %w", err)
+	}
+	defer db.Close()
 	cellCfg := cell.Config{Domain: domain}
 	authOrigin := "https://" + cellCfg.Host("auth")
 	consoleURL := "https://" + cellCfg.Host("console") + "/"
@@ -162,6 +172,7 @@ func run(log *slog.Logger) error {
 		Handler: (&cellapi.Server{
 			Kube: kube, Pods: clientset.CoreV1(), Identity: identity, Authenticate: tokens.Check,
 			Catalog: catalog.FS, OpenAPI: api.OpenAPI, Login: login, Console: console, Join: join, Log: log,
+			Transcripts: db,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}

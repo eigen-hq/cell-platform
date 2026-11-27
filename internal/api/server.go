@@ -82,6 +82,9 @@ type Server struct {
 	Identity Identity
 	// Authenticate turns a bearer token into a caller.
 	Authenticate func(ctx context.Context, token string) (*Caller, error)
+	// Transcripts keeps what agents and models said in tasks (E-98); nil
+	// answers 503.
+	Transcripts Transcripts
 	// Catalog holds <app>/manifest.yaml files.
 	Catalog fs.FS
 	OpenAPI []byte
@@ -170,6 +173,8 @@ func (s *Server) routes() []route {
 		{"GET", "/v0/tasks/{name}", RoleAgent, s.getTask},
 		{"POST", "/v0/tasks/{name}/claim", RoleAgent, s.claimTask},
 		{"POST", "/v0/tasks/{name}/finish", RoleAgent, s.finishTask},
+		{"GET", "/v0/tasks/{name}/items", RoleAgent, s.listItems},
+		{"POST", "/v0/tasks/{name}/items", RoleAgent, s.appendItems},
 		{"GET", "/v0/nodes", RoleViewer, s.listNodes},
 		{"GET", "/v0/nodes/{name}/usage", RoleViewer, s.nodeHistory},
 		{"POST", "/v0/nodes/joins", RoleAdmin, s.createJoin},
