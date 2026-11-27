@@ -74,6 +74,31 @@ func TestNodes(t *testing.T) {
 	}
 }
 
+// A ready machine without usage is flagged only when others have theirs
+// and it had time for a measurement.
+func TestMarkUnmeasured(t *testing.T) {
+	now := time.Now()
+	used := 1.0
+	old, fresh := now.Add(-time.Hour), now.Add(-time.Minute)
+	nodes := []nodeView{
+		{Name: "measured", Ready: true, Since: old, CPUUsed: &used},
+		{Name: "blocked", Ready: true, Since: old},
+		{Name: "new", Ready: true, Since: fresh},
+		{Name: "down", Ready: false, Since: old},
+	}
+	markUnmeasured(nodes, now)
+	for _, v := range nodes {
+		if v.Unmeasured != (v.Name == "blocked") {
+			t.Errorf("%s: unmeasured %v", v.Name, v.Unmeasured)
+		}
+	}
+	none := []nodeView{{Name: "a", Ready: true, Since: old}, {Name: "b", Ready: true, Since: old}}
+	markUnmeasured(none, now)
+	if none[0].Unmeasured || none[1].Unmeasured {
+		t.Errorf("no metrics at all: %v", none)
+	}
+}
+
 // An admin gets a join command; its key is a k3s bootstrap token that
 // expires in an hour, and the script it fetches joins with that key.
 func TestJoin(t *testing.T) {

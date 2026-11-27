@@ -155,6 +155,11 @@
           <Meter label="Processor" value={m.cpuUsed === undefined ? `${m.cpu} cores` : `${num(m.cpuUsed)} / ${m.cpu} cores`} part={pct(m.cpuUsed, m.cpu)} />
           <Meter label="Memory" value={m.memoryUsed === undefined ? gb(m.memory) : `${gb(m.memoryUsed)} / ${gb(m.memory)}`} part={pct(m.memoryUsed, m.memory)} />
           <Meter label="Disk" value={m.diskUsed === undefined ? gb(m.disk) : `${gb(m.diskUsed)} / ${gb(m.disk)}`} part={pct(m.diskUsed, m.disk)} />
+          {#if m.unmeasured}
+            <p class="unmeasured">
+              No load from this machine: {short(server.name)} cannot reach it on TCP 10250. Open TCP 6443, 10250, 5001 and UDP 51820 on {short(m.name)} for the other machines, in its own firewall and in the provider's.
+            </p>
+          {/if}
         </li>
       {/each}
     </ul>
@@ -423,6 +428,11 @@
     background: currentColor;
   }
   .stat.bad { color: var(--color-bad); }
+  .unmeasured {
+    margin: 0;
+    color: var(--color-wait);
+    font-size: 13px;
+  }
   .kit {
     display: flex;
     flex-wrap: wrap;

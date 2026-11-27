@@ -123,7 +123,7 @@ Any mail service with SMTP works, for example your company's mail server or a ma
 
 ## Add more machines
 
-Prerequisite: the new machine meets the [requirements](#requirements) (x86_64 or arm64). In the same private network as the first one, it needs no open ports. Without a private network, the machines talk over their public addresses; then open TCP 6443, 10250, 5001 and UDP 51820 on every machine, **only for the addresses of the other machines**.
+Prerequisite: the new machine meets the [requirements](#requirements) (x86_64 or arm64). In the same private network as the first one, it needs no open ports. Without a private network, the machines talk over their public addresses; then open TCP 6443, 10250, 5001 and UDP 51820 on every machine, **only for the addresses of the other machines**. Open them in the machine's own firewall and in the provider's network firewall, if it has one (cloud firewall, security group): the join itself works without them, but the cell then cannot measure the machine's load or share images with it. The console's Machines page says so on the machine's card.
 
 1. In the console: *Machines*, *Add machine*.
 2. Run the command shown on the new machine.

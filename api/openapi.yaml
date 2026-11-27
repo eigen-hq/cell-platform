@@ -1012,6 +1012,7 @@ components:
         cpuUsed: {type: number, description: Cores in use; absent without a measurement.}
         memoryUsed: {type: integer, format: int64, description: Bytes in use; absent without a measurement.}
         diskUsed: {type: integer, format: int64, description: Bytes of `disk` in use; absent without Longhorn.}
+        unmeasured: {type: boolean, description: "Ready for minutes, yet without the usage the other machines report: the server reads it over TCP 10250, so a firewall likely closes that port to the server."}
         apps: {type: array, items: {type: string}, description: Apps with a pod on the machine.}
         system: {type: boolean, description: The cell's own services run here.}
         os: {type: string}
