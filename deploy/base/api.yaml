@@ -60,6 +60,10 @@ rules:
   - apiGroups: [""]
     resources: [pods/log]
     verbs: [get]
+  # What the containers use, next to what their spec allows.
+  - apiGroups: [metrics.k8s.io]
+    resources: [pods]
+    verbs: [list]
 ---
 # Which machines the cell's own services run on.
 apiVersion: rbac.authorization.k8s.io/v1

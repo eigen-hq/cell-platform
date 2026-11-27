@@ -78,7 +78,7 @@ func (a *Agent) tools(task string) ([]anthropic.BetaTool, error) {
 			return app("get_app", "An app: phase, conditions with the operator's messages, and its spec (the manifest).", "")
 		},
 		func() (anthropic.BetaTool, error) {
-			return app("get_pods", "The app's pods with container states, restarts and last exit.", "/pods")
+			return app("get_pods", "The app's pods with container states, restarts, last exit, and per container the CPU and memory in use next to its requests and limits.", "/pods")
 		},
 		func() (anthropic.BetaTool, error) {
 			return app("get_backups", "The app's backups: when they ran and whether they succeeded.", "/backups")

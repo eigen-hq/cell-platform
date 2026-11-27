@@ -11,7 +11,9 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	fieldpath "k8s.io/apimachinery/pkg/util/validation/field"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -227,12 +229,35 @@ func TestCreateTask(t *testing.T) {
 	}
 }
 
+// The metrics API's usage lands on the container of the same pod and name.
+func TestPodUsage(t *testing.T) {
+	pods := []podView{{Name: "notes-0", Containers: []containerView{{Name: "notes"}, {Name: "proxy"}}}}
+	metrics := []unstructured.Unstructured{
+		{Object: map[string]any{"metadata": map[string]any{"name": "notes-0"}, "containers": []any{
+			map[string]any{"name": "notes", "usage": map[string]any{"cpu": "250m", "memory": "100Mi"}},
+		}}},
+		{Object: map[string]any{"metadata": map[string]any{"name": "gone-0"}, "containers": []any{
+			map[string]any{"name": "notes", "usage": map[string]any{"cpu": "1", "memory": "1Gi"}},
+		}}},
+	}
+	podUsage(pods, metrics)
+	c := pods[0].Containers
+	if c[0].CPUUsed == nil || *c[0].CPUUsed != 0.25 || c[0].MemoryUsed == nil || *c[0].MemoryUsed != 100<<20 {
+		t.Errorf("notes: %+v", c[0])
+	}
+	if c[1].CPUUsed != nil || c[1].MemoryUsed != nil {
+		t.Errorf("unmeasured proxy: %+v", c[1])
+	}
+}
+
 // What admins and agents look at when an app is in trouble.
 func TestDiagnosisReads(t *testing.T) {
 	old := metav1.NewTime(time.Date(2026, 11, 19, 10, 0, 0, 0, time.UTC))
 	pod := func(name string, created metav1.Time) *corev1.Pod {
 		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "app-notes", CreationTimestamp: created},
-			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "notes"}}},
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "notes", Resources: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("64Mi")},
+				Limits:   corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("128Mi"), corev1.ResourceCPU: resource.MustParse("500m")}}}}},
 			Status: corev1.PodStatus{Phase: corev1.PodRunning, ContainerStatuses: []corev1.ContainerStatus{{
 				Name: "notes", Image: "example/notes:1.0", RestartCount: 3,
 				State:                corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "CrashLoopBackOff", Message: "back-off"}},
@@ -254,7 +279,8 @@ func TestDiagnosisReads(t *testing.T) {
 		t.Fatalf("pods: %d %v", code, body)
 	}
 	c := field(body.([]any)[0], "containers").([]any)[0]
-	if field(c, "reason") != "CrashLoopBackOff" || field(c, "restarts") != 3.0 || field(c, "lastExit", "exitCode") != 1.0 {
+	if field(c, "reason") != "CrashLoopBackOff" || field(c, "restarts") != 3.0 || field(c, "lastExit", "exitCode") != 1.0 ||
+		field(c, "memoryRequest") != float64(64<<20) || field(c, "memoryLimit") != float64(128<<20) || field(c, "cpuLimit") != 0.5 || field(c, "cpuRequest") != nil {
 		t.Errorf("container %v", c)
 	}
 	code, body = h.do("GET", "/v0/apps/notes/events", "admin", nil)

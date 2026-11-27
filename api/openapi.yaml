@@ -937,6 +937,12 @@ components:
                   exitCode: {type: integer}
                   message: {type: string}
                   at: {type: string, format: date-time}
+              cpuUsed: {type: number, description: "Cores in use now, from the metrics API; absent when the machine sends no load."}
+              memoryUsed: {type: integer, format: int64, description: "Bytes in use now (working set), from the metrics API."}
+              cpuRequest: {type: number, description: "Cores the spec reserves on the machine."}
+              cpuLimit: {type: number, description: "Cores the container may use at most; more is throttled."}
+              memoryRequest: {type: integer, format: int64, description: "Bytes the spec reserves on the machine."}
+              memoryLimit: {type: integer, format: int64, description: "Bytes the container may use at most; more ends it (OOMKilled)."}
     AppEvent:
       type: object
       additionalProperties: false

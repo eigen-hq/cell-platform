@@ -52,6 +52,19 @@
   const dot = (c: Pod["containers"][number]) => (c.ready ? "ok" : c.state === "terminated" || c.restarts > 0 ? "bad" : "wait");
   const word = (c: Pod["containers"][number]) =>
     c.ready ? "ready" : c.reason ? c.reason : c.state === "terminated" ? "stopped" : c.state === "waiting" ? "waiting" : "starting";
+
+  // Use next to the most the container may take: memory past the limit
+  // ends it (OOMKilled), processor past it is only slowed.
+  const mb = (b: number) => (b >= 1 << 30 ? `${(b / (1 << 30)).toFixed(1)} GB` : `${Math.round(b / (1 << 20))} MB`);
+  const cores = (v: number) => (v < 0.1 ? `${Math.round(v * 1000)}m` : v.toFixed(2).replace(/\.?0+$/, ""));
+  function usage(c: Pod["containers"][number]) {
+    const part = (used: string | undefined, limit: string | undefined, unit: string) =>
+      used ? `${used}${limit ? ` of ${limit}` : ""} ${unit}` : limit ? `at most ${limit} ${unit}` : "";
+    const mem = part(c.memoryUsed === undefined ? undefined : mb(c.memoryUsed), c.memoryLimit === undefined ? undefined : mb(c.memoryLimit), "memory");
+    const cpu = part(c.cpuUsed === undefined ? undefined : cores(c.cpuUsed), c.cpuLimit === undefined ? undefined : cores(c.cpuLimit), "cores");
+    return [mem, cpu].filter(Boolean).join(", ");
+  }
+  const tight = (c: Pod["containers"][number]) => c.memoryUsed !== undefined && c.memoryLimit !== undefined && c.memoryUsed >= 0.9 * c.memoryLimit;
 </script>
 
 {#if failed}<p class="fail" role="alert">{failed}</p>{/if}
@@ -72,6 +85,7 @@
                   <strong>{c.name}</strong> <small>{word(c)}{c.restarts ? `, ${c.restarts} ${c.restarts === 1 ? "restart" : "restarts"}` : ""}</small>
                   {#if c.lastExit}<small class="exit">last exit {ago(c.lastExit.at)}: {c.lastExit.reason}, code {c.lastExit.exitCode}</small>{/if}
                   {#if c.message}<small class="exit">{c.message}</small>{/if}
+                  {#if usage(c)}<small class="use" class:tight={tight(c)}>{usage(c)}{tight(c) ? ", close to its memory limit" : ""}</small>{/if}
                 </span>
                 <span class="read">
                   <Button kind="quiet" disabled={reading} onclick={() => readLog(p.name, c.name, false)}>Log</Button>
@@ -152,8 +166,12 @@
     background: var(--color-bad);
     box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-bad) 25%, transparent);
   }
-  .exit {
+  .exit,
+  .use {
     display: block;
+  }
+  .use.tight {
+    color: var(--color-wait);
   }
   .read {
     display: flex;
