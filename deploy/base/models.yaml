@@ -67,3 +67,25 @@ spec:
     - name: metrics
       port: 15020
       targetPort: metrics
+---
+# Apps and agents reach the model API, which checks each key. The metrics
+# tell every account's tokens: only the API reads them.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cell-models
+  namespace: cell-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cell-models
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - port: 3000
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cell-api
+      ports:
+        - port: 15020
