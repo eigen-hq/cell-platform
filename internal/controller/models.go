@@ -173,7 +173,7 @@ func modelsConfig(p cell.ModelProvider, configured bool, accounts []modelsKey) (
 			}
 		}
 		// The defaults cache system prompt and messages where the provider
-		// needs it asked (Anthropic, Bedrock); the agent sends none of it (E-93).
+		// needs it asked (Anthropic, Bedrock); the agent sends none of it (E-94).
 		models = append(models, map[string]any{"name": "*", "provider": provider, "params": params, "promptCaching": map[string]any{}})
 	}
 	return yaml.Marshal(map[string]any{

@@ -160,7 +160,7 @@ How people work with agents is in `agents.md`, the design in `architecture.md` (
 |---|---|---|
 | Agent tasks with all steps | running | |
 | Free-form tasks for the ops agent from the console (ask box on Home and per app, E-85), acting through the API, with approval | running (asks about the cell verified on the test cell); credentials and cell-level changes open (O-32) | |
-| Neutral model API: the agent's own lean loop and a thin client for one open, stateless model API through the model gateway; no provider SDK in agent code (anthropic-sdk-go goes). Same behaviour as today: scenarios A and B and the agent tests pass against a scripted fake of the new API. Wire API Chat Completions (E-93). First check on the test cell: the gateway's Chat Completions route with tool calls and reasoning against an Anthropic and an OpenAI-compatible provider | built, fake-tested; check on the test cell open | Model gateway |
+| Neutral model API: the agent's own lean loop and a thin client for one open, stateless model API through the model gateway; no provider SDK in agent code (anthropic-sdk-go goes). Same behaviour as today: scenarios A and B and the agent tests pass against a scripted fake of the new API. Wire API Chat Completions (E-94). First check on the test cell: the gateway's Chat Completions route with tool calls and reasoning against an Anthropic and an OpenAI-compatible provider | built, fake-tested; check on the test cell open | Model gateway |
 | Conversations: a task holds turns of typed items; follow-ups on any task, also a finished one; the agent asks back and the task waits for you; several tasks at once, up to a limit per agent; resume after a restart without acting twice (one owner per run, an idempotency key on every tool call, catch-up before events; checked by scripted crash tests); a token budget per model, with *limit reached* when a task outgrows it; stop, also of child tasks; every step keeps an excerpt of its response, without the cap of 200 | open | Neutral model API, platform database |
 | Live progress: run, step, tool call, text, stage and waiting-for-input on the event stream; the console and the agent stop polling; task content only on the task's own stream, `GET /v0/events` says only that a task changed; the model client streams | open | Conversations |
 | Task thread in the console: reply box, *Waiting for you* with the agent's question, stop | open | Conversations, live progress |
@@ -203,7 +203,7 @@ A core part of the platform, not an add-on (E-78): agents and apps reach models 
 
 | Feature | Status | Depends on |
 |---|---|---|
-| Model gateway: one open model API in the cell, any provider or own model behind it; no agent code bound to one provider's SDK | built (E-80); the agent speaks Chat Completions to it (E-93) | |
+| Model gateway: one open model API in the cell, any provider or own model behind it; no agent code bound to one provider's SDK | built (E-80); the agent speaks Chat Completions to it (E-94) | |
 | Providers and keys in the console and the API (the customer's own keys), not only at install (`CELL_LLM_API_KEY`) | built (E-80) | Model gateway |
 | Model per task: several providers in the gateway at once (today one entry for all models), which model an agent uses, fallback to another provider | open | Neutral model API, providers and keys |
 | Usage and costs, budget and limits per agent, app or department | built: tokens per account and one hourly token limit for each (E-81); budgets in money, per department and durable usage open (O-31) | Model gateway, platform database |

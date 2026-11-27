@@ -75,7 +75,7 @@ A cell is a k3s cluster with everything a customer needs, on one or more machine
 | Platform database | Records that are not desired state: task conversations, model usage, later memory and the context index | CloudNativePG cluster `cell-db`, reached only by the API, except own apps writing to the context index (planned, E-92) |
 | MCP gateway | One endpoint for the tools of all apps, with permission check | agentgateway, configuration by the operator (E-36) |
 | Model gateway | One open model API for agents and apps, any provider behind it | agentgateway in standalone mode, `cell-models` (E-80) |
-| Ops agents | Diagnosis, asks, packaging; later more agents | Own development in Go: an own loop on one open model API, Chat Completions (E-88, E-93), see [Agent harness](#agent-harness) |
+| Ops agents | Diagnosis, asks, packaging; later more agents | Own development in Go: an own loop on one open model API, Chat Completions (E-88, E-94), see [Agent harness](#agent-harness) |
 
 ## Own resources
 
@@ -136,7 +136,7 @@ Agents reach their language model only through the cell's model gateway (E-80): 
 
 ## Agent harness
 
-Planned (E-88 to E-90). What runs today is the loop of E-32 on our own Chat Completions client (E-93), without a provider SDK. How people use it is in `agents.md`; the order of the work is in `backlog.md`.
+Planned (E-88 to E-90). What runs today is the loop of E-32 on our own Chat Completions client (E-94), without a provider SDK. How people use it is in `agents.md`; the order of the work is in `backlog.md`.
 
 ```mermaid
 flowchart LR
@@ -158,7 +158,7 @@ flowchart LR
 
 **Durable runs.** One run of a task (an attempt) belongs to one agent process at a time: the process claims it with a lease that it renews, and the API refuses writes from a process whose lease ran out or whose attempt number is old. The loop stores every `function_call` item before it runs it. The call goes to the API with the item's ID as idempotency key, and the API keeps the result under that key, so a repeated call returns the first result instead of acting twice. A `ChangeRequest` carries its key as a label, so after a crash between creating it and storing the result the API finds it again instead of creating a second one. On start and after every reconnect the agent first lists the work waiting for it in the API, then follows the event stream from its last event ID: events only wake it, the list is the truth. Scripted tests stop the agent after a stored call and after a created change before its result, deliver an event twice, and run two agents against one task.
 
-**The model API.** One open API between the agent and the gateway, stateless: every call carries the whole conversation (Chat Completions, E-93). A thin client of our own covers only what the loop uses: one completion with function tools and the provider's reasoning passed back; streaming comes with Live progress. The gateway translates to the provider. No provider SDK and no provider's message format in agent code; only the client knows the wire format.
+**The model API.** One open API between the agent and the gateway, stateless: every call carries the whole conversation (Chat Completions, E-94). A thin client of our own covers only what the loop uses: one completion with function tools and the provider's reasoning passed back; streaming comes with Live progress. The gateway translates to the provider. No provider SDK and no provider's message format in agent code; only the client knows the wire format.
 
 **The transcript.** Typed items of our own, named after Open Responses: `message` (a role and parts), `function_call`, `function_call_output`, `reasoning` (a summary, or the provider's opaque content passed back unchanged), and items of our own with the prefix `cell:` (`cell:answer`, `cell:ask`, `cell:event` for a check result or another wake-up). A part has a media type and either inline content or a reference to an attachment, so images, audio and video fit without a new format. The API stores items in the platform database; steps keep an excerpt of every response, without the cap of 200 that a `Task` status has today.
 

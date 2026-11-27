@@ -14,7 +14,7 @@ import (
 )
 
 // Model is the client of the cell's model gateway (E-80). It speaks Chat
-// Completions, which the gateway translates to every provider (E-93); this
+// Completions, which the gateway translates to every provider (E-94); this
 // file alone knows that wire format, the loop works with message.
 type Model struct {
 	// URL is the gateway's base URL.
