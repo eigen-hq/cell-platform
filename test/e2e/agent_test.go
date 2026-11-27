@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/anthropic-sdk-go/v2"
-	"github.com/anthropics/anthropic-sdk-go/v2/option"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/utils/ptr"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -26,13 +26,13 @@ import (
 	"github.com/eigen-hq/cell-platform/internal/agent/agenttest"
 )
 
-// opsAgent is the agent with its account from the cell and a scripted
+// cellAgent is agent name of the cell with its account and a scripted
 // model: the run is repeatable and costs nothing, everything else is the
 // real cell.
-func (tc *testCell) opsAgent(t *testing.T, script agenttest.Script) *agent.Agent {
+func (tc *testCell) cellAgent(t *testing.T, name string, script agenttest.Script) *agent.Agent {
 	t.Helper()
 	var s corev1.Secret
-	if err := tc.kube.Get(context.Background(), client.ObjectKey{Namespace: "cell-system", Name: "cell-agent"}, &s); err != nil {
+	if err := tc.kube.Get(context.Background(), client.ObjectKey{Namespace: "cell-system", Name: "cell-agent-" + name}, &s); err != nil {
 		t.Fatalf("the operator set up no agent account: %v", err)
 	}
 	model := agenttest.Serve(script)
@@ -42,33 +42,51 @@ func (tc *testCell) opsAgent(t *testing.T, script agenttest.Script) *agent.Agent
 			t.Errorf("model: %v", err)
 		}
 	})
-	m := anthropic.NewClient(option.WithAPIKey("scripted"), option.WithBaseURL(model.URL), option.WithMaxRetries(0))
 	return &agent.Agent{
 		API: &agent.API{URL: "https://" + tc.cfg.Host("api"), TokenURL: "https://" + tc.cfg.Host("auth") + "/application/o/token/",
 			ClientID: "cell-api", Username: string(s.Data["username"]), Password: string(s.Data["password"]), HTTP: tc.akHTTP},
-		Model: &m, ModelID: "scripted", Log: slog.Default(), Poll: time.Second,
+		Model: &agent.Model{URL: model.URL, Key: "scripted", Name: "scripted", HTTP: http.DefaultClient},
+		Log:   slog.Default(), Poll: time.Second,
 	}
 }
 
-// pauseAgent stops the cell's own agent, which may have a real model key,
-// for the length of the test.
-func (tc *testCell) pauseAgent(t *testing.T) {
+// agentAccount makes Agent name and returns a client with the account the
+// operator makes for it (E-97). The Agent goes at the end of the test, and
+// its account with it.
+func (tc *testCell) agentAccount(t *testing.T, name string, spec cellv1.AgentSpec) *apiClient {
+	t.Helper()
+	ctx := context.Background()
+	a := &cellv1.Agent{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: spec}
+	if err := tc.kube.Create(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := tc.kube.Delete(ctx, a); err != nil && !apierrors.IsNotFound(err) {
+			t.Errorf("delete agent %s: %v", name, err)
+		}
+	})
+	var s corev1.Secret
+	waitFor(t, 2*time.Minute, func() error {
+		return tc.kube.Get(ctx, client.ObjectKey{Namespace: "cell-system", Name: "cell-agent-" + name}, &s)
+	})
+	return &apiClient{tc: tc, username: string(s.Data["username"]), password: string(s.Data["password"])}
+}
+
+// pauseAgent stops agent name of the cell, which may have a real model
+// key, for the length of the test.
+func (tc *testCell) pauseAgent(t *testing.T, name string) {
 	t.Helper()
 	ctx := context.Background()
 	scale := func(n int32) error {
-		var d appsv1.Deployment
-		if err := tc.kube.Get(ctx, client.ObjectKey{Namespace: "cell-system", Name: "cell-agent"}, &d); err != nil {
-			return err
-		}
-		d.Spec.Replicas = ptr.To(n)
-		return tc.kube.Update(ctx, &d)
+		patch := fmt.Sprintf(`{"spec":{"paused":%t}}`, n == 0)
+		return tc.kube.Patch(ctx, &cellv1.Agent{ObjectMeta: metav1.ObjectMeta{Name: name}}, client.RawPatch(types.MergePatchType, []byte(patch)))
 	}
 	running := func() error {
 		var d appsv1.Deployment
-		if err := tc.kube.Get(ctx, client.ObjectKey{Namespace: "cell-system", Name: "cell-agent"}, &d); err != nil {
+		if err := tc.kube.Get(ctx, client.ObjectKey{Namespace: "cell-system", Name: "cell-agent-" + name}, &d); err != nil {
 			return err
 		}
-		return check(d.Status.AvailableReplicas == 1 && d.Status.UpdatedReplicas == 1, "the cell's agent does not run: %+v", d.Status)
+		return check(d.Status.AvailableReplicas == 1 && d.Status.UpdatedReplicas == 1, "agent %s does not run: %+v", name, d.Status)
 	}
 	if err := running(); err != nil {
 		t.Fatal(err)
@@ -78,14 +96,14 @@ func (tc *testCell) pauseAgent(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		if err := scale(1); err != nil {
-			t.Errorf("restart the cell's agent: %v", err)
+			t.Errorf("restart agent %s: %v", name, err)
 			return
 		}
 		waitFor(t, 2*time.Minute, running)
 	})
 	waitFor(t, 2*time.Minute, func() error {
 		var pods corev1.PodList
-		if err := tc.kube.List(ctx, &pods, client.InNamespace("cell-system"), client.MatchingLabels{"app.kubernetes.io/name": "cell-agent"}); err != nil {
+		if err := tc.kube.List(ctx, &pods, client.InNamespace("cell-system"), client.MatchingLabels{"app.kubernetes.io/name": "cell-agent-" + name}); err != nil {
 			return err
 		}
 		if len(pods.Items) > 0 {
@@ -128,7 +146,7 @@ func TestAgentRepairsApp(t *testing.T) {
 	tc := newTestCell(t)
 	ctx := context.Background()
 	admin := tc.adminAPI(t)
-	tc.pauseAgent(t)
+	tc.pauseAgent(t, "ops")
 	admin.removed(t, "ailing")
 	t.Cleanup(func() { admin.removed(t, "ailing") })
 	install := admin.propose(t, admin, http.MethodPost, "/v0/apps", map[string]any{"catalog": "whoami", "name": "ailing", "subdomain": "ailing"})
@@ -162,20 +180,20 @@ func TestAgentRepairsApp(t *testing.T) {
 	})
 
 	var change string
-	a := tc.opsAgent(t, func(c agenttest.Conversation) (agenttest.Turn, error) {
+	a := tc.cellAgent(t, "ops", func(c agenttest.Conversation) (agenttest.Turn, error) {
 		switch c.Turn {
 		case 0:
-			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "get_app", Input: map[string]any{"app": "ailing"}}, {Tool: "get_pods", Input: map[string]any{"app": "ailing"}}}}, nil
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "getApp", Input: map[string]any{"name": "ailing"}}, {Tool: "listPods", Input: map[string]any{"name": "ailing"}}}}, nil
 		case 1:
 			if err := check(len(c.Results) == 2 && strings.Contains(c.Results[0], "WHOAMI_PORT_NUMBER") && strings.Contains(c.Results[1], "ailing-"), "app and pods %q", c.Results); err != nil {
 				return agenttest.Turn{}, err
 			}
-			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "get_logs", Input: map[string]any{"app": "ailing"}}}}, nil
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "appLogs", Input: map[string]any{"name": "ailing"}}}}, nil
 		case 2:
 			if err := check(len(c.Results) == 1 && strings.Contains(c.Results[0], "Starting up on port 8080"), "logs %q", c.Results); err != nil {
 				return agenttest.Turn{}, err
 			}
-			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "propose_update", Input: map[string]any{"app": "ailing",
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "updateApp", Input: map[string]any{"name": "ailing",
 				"patch":  map[string]any{"source": map[string]any{"image": map[string]any{"env": nil}}},
 				"reason": "WHOAMI_PORT_NUMBER=8080 moves whoami off port 80, where the platform routes and checks it (log: Starting up on port 8080)"}}}}, nil
 		case 3:
@@ -196,7 +214,7 @@ func TestAgentRepairsApp(t *testing.T) {
 	t.Logf("agent (scripted model) read %v and answered: %v", calls(done), field(done, "result"))
 	got := calls(done)
 	slices.Sort(got[:min(2, len(got))])
-	if field(done, "phase") != "Succeeded" || field(done, "assignee") != "cell-agent" ||
+	if field(done, "phase") != "Succeeded" || field(done, "assignee") != a.API.Username ||
 		!slices.Equal(got, []string{"GET /v0/apps/ailing", "GET /v0/apps/ailing/pods", "GET /v0/apps/ailing/logs", "PATCH /v0/apps/ailing"}) ||
 		!slices.Equal(field(done, "changes").([]any), []any{change}) || !strings.Contains(field(done, "result").(string), change) {
 		t.Fatalf("task %v", done)
@@ -222,7 +240,7 @@ func TestAgentPackagesApp(t *testing.T) {
 	tc := newTestCell(t)
 	ctx := context.Background()
 	admin := tc.adminAPI(t)
-	tc.pauseAgent(t)
+	tc.pauseAgent(t, "packer")
 	admin.removed(t, "memos")
 	t.Cleanup(func() { admin.removed(t, "memos") })
 	compose := `services:
@@ -242,13 +260,13 @@ func TestAgentPackagesApp(t *testing.T) {
 		"access": map[string]any{"subdomain": "memos", "port": 5230, "auth": map[string]any{"mode": "proxy"}},
 		"health": map[string]any{"path": "/", "timeoutSeconds": 300}}
 	var change string
-	a := tc.opsAgent(t, func(c agenttest.Conversation) (agenttest.Turn, error) {
+	a := tc.cellAgent(t, "packer", func(c agenttest.Conversation) (agenttest.Turn, error) {
 		switch c.Turn {
 		case 0:
 			if err := check(strings.Contains(c.Task, "neosmemo/memos:26.11.1"), "brief %q", c.Task); err != nil {
 				return agenttest.Turn{}, err
 			}
-			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "get_catalog_entry", Input: map[string]any{"name": "whoami"}}}}, nil
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "getCatalogEntry", Input: map[string]any{"name": "whoami"}}}}, nil
 		case 1:
 			// A first try with a subdomain of the cell's: the cluster's own
 			// rules refuse it before anyone approves.
@@ -257,12 +275,12 @@ func TestAgentPackagesApp(t *testing.T) {
 				wrong[k] = v
 			}
 			wrong["access"] = map[string]any{"subdomain": "api", "port": 5230, "auth": map[string]any{"mode": "proxy"}}
-			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "propose_install", Input: map[string]any{"app": "memos", "manifest": wrong, "reason": "e2e"}}}}, nil
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "installApp", Input: map[string]any{"name": "memos", "manifest": wrong, "reason": "e2e"}}}}, nil
 		case 2:
 			if err := check(len(c.Results) == 1 && strings.HasPrefix(c.Results[0], "ERROR") && strings.Contains(c.Results[0], "belong to the cell"), "refusal %q", c.Results); err != nil {
 				return agenttest.Turn{}, err
 			}
-			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "propose_install", Input: map[string]any{"app": "memos", "manifest": manifest,
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "installApp", Input: map[string]any{"name": "memos", "manifest": manifest,
 				"reason": "Memos from its Compose file: one container, data in /var/opt/memos, behind the cell's login"}}}}, nil
 		case 3:
 			var cr struct{ Name string }

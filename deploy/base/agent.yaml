@@ -1,50 +1,26 @@
-# The ops agent. It has no rights in the cluster (no service account
-# token): it works only through the platform API with its own account,
-# which the operator creates (Secret cell-agent). It reaches its model
-# through the model gateway (models.yaml); without a provider set, tasks
-# wait.
-apiVersion: apps/v1
-kind: Deployment
+# The cell's agents (E-97). For each, the operator makes an account in the
+# identity, its credentials (Secret cell-agent-<name>) and Deployment
+# cell-agent-<name>. An agent has no rights in the cluster: it works only
+# through the platform API, which checks every call against its Agent. It
+# reaches its model through the model gateway (models.yaml); without a
+# provider set, tasks wait.
+apiVersion: cell.internal/v1alpha1
+kind: Agent
 metadata:
-  name: cell-agent
-  namespace: cell-system
+  name: ops
 spec:
-  replicas: 1
-  strategy: {type: Recreate}
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: cell-agent
-  template:
-    metadata:
-      labels:
-        app.kubernetes.io/name: cell-agent
-    spec:
-      automountServiceAccountToken: false
-      # The platform image is built on the first machine, for its architecture.
-      nodeSelector:
-        node-role.kubernetes.io/control-plane: "true"
-      containers:
-        - name: agent
-          image: ${OPERATOR_IMAGE}
-          imagePullPolicy: IfNotPresent
-          command: [/agent]
-          env:
-            - name: CELL_AGENT_USERNAME
-              valueFrom: {secretKeyRef: {name: cell-agent, key: username}}
-            - name: CELL_AGENT_PASSWORD
-              valueFrom: {secretKeyRef: {name: cell-agent, key: password}}
-            # The model gateway (E-80) and the agent's own key to it; the
-            # provider's key stays in the gateway. The operator adds the key
-            # to Secret cell-agent: until then the pod waits.
-            - name: ANTHROPIC_BASE_URL
-              value: http://cell-models.cell-system.svc.cluster.local
-            # A Bearer token, as every app sends its key (E-81).
-            - name: ANTHROPIC_AUTH_TOKEN
-              valueFrom: {secretKeyRef: {name: cell-agent, key: modelKey}}
-          resources:
-            requests: {cpu: 10m, memory: 32Mi}
-            limits: {memory: 128Mi}
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities: {drop: [ALL]}
+  # Finds out why an app needs attention and answers what admins ask.
+  kinds: [diagnose, ask]
+  apps: ["*"]
+  tools: ["*"]
+---
+apiVersion: cell.internal/v1alpha1
+kind: Agent
+metadata:
+  name: packer
+spec:
+  # Makes a manifest of a Compose file and proposes installing it: it
+  # cannot restart, restore or remove an app.
+  kinds: [package]
+  apps: ["*"]
+  tools: [listCatalog, getCatalogEntry, installApp, getApp]

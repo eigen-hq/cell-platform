@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -457,6 +459,45 @@ func TestCreateAppPasswordChecksOwner(t *testing.T) {
 	}
 }
 
+// Revoking deletes the user's app passwords only, even from a server that
+// ignores the filters.
+func TestRevokeAppPasswords(t *testing.T) {
+	api := newFakeAPI()
+	api.objects["core/users/"] = []map[string]any{{"pk": 9, "username": "alice"}, {"pk": 10, "username": "bob"}}
+	tokens := map[string]map[string]any{
+		"a1": {"identifier": "a1", "user": 9, "intent": "app_password"},
+		"a2": {"identifier": "a2", "user": 9, "intent": "app_password"},
+		"a3": {"identifier": "a3", "user": 9, "intent": "recovery"},
+		"b1": {"identifier": "b1", "user": 10, "intent": "app_password"},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id, ok := strings.CutPrefix(r.URL.Path, "/api/v3/core/tokens/")
+		switch {
+		case !ok:
+			api.ServeHTTP(w, r)
+		case id == "" && r.Method == http.MethodGet:
+			var all []map[string]any
+			for _, k := range slices.Sorted(maps.Keys(tokens)) {
+				all = append(all, tokens[k])
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"results": all, "pagination": map[string]any{"next": 0}})
+		case r.Method == http.MethodDelete:
+			delete(tokens, strings.TrimSuffix(id, "/"))
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, `{"detail":"unexpected"}`, http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+	c := &Client{BaseURL: srv.URL, Token: "t", HTTP: srv.Client()}
+	if err := c.RevokeAppPasswords(context.Background(), "alice"); err != nil {
+		t.Fatal(err)
+	}
+	if left := slices.Sorted(maps.Keys(tokens)); !slices.Equal(left, []string{"a3", "b1"}) {
+		t.Errorf("tokens left %v, want a3 and b1", left)
+	}
+}
+
 // The platform's own account is hidden: not listed, no app password, no
 // group change through the API.
 func TestPlatformAccountHidden(t *testing.T) {
@@ -641,6 +682,38 @@ func TestInviteReplacesTheLastLink(t *testing.T) {
 
 // Only people are removed: no superuser, no service account, no hidden
 // account reaches a DELETE.
+// Deleting an Agent deletes its machine account (E-97), never a person's.
+func TestRemoveServiceAccount(t *testing.T) {
+	api := newFakeAPI()
+	api.objects["core/users/"] = []map[string]any{
+		{"pk": 2, "username": "cell-agent-ops.u1", "type": "service_account"},
+		{"pk": 7, "username": PlatformAccount, "type": "service_account"},
+		{"pk": 9, "username": "alice", "type": "internal"},
+	}
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+	c := &Client{BaseURL: srv.URL, Token: "t", HTTP: srv.Client()}
+	ctx := context.Background()
+	for _, name := range []string{"alice", PlatformAccount} {
+		if err := c.RemoveServiceAccount(ctx, name); err == nil {
+			t.Errorf("removed %s", name)
+		}
+	}
+	for _, call := range api.calls {
+		if strings.HasPrefix(call, "DELETE ") {
+			t.Errorf("call reached authentik: %s", call)
+		}
+	}
+	for range 2 { // the second time it is gone already
+		if err := c.RemoveServiceAccount(ctx, "cell-agent-ops.u1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if u, _ := c.find(ctx, "core/users/", url.Values{"username": {"cell-agent-ops.u1"}}); u != nil {
+		t.Errorf("account is still there: %v", u)
+	}
+}
+
 func TestRemoveUser(t *testing.T) {
 	api := newFakeAPI()
 	api.objects["core/users/"] = []map[string]any{

@@ -40,10 +40,11 @@ import (
 // the tests play CloudNativePG, Flux and the kubelet by writing status.
 
 var (
-	k8s     client.Client
-	ident   = &fakeIdentity{oidc: map[string]authentik.OIDC{}, proxy: map[string]authentik.Proxy{}, access: map[string][]string{}}
-	healthy sync.Map // app name -> bool
-	skew    atomic.Int64
+	k8s        client.Client
+	agentIdent = &fakeAgentIdentity{accounts: map[string][]string{}}
+	ident      = &fakeIdentity{oidc: map[string]authentik.OIDC{}, proxy: map[string]authentik.Proxy{}, access: map[string][]string{}}
+	healthy    sync.Map // app name -> bool
+	skew       atomic.Int64
 	// outpostReady plays authentik's outpost serving proxy apps.
 	outpostReady atomic.Bool
 )
@@ -155,6 +156,12 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	if err := (&ChangeReconciler{Client: mgr.GetClient(), Now: now}).SetupWithManager(mgr); err != nil {
+		panic(err)
+	}
+	if err := (&AgentReconciler{Client: mgr.GetClient(), Identity: agentIdent, Image: "agent:test"}).SetupWithManager(mgr); err != nil {
+		panic(err)
+	}
+	if err := (&AgentTaskReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
 		panic(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())

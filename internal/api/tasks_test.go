@@ -60,7 +60,7 @@ func TestAgentsWorkInTasks(t *testing.T) {
 		t.Errorf("admin claimed a task: %d", code)
 	}
 	code, body := h.do("POST", "/v0/tasks/notes-diagnose-1/claim", "agent", nil)
-	if code != 200 || field(body, "phase") != "Running" || field(body, "assignee") != "agent-user" {
+	if code != 200 || field(body, "phase") != "Running" || field(body, "assignee") != opsAccount {
 		t.Fatalf("claim: %d %v", code, body)
 	}
 	if code, _ := h.do("POST", "/v0/tasks/notes-diagnose-1/claim", "agent", nil); code != 409 {
@@ -147,7 +147,7 @@ func TestAgentsWorkInTasks(t *testing.T) {
 
 	// A runaway agent stops at the step limit.
 	full := pendingTask("notes-diagnose-3")
-	full.Status = cellv1.TaskStatus{Phase: cellv1.RunRunning, Assignee: "agent-user", Steps: make([]cellv1.TaskStep, maxSteps)}
+	full.Status = cellv1.TaskStatus{Phase: cellv1.RunRunning, Assignee: opsAccount, Steps: make([]cellv1.TaskStep, maxSteps)}
 	if err := h.kube.Create(context.Background(), full); err != nil {
 		t.Fatal(err)
 	}
@@ -166,6 +166,31 @@ func names(list any) []string {
 		out = append(out, field(x, "name").(string))
 	}
 	return out
+}
+
+// A change's reason and message can quote an app's logs: an agent in an
+// app's task reads only that app's changes.
+func TestAgentChangeLogScope(t *testing.T) {
+	h := newHarness(t, installed("notes", "oidc"), installed("plain", "none"), pendingTask("notes-diagnose-1"))
+	_, body := h.do("PATCH", "/v0/apps/plain", "admin", map[string]any{"patch": map[string]any{"version": "9"}, "reason": "plain logs say x"})
+	other := field(body, "name").(string)
+	h.do("PATCH", "/v0/apps/notes", "admin", map[string]any{"patch": map[string]any{"version": "2"}})
+	h.agentTask = "notes-diagnose-1"
+	h.do("POST", "/v0/tasks/notes-diagnose-1/claim", "agent", nil)
+
+	if code, _ := h.do("GET", "/v0/changes?app=plain", "agent", nil); code != 403 {
+		t.Errorf("agent lists another app's changes: %d", code)
+	}
+	if code, _ := h.do("GET", "/v0/changes/"+other, "agent", nil); code != 403 {
+		t.Errorf("agent reads another app's change: %d", code)
+	}
+	code, body := h.do("GET", "/v0/changes", "agent", nil)
+	if list, _ := body.([]any); code != 200 || len(list) != 1 || field(list[0], "app") != "notes" {
+		t.Errorf("agent's change log: %d %v", code, body)
+	}
+	if _, body := h.do("GET", "/v0/changes", "viewer", nil); len(body.([]any)) != 2 {
+		t.Errorf("viewer's change log %v", body)
+	}
 }
 
 func TestCreateTask(t *testing.T) {
@@ -318,7 +343,7 @@ func TestInstallFromManifest(t *testing.T) {
 		return c.Create(ctx, obj, opts...)
 	}}, installed("notes", "oidc"), &cellv1.Task{ObjectMeta: metav1.ObjectMeta{Name: "memo-package-1"},
 		Spec:   cellv1.TaskSpec{Kind: "package", App: "memo", Input: "services: {}", Requester: cellv1.Requester{Kind: "Human", Name: "admin-user"}},
-		Status: cellv1.TaskStatus{Phase: cellv1.RunRunning, Assignee: "agent-user"}})
+		Status: cellv1.TaskStatus{Phase: cellv1.RunRunning, Assignee: opsAccount}})
 	h.agentTask = "memo-package-1"
 	spec := map[string]any{"version": "1.0", "source": map[string]any{"image": map[string]any{"repository": "example/memo"}},
 		"needs":  map[string]any{"volumes": []any{map[string]any{"name": "data", "size": "1Gi", "mountPath": "/data"}}},

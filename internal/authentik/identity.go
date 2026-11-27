@@ -259,6 +259,23 @@ func (c *Client) RemoveUser(ctx context.Context, username string) error {
 	return c.do(ctx, http.MethodDelete, fmt.Sprintf("core/users/%v/", u["pk"]), nil, nil)
 }
 
+// RemoveServiceAccount deletes a machine account, and with it every app
+// password and token it holds; one that does not exist is gone already.
+// It never deletes a person's account.
+func (c *Client) RemoveServiceAccount(ctx context.Context, username string) error {
+	if internalUser(username) {
+		return fmt.Errorf("user %q: %w", username, ErrNotFound)
+	}
+	u, err := c.find(ctx, "core/users/", url.Values{"username": {username}})
+	if err != nil || u == nil {
+		return err
+	}
+	if !strings.Contains(fmt.Sprint(u["type"]), "service_account") {
+		return fmt.Errorf("user %q is no service account: not removed", username)
+	}
+	return c.do(ctx, http.MethodDelete, fmt.Sprintf("core/users/%v/", u["pk"]), nil, nil)
+}
+
 // EnsureServiceAccount creates a machine account if it is missing (no
 // password login; it logs in with app passwords) and adds it to groups.
 func (c *Client) EnsureServiceAccount(ctx context.Context, username string, groups ...string) error {
@@ -274,6 +291,36 @@ func (c *Client) EnsureServiceAccount(ctx context.Context, username string, grou
 	}
 	for _, g := range groups {
 		if err := c.EnsureGroup(ctx, g, username); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RevokeAppPasswords deletes every app password of username, so none
+// handed out before still logs in; a user that does not exist has none.
+// The filters are only a hint (see find): a token is deleted only if it is
+// an app password of that user.
+func (c *Client) RevokeAppPasswords(ctx context.Context, username string) error {
+	if internalUser(username) {
+		return fmt.Errorf("user %q: %w", username, ErrNotFound)
+	}
+	u, err := c.find(ctx, "core/users/", url.Values{"username": {username}})
+	if err != nil || u == nil {
+		return err
+	}
+	pk := u["pk"]
+	tokens, err := c.list(ctx, "core/tokens/", url.Values{"user__username": {username}, "intent": {"app_password"}})
+	if err != nil {
+		return err
+	}
+	for _, t := range tokens {
+		if t["intent"] != "app_password" || fmt.Sprint(t["user"]) != fmt.Sprint(pk) {
+			continue
+		}
+		err := c.do(ctx, http.MethodDelete, "core/tokens/"+url.PathEscape(fmt.Sprint(t["identifier"]))+"/", nil, nil)
+		var ak *Error
+		if err != nil && (!errors.As(err, &ak) || ak.Status != http.StatusNotFound) {
 			return err
 		}
 	}

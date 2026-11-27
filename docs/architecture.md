@@ -72,8 +72,10 @@ A cell is a k3s cluster with everything a customer needs, on one or more machine
 | Object storage | S3 for apps that need it | Open, only on demand |
 | Backup | Daily backup outside the cell, restore | Volume backups and database archive into an S3 bucket |
 | Platform API | The only door for UI, CLI and agents | Own development, thin layer over the resources |
+| Platform database | Records that are not desired state: task conversations, model usage, later memory and the context index | CloudNativePG cluster `cell-db`, reached only by the API, except own apps writing to the context index (planned, E-92) |
 | MCP gateway | One endpoint for the tools of all apps, with permission check | agentgateway, configuration by the operator (E-36) |
-| Ops agents | Diagnosis, upgrades with migrations, packaging | Own development in Go, language model through the customer's key (E-32, E-33) |
+| Model gateway | One open model API for agents and apps, any provider behind it | agentgateway in standalone mode, `cell-models` (E-80) |
+| Ops agents | Diagnosis, asks, packaging; later more agents | Own development in Go: an own loop on one open model API, Chat Completions (E-88, E-94), see [Agent harness](#agent-harness) |
 
 ## Own resources
 
@@ -82,7 +84,7 @@ All are in the API group `cell.internal`.
 - **`App`**: an installed app. The spec is the manifest plus the customer's inputs; the status shows phase, version, URL and last backup. For the structure see `app-manifest.md`.
 - **`ChangeRequest`**: a proposed or executed change. It holds the originator (human, agent, operator), the diff on the `App` spec, the reason, risk level, snapshot reference and result. The sum of all `ChangeRequest`s is the change log.
 - **`Backup`** and **`Restore`**: a backup or a restore of an app, respectively.
-- **`Task`**: a job for an agent (diagnosis or packaging), with every API call of the agent as a step and its answer. Together with the `ChangeRequest`s it names, it belongs to the change log (E-34).
+- **`Task`**: a job for an agent (diagnosis, ask or packaging), with every API call of the agent as a step and its answer. Together with the `ChangeRequest`s it names, it belongs to the change log (E-34). Planned (E-89): the `Task` stays the header of a conversation (state, stage, links); its turns, items and steps live in the platform database.
 
 The catalog is a folder in the repo (`catalog/<app>/manifest.yaml`), not a resource of its own.
 
@@ -106,11 +108,15 @@ Kubernetes restarts the app. If it stays unhealthy beyond a threshold, the opera
 
 **Agent intervention**
 
-1. Trigger: a `Task`, created by the operator on `NeedsAttention` or by an admin (diagnosis, an app to be repackaged).
+Today:
+
+1. Trigger: a `Task`, created by the operator on `NeedsAttention` or by an admin (diagnosis, ask, an app to be packaged).
 2. The agent takes it and reads status, pods, logs and events through the API; every call is a step in the task.
 3. It proposes a `ChangeRequest` with diff and reason, only for the app of its task; the API sets the risk level.
 4. It ends the task with its answer: cause, evidence, proposed change.
 5. After approval the operator runs the change like an update, with backup and rollback.
+
+Planned (E-89, stages as in `agents.md`): steps 2 to 4 become turns of a conversation that ends in a structured answer (Understood, Causes, Options). The chosen option's `ChangeRequest` carries checks; after the health check the operator runs them in a verify window (rollback on failure) and a watch window (the task reopens on failure), and writes the receipt.
 
 **Grant access**
 
@@ -118,15 +124,67 @@ Kubernetes restarts the app. If it stays unhealthy beyond a threshold, the opera
 
 ## Agent model
 
-Agents are accounts in the identity service with their own permissions. Their tools are exclusively calls to the platform API.
+Agents are accounts in the identity service with their own permissions, one per `Agent` resource (E-97). Their tools are exclusively calls to the platform API.
 
 | Level | Examples | Rule |
 |---|---|---|
 | 0 Read | Status, logs, events, metrics | Always allowed |
-| 1 Reversible | Restart, configuration change, update with snapshot | With approval; switching to automatic per cell is not built yet |
-| 2 Risky | Delete data, restore over the current state, uninstall | Always with approval by a human |
+| 1 Reversible | Restart, configuration change, update with snapshot, install from the catalog | With approval today; decided: applies itself with its checks and automatic rollback once checks on a change are built (E-95) |
+| 2 Risky | Delete data or backups, restore over the current state, uninstall, install from a manifest outside the catalog, a patch to source, needs or subdomain, spend, anything outside the cell, widening of rights | Always with approval by a person signed in to the console (E-95) |
 
 Agents reach their language model only through the cell's model gateway (E-80): one provider an admin sets, with the customer's key, which stays in the gateway; each agent has its own key to the gateway. The provider is replaceable without touching an agent.
+
+## Agent harness
+
+Planned (E-88 to E-90). What runs today is the loop of E-32 on our own Chat Completions client (E-94), without a provider SDK. How people use it is in `agents.md`; the order of the work is in `backlog.md`.
+
+```mermaid
+flowchart LR
+  P["Console, office UI"] --> API
+  X["Own assistant (MCP)"] --> MCP["cell-mcp"]
+  O["Outside agent (A2A)"] --> MCP
+  MCP --> API["Platform API"]
+  API --> DB[("cell-db: conversations")]
+  API --> K["Task, ChangeRequest"]
+  AG["Agent: loop"] --> API
+  AG --> M["cell-models"] --> PR["Provider"]
+  OP["Operator: apply, checks"] --> K
+  OP --> VM[("Metrics")]
+  API -. events .-> P
+  API -. events .-> AG
+```
+
+**The loop.** Our own in Go, in each agent's Deployment `cell-agent-<name>`, without an agent framework. For each turn it reads the task's conversation from the API, sends it to the model gateway, runs the tool calls the model returns through the platform API (each one a step, as today), appends what came back, and repeats until the model ends the turn or a limit is hit (model calls per turn, the account's token limit). The model may call tools on any turn, several at once; the calls of one turn run side by side and their results go back in order. A turn cut at the token limit or by a filter is dropped and runs none of its calls: the model hears so and does it again, and a second cut in a row ends the run. The agent keeps no state of its own: everything is in the API, so after a restart a task continues from its last item. Tasks run in parallel, each in its own goroutine, up to a limit per agent; the rest wait as *queued*.
+
+**Durable runs.** One run of a task (an attempt) belongs to one agent process at a time: the process claims it with a lease that it renews, and the API refuses writes from a process whose lease ran out or whose attempt number is old. The loop stores every `function_call` item before it runs it. The call goes to the API with the item's ID as idempotency key, and the API keeps the result under that key, so a repeated call returns the first result instead of acting twice. A `ChangeRequest` carries its key as a label, so after a crash between creating it and storing the result the API finds it again instead of creating a second one. On start and after every reconnect the agent first lists the work waiting for it in the API, then follows the event stream from its last event ID: events only wake it, the list is the truth. Scripted tests stop the agent after a stored call and after a created change before its result, deliver an event twice, and run two agents against one task.
+
+**The model API.** One open API between the agent and the gateway, stateless: every call carries the whole conversation (Chat Completions, E-94). A thin client of our own covers only what the loop uses: one completion with function tools and the provider's reasoning passed back; streaming comes with Live progress. The gateway translates to the provider. No provider SDK and no provider's message format in agent code; only the client knows the wire format.
+
+**The transcript.** Typed items of our own, named after Open Responses: `message` (a role and parts), `function_call`, `function_call_output`, `reasoning` (a summary, or the provider's opaque content passed back unchanged), and items of our own with the prefix `cell:` (`cell:answer`, `cell:ask`, `cell:event` for a check result or another wake-up). A part has a media type and either inline content or a reference to an attachment, so images, audio and video fit without a new format. The API stores items in the platform database; steps keep an excerpt of every response, without the cap of 200 that a `Task` status has today.
+
+**What the model sees.** The stored transcript is not sent as it is: for every call the loop builds the model's input from it. `message`, `function_call` and `function_call_output` map one to one to the wire API's messages and tool calls; `cell:answer` and `cell:ask` go as the call of the `answer` or `ask` tool with its arguments and a short result; `cell:event` goes as a message with a fixed text; an attachment the model cannot read becomes a line with its name and type. Opaque reasoning goes back only to the provider and model that wrote it; after a switch only its summary goes, as text. The input has a token budget per model: the newest turns in full, older turns as their answer and step excerpts. If a task still does not fit, it stops in the visible state *limit reached*, and an admin raises the limit or starts a new task from its summary. A child task gets a part of its parent's remaining budget, never more, and children nest only to a fixed depth. A test replays a stored conversation through the pinned gateway to an Anthropic and an OpenAI-compatible backend, and again after a switch of provider.
+
+**Turns end in structure.** The model ends a turn by calling one of two tools, `answer` or `ask`, whose parameters are the answer schema (Understood, Causes, Options, Receipt) or a question with form fields. Tool calls work on every model that matters, unlike strict structured output. The API checks an answer before it stores it: every evidence reference names a step of this task, every option names a `ChangeRequest` draft the API has priced (risk, reversibility, diff). The options of one answer form a group: approving one closes the others in the same call, and a new answer or a correction closes the open options of the answer before. An approval names the exact revision it saw (the change, its checks and the app's generation); the API refuses it if any of them moved, and the operator checks the app's generation again before it starts, so a stale proposal goes back to the agent instead of running. A form field for a secret is a question the API issues, with its own ID, its purpose and its destination (which Secret and key, chosen by the API from the purpose, never by the model); the value goes from the console straight into that Secret and never into an item, an event, a log line or an error message.
+
+**Tools.** Generated from `api/openapi.yaml` (E-96): an operation marked `x-agent` becomes a tool named by its operationId, with its description, and its path and query parameters and the properties of its JSON body as one argument object, every `$ref` inlined. The agent builds the catalog once at start, sorted by name, and refuses to start on a broken one. The agent offers the model only the tools its `Agent` names (E-97); the API stays the only place that enforces rights and refuses every other call. The same catalog serves the loop and, through the MCP gateway, outside assistants (Interop). Tools of apps and of outside MCP servers also go through the API: it calls them through the gateway with the agent's identity and records call and result as a step; an agent never calls an MCP server itself. An outside tool that an admin has not marked as read-only is a proposal that needs approval, marked as one the cell cannot undo.
+
+**Whose rights.** A task records who asked: a person, an assistant on a person's behalf, another agent, or the operator. Every call in the task gets only the rights that both the agent's account and the requester have, and a child task inherits them, never more. The API checks this on every call, not once at the start, so when a person loses a right, the next call of the task that needs it fails and the task shows why. Who may read a task, its items, attachments and children stays as today (E-63), plus the person who asked.
+
+**Live progress.** The API publishes the agent's progress with the vocabulary of AG-UI: run started and finished, step started and finished, tool call, text delta, stage change, waiting for input. These events carry task content, so they go out only on the stream of their task, with the rights needed to read the task, also on replay. The stream for everyone (`GET /v0/events`, open to viewers) carries only that a task changed, its ID and its stage. The console shows it live; nothing polls.
+
+**Answer blocks.** A block in an answer names a component of the console and the query behind it, never the numbers (A2UI messages and a small Svelte renderer, E-92). A query is the ID of a reading operation in `api/openapi.yaml` from a list the console allows, with parameters checked against its schema and the task's scope; never a URL or a method. The console runs it with the viewer's own rights and renders it the same way as on the app's own page. A block that supports a claim has a fixed time window, and the API stores the figures the claim rests on with the answer, so an old answer still shows what it saw after the metrics expire (30 days, E-87); a block without a fixed window is marked *live*. Facts the platform checked (figures, check results, steps) look different from the model's conclusions. An evidence step keeps the part of the response the agent saw; Raw shows every item as the model received it.
+
+**Checks and the watch window.** A `ChangeRequest` gets `spec.checks[]` in the shape of an Argo Rollouts analysis: a template from a fixed catalog with parameters, an initial delay, an interval, a count, a success and a failure condition. A template enters the catalog only together with its data source: processor and memory (E-87) and restarts (the pods' status) first, response times and availability with the probes, a log line only once the cell keeps log history. Each kind of change says which rollback it has: an update goes back to its backup, a restart and a removal have none, a failed install stays installed (E-31, E-73). Data that came in after the backup is lost on a rollback, and the proposal says so before approval. The operator evaluates the checks against the metrics store after the health check (its NetworkPolicy then admits the operator too) and keeps their state in the change's status, so it resumes after a restart. A check is *passed*, *failed* or *inconclusive* (no data, store away, too few samples), and inconclusive never counts as passed. A failure in the verify window rolls back where the kind allows it, as a failed health check does today. An inconclusive verify window and every failure in the watch window add a `cell:event` to the task, reopen it and warn IT; if the change has no task, the operator opens a diagnosis task, as for a failed health check. A check longer than the verify window runs in the watch window. While a change is in its verify window, no other change of the same app starts, and the next change of the app ends the watch window of the one before. The model only picks templates and parameters; it never writes a query.
+
+**Actions and impact.** Every action in the cell writes an action record: approved changes, restores, restarts, automatic rollbacks, machines joining or leaving, and changes to the cell's settings (mail, models, backup target), by a person, an agent or the operator. A record holds the actor, when the action started and ended, its targets and what it affected (the cell, machines, apps), its outcome and its task, if any; the API writes it to the platform database. The impact is computed by the API on read, without a model: for every record, the key figures of what it affected over the same window before and after (1 hour, 1 day, 1 week), and the other records in that window. Markers on charts come from the same records. Availability and response times come from two probes per app: one through its public address, which measures what people reach, the login included, and one from inside the cell straight to the app's service, which measures the app.
+
+**Interop.** Outside assistants use the cell through `cell-mcp`: app tools as today, plus platform tools and task tools, signed in through authentik (E-92). Today the API accepts only tokens of its own client and the console's, and the gateway removes the Authorization header before every backend. So the gateway passes the person's token on to the platform backend only, and the API accepts a token of the MCP client only on the routes for assistants and records both the person and the assistant (E-92). The API refuses an approval made with such a token; hiding the tool is not enough.
+
+Agents in other systems reach the cell's agents over A2A through an adapter in the API, not a gateway backend, because an A2A task that has ended takes no more messages. Each agent has an agent card. A cell `Task` is an A2A context, and each run of the agent in it is an A2A task that ends with the turn (*input-required* when the agent asks). A follow-up is a new A2A task in the same context, and later results (approval, verify, watch) go to the caller as push notifications. Cancelling an A2A task stops the agent's run, not an approved change. Everything ends in the platform API; nothing reaches the cluster past it.
+
+**Records and recovery.** `cell-db` is backed up like an app's database and restored by `make dr-test` with the apps. `Task` headers and `ChangeRequest`s live in the cluster and are lost with it, so a conversation whose header is gone comes back read-only, and no run resumes after a restore: the API starts a new epoch and refuses claims from before it, so nothing done before is done again. The tasks of today move into the database once, as read-only conversations. A conversation is deleted with its task, except what an action record still refers to (its answer and figures), which stays as long as the record. The DR test proves that no finished change runs again.
+
+**Later: more media.** Speech to text and text to speech through the gateway's audio routes, or a speech model in the cell; live voice over a separate realtime connection whose transcript is appended to the task as items. Neither changes the loop.
 
 ## Integration and data
 
@@ -138,7 +196,7 @@ The data of third-party apps stays in the apps. Only what is common to all is he
 
 ## Interface to the UI
 
-REST with an OpenAPI description (`api/openapi.yaml`), login through tokens of the identity service. Roles come from groups of the identity service: admins may do everything, agents read and propose changes, viewers read the state of the cell only, without people, tasks, pods, events or logs (E-63), all other accounts see nothing (E-46). Every change to an app is created as a `ChangeRequest` without a decision; an admin approves it in a separate call (E-30).
+REST with an OpenAPI description (`api/openapi.yaml`), login through tokens of the identity service. Roles come from groups of the identity service: admins may do everything, agents read and propose changes within their `Agent` (E-97), viewers read the state of the cell only, without people, tasks, pods, events or logs (E-63), all other accounts see nothing (E-46). Every change to an app is created as a `ChangeRequest` without a decision; an admin approves it in a separate call (E-30).
 
 | Area | Purpose |
 |---|---|
@@ -170,4 +228,4 @@ In addition there is the one MCP endpoint of the gateway for the agents in the U
 
 ## Not built yet
 
-Removing machines and moving apps between machines, apps reachable only in the mesh, a central service for fleet and billing, context index, build pipeline for custom apps, migration of existing customers, running open language models in the cell.
+Removing machines and moving apps between machines, apps reachable only in the mesh, a central service for fleet and billing, the agent harness of E-88 to E-90 (conversations, structured answers, checks after a change, impact of changes, MCP and A2A for outside agents), context index, build pipeline for custom apps, migration of existing customers, running open language models in the cell.

@@ -204,6 +204,9 @@ type harness struct {
 // agentWork is the running task the harness's agent works in.
 const agentWork = "agent-work"
 
+// opsAccount is the account of the harness's agent, Agent ops (E-97).
+const opsAccount = "cell-agent-ops.ops-1"
+
 func newHarness(t *testing.T, objs ...client.Object) *harness {
 	t.Helper()
 	return newHarnessWith(t, interceptor.Funcs{}, objs...)
@@ -223,8 +226,11 @@ func newHarnessWith(t *testing.T, funcs interceptor.Funcs, objs ...client.Object
 	}
 	work := &cellv1.Task{ObjectMeta: metav1.ObjectMeta{Name: agentWork},
 		Spec:   cellv1.TaskSpec{Kind: "diagnose", App: "notes", Requester: cellv1.Requester{Kind: "Human", Name: "admin-user"}},
-		Status: cellv1.TaskStatus{Phase: cellv1.RunRunning, Assignee: "agent-user"}}
-	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(append(objs, work)...).WithInterceptorFuncs(funcs).
+		Status: cellv1.TaskStatus{Phase: cellv1.RunRunning, Assignee: opsAccount}}
+	// The harness's agent takes every task and calls every tool.
+	ops := &cellv1.Agent{ObjectMeta: metav1.ObjectMeta{Name: "ops", UID: "ops-1"},
+		Spec: cellv1.AgentSpec{Kinds: []string{"diagnose", "package", "ask"}, Apps: []string{"*"}, Tools: []string{"*"}}}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(append(objs, work, ops)...).WithInterceptorFuncs(funcs).
 		WithStatusSubresource(&cellv1.Task{}).Build()
 	spec, err := os.ReadFile("../../api/openapi.yaml")
 	if err != nil {
@@ -236,8 +242,18 @@ func newHarnessWith(t *testing.T, funcs interceptor.Funcs, objs ...client.Object
 		Identity: newFakeIdentity(),
 		Authenticate: func(_ context.Context, token string) (*Caller, error) {
 			switch token {
-			case "admin", "agent", "viewer", "none":
+			case "admin", "viewer", "none":
 				return &Caller{Username: token + "-user", Role: token, Groups: []string{}}, nil
+			case "agent":
+				return &Caller{Username: opsAccount, Role: RoleAgent, Groups: []string{GroupAgents}}, nil
+			}
+			// agent-<name>: the account of Agent <name> with UID <name>-1;
+			// account:<username>: any account in the agents' group.
+			if name, ok := strings.CutPrefix(token, "agent-"); ok {
+				return &Caller{Username: "cell-agent-" + name + "." + name + "-1", Role: RoleAgent, Groups: []string{GroupAgents}}, nil
+			}
+			if username, ok := strings.CutPrefix(token, "account:"); ok {
+				return &Caller{Username: username, Role: RoleAgent, Groups: []string{GroupAgents}}, nil
 			}
 			return nil, errors.New("bad token")
 		},
@@ -279,7 +295,7 @@ func (h *harness) do(method, path, token string, body any) (int, any) {
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	if token == "agent" && h.agentTask != "" {
+	if strings.HasPrefix(token, "agent") && h.agentTask != "" {
 		req.Header.Set(TaskHeader, h.agentTask)
 	}
 	resp, err := h.srv.Client().Do(req)
@@ -427,7 +443,7 @@ func TestInstallWaitsForApproval(t *testing.T) {
 		t.Fatalf("install: %d %v", code, body)
 	}
 	name := field(body, "name").(string)
-	if field(body, "action") != "install" || field(body, "requester", "kind") != "Agent" || field(body, "requester", "name") != "agent-user" ||
+	if field(body, "action") != "install" || field(body, "requester", "kind") != "Agent" || field(body, "requester", "name") != "ops" ||
 		field(body, "approval", "required") != true || field(body, "approval", "decision") != nil {
 		t.Errorf("recorded change %v", body)
 	}
@@ -489,7 +505,7 @@ func TestInstallConflictsAndRejection(t *testing.T) {
 		}
 	}
 	// Another name on the same host would take over the app's traffic.
-	if code, _ := h.do("POST", "/v0/apps", "agent", map[string]any{"catalog": "notes", "name": "notes2"}); code != 409 {
+	if code, _ := h.do("POST", "/v0/apps", "admin", map[string]any{"catalog": "notes", "name": "notes2"}); code != 409 {
 		t.Errorf("install on a taken subdomain: %d", code)
 	}
 	code, body := h.do("POST", "/v0/apps", "admin", map[string]any{"catalog": "notes", "name": "notes2", "subdomain": "notes2"})
@@ -555,7 +571,11 @@ func TestAppChanges(t *testing.T) {
 	}
 
 	// Access: a low-risk update; an app without login cannot have groups.
-	code, body = h.do("PUT", "/v0/apps/notes/access", "agent", map[string]any{"groups": []string{"finance"}})
+	// It is no agent's tool (E-96): only admins set access.
+	if code, body = h.do("PUT", "/v0/apps/notes/access", "agent", map[string]any{"groups": []string{"finance"}}); code != 403 {
+		t.Errorf("agent sets access: %d %v", code, body)
+	}
+	code, body = h.do("PUT", "/v0/apps/notes/access", "admin", map[string]any{"groups": []string{"finance"}})
 	if code != 202 || field(body, "risk") != "low" || field(body, "patch", "access", "groups").([]any)[0] != "finance" {
 		t.Errorf("set access: %d %v", code, body)
 	}
@@ -564,7 +584,7 @@ func TestAppChanges(t *testing.T) {
 	}
 	// A forgotten or null list never opens the app to everyone.
 	for _, req := range []any{map[string]any{"reason": "oops"}, map[string]any{"groups": nil}} {
-		if code, _ = h.do("PUT", "/v0/apps/notes/access", "agent", req); code != 400 {
+		if code, _ = h.do("PUT", "/v0/apps/notes/access", "admin", req); code != 400 {
 			t.Errorf("access %v: %d", req, code)
 		}
 	}
@@ -707,10 +727,10 @@ func TestIdentity(t *testing.T) {
 	if code != 200 || len(field(body, "members").([]any)) != 0 {
 		t.Errorf("empty the group: %d %v", code, body)
 	}
-	if code, body = h.do("GET", "/v0/groups", "agent", nil); code != 200 || len(body.([]any)) != 2 {
+	if code, body = h.do("GET", "/v0/groups", "admin", nil); code != 200 || len(body.([]any)) != 2 {
 		t.Errorf("groups: %d %v", code, body)
 	}
-	if code, body = h.do("GET", "/v0/users", "agent", nil); code != 200 || len(body.([]any)) != 1 {
+	if code, body = h.do("GET", "/v0/users", "admin", nil); code != 200 || len(body.([]any)) != 1 {
 		t.Errorf("users: %d %v", code, body)
 	}
 }

@@ -1,157 +1,282 @@
 package agent
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
-	"net/http"
+	"maps"
 	"net/url"
-	"strconv"
+	"slices"
+	"strings"
+	"sync"
 
-	"github.com/anthropics/anthropic-sdk-go/v2"
-	"github.com/anthropics/anthropic-sdk-go/v2/toolrunner"
+	"sigs.k8s.io/yaml"
+
+	apidoc "github.com/eigen-hq/cell-platform/api"
 )
 
 // maxResult caps what one tool call hands the model.
 const maxResult = 30000
 
-type none struct{}
-
-type appArg struct {
-	App string `json:"app" jsonschema:"required,description=Name of the app"`
+// tool is a function the model may call.
+type tool struct {
+	Name, Description string
+	// Params is the JSON schema of the arguments.
+	Params map[string]any
+	Run    func(ctx context.Context, args json.RawMessage) (string, error)
 }
 
-type logsArg struct {
-	App       string `json:"app" jsonschema:"required,description=Name of the app"`
-	Pod       string `json:"pod,omitempty" jsonschema:"description=Pod name (default: the newest pod of the app)"`
-	Container string `json:"container,omitempty" jsonschema:"description=Container name (default: the pod's first container)"`
-	Previous  bool   `json:"previous,omitempty" jsonschema:"description=Logs of the container's previous run (after a crash)"`
-	Tail      int    `json:"tail,omitempty" jsonschema:"description=Lines from the end (default 200)"`
+// operation is an operation of the platform API that api/openapi.yaml
+// marks x-agent: the contract is the one source of the agents' tools.
+type operation struct {
+	Name, Description, Method, Path string
+	// Params is the JSON schema of the arguments: the operation's path and
+	// query parameters and the properties of its JSON body, side by side.
+	Params map[string]any
+	in     map[string]string // where an argument goes: path, query or body
+	body   bool              // the operation takes a JSON body
 }
 
-type catalogArg struct {
-	Name string `json:"name" jsonschema:"required,description=Name of the catalog entry"`
-}
+// operations are the agents' tools in the contract, sorted by name so the
+// start of every prompt stays the same for the gateway's cache.
+var operations = sync.OnceValues(func() ([]operation, error) { return parseOperations(apidoc.OpenAPI) })
 
-type updateArg struct {
-	App    string         `json:"app" jsonschema:"required,description=Name of the app"`
-	Patch  map[string]any `json:"patch" jsonschema:"required,description=JSON merge patch on the app spec; null removes a field and a list replaces the whole list"`
-	Reason string         `json:"reason" jsonschema:"required,description=The cause you found with its evidence and what the patch changes"`
-}
-
-type installArg struct {
-	App      string         `json:"app" jsonschema:"required,description=Name of the new app"`
-	Manifest map[string]any `json:"manifest" jsonschema:"required,description=The app spec: the spec part of an App manifest"`
-	Reason   string         `json:"reason" jsonschema:"required,description=Where the manifest comes from and what an approver should check"`
-}
-
-// tools are the agent's tools in task: each is one call of the platform
-// API, which records it as a step of the task.
-func (a *Agent) tools(task string) ([]anthropic.BetaTool, error) {
-	call := func(ctx context.Context, method, path string, in any) (anthropic.BetaToolResultBlockParamContentUnion, error) {
-		code, body, err := a.API.Do(ctx, method, path, task, in)
-		if err != nil {
-			return anthropic.BetaToolResultBlockParamContentUnion{}, err
-		}
-		text := string(body)
-		if len(text) > maxResult {
-			text = text[len(text)-maxResult:] // the end of logs and lists matters most
-		}
-		if code >= 300 {
-			return anthropic.BetaToolResultBlockParamContentUnion{}, fmt.Errorf("HTTP %d: %s", code, text)
-		}
-		return anthropic.BetaToolResultBlockParamContentUnion{OfText: &anthropic.BetaTextBlockParam{Text: text}}, nil
+func parseOperations(spec []byte) ([]operation, error) {
+	var doc map[string]any
+	if err := yaml.Unmarshal(spec, &doc); err != nil {
+		return nil, fmt.Errorf("openapi.yaml: %w", err)
 	}
-	app := func(name, desc, suffix string) (anthropic.BetaTool, error) {
-		return toolrunner.NewBetaToolFromJSONSchema(name, desc, func(ctx context.Context, in appArg) (anthropic.BetaToolResultBlockParamContentUnion, error) {
-			return call(ctx, http.MethodGet, "/v0/apps/"+url.PathEscape(in.App)+suffix, nil)
-		})
-	}
-	var tools []anthropic.BetaTool
-	for _, mk := range []func() (anthropic.BetaTool, error){
-		func() (anthropic.BetaTool, error) {
-			return toolrunner.NewBetaToolFromJSONSchema("list_apps", "List the cell's apps with phase and conditions.",
-				func(ctx context.Context, _ none) (anthropic.BetaToolResultBlockParamContentUnion, error) {
-					return call(ctx, http.MethodGet, "/v0/apps", nil)
-				})
-		},
-		func() (anthropic.BetaTool, error) {
-			return app("get_app", "An app: phase, conditions with the operator's messages, and its spec (the manifest).", "")
-		},
-		func() (anthropic.BetaTool, error) {
-			return app("get_pods", "The app's pods with container states, restarts, last exit, and per container the CPU and memory in use next to its requests and limits.", "/pods")
-		},
-		func() (anthropic.BetaTool, error) {
-			return app("get_backups", "The app's backups: when they ran and whether they succeeded.", "/backups")
-		},
-		func() (anthropic.BetaTool, error) {
-			return toolrunner.NewBetaToolFromJSONSchema("list_nodes", "The cell's machines: role, readiness, CPU, memory and disk.",
-				func(ctx context.Context, _ none) (anthropic.BetaToolResultBlockParamContentUnion, error) {
-					return call(ctx, http.MethodGet, "/v0/nodes", nil)
-				})
-		},
-		func() (anthropic.BetaTool, error) {
-			return app("get_events", "Recent Kubernetes events in the app's namespace (scheduling, probes, image pulls).", "/events")
-		},
-		func() (anthropic.BetaTool, error) {
-			return toolrunner.NewBetaToolFromJSONSchema("get_logs", "Logs of a container of the app.",
-				func(ctx context.Context, in logsArg) (anthropic.BetaToolResultBlockParamContentUnion, error) {
-					q := url.Values{}
-					for k, v := range map[string]string{"pod": in.Pod, "container": in.Container} {
-						if v != "" {
-							q.Set(k, v)
-						}
-					}
-					if in.Previous {
-						q.Set("previous", "true")
-					}
-					if in.Tail > 0 {
-						q.Set("tail", strconv.Itoa(in.Tail))
-					}
-					path := "/v0/apps/" + url.PathEscape(in.App) + "/logs"
-					if len(q) > 0 {
-						path += "?" + q.Encode()
-					}
-					return call(ctx, http.MethodGet, path, nil)
-				})
-		},
-		func() (anthropic.BetaTool, error) {
-			return toolrunner.NewBetaToolFromJSONSchema("list_changes", "The app's change log: proposed and finished changes with their outcome.",
-				func(ctx context.Context, in appArg) (anthropic.BetaToolResultBlockParamContentUnion, error) {
-					return call(ctx, http.MethodGet, "/v0/changes?app="+url.QueryEscape(in.App), nil)
-				})
-		},
-		func() (anthropic.BetaTool, error) {
-			return toolrunner.NewBetaToolFromJSONSchema("list_catalog", "The catalog of maintained app manifests.",
-				func(ctx context.Context, _ none) (anthropic.BetaToolResultBlockParamContentUnion, error) {
-					return call(ctx, http.MethodGet, "/v0/catalog", nil)
-				})
-		},
-		func() (anthropic.BetaTool, error) {
-			return toolrunner.NewBetaToolFromJSONSchema("get_catalog_entry", "A catalog entry with its full manifest, as an example of a working manifest.",
-				func(ctx context.Context, in catalogArg) (anthropic.BetaToolResultBlockParamContentUnion, error) {
-					return call(ctx, http.MethodGet, "/v0/catalog/"+url.PathEscape(in.Name), nil)
-				})
-		},
-		func() (anthropic.BetaTool, error) {
-			return toolrunner.NewBetaToolFromJSONSchema("propose_update",
-				"Propose a change to an app's spec. Nothing changes until an admin approves it; the platform backs the app up first and rolls back if the app is not healthy afterwards.",
-				func(ctx context.Context, in updateArg) (anthropic.BetaToolResultBlockParamContentUnion, error) {
-					return call(ctx, http.MethodPatch, "/v0/apps/"+url.PathEscape(in.App), map[string]any{"patch": in.Patch, "reason": in.Reason})
-				})
-		},
-		func() (anthropic.BetaTool, error) {
-			return toolrunner.NewBetaToolFromJSONSchema("propose_install",
-				"Propose installing a new app from a manifest. The API checks the manifest first and answers with the errors it finds; nothing is installed until an admin approves.",
-				func(ctx context.Context, in installArg) (anthropic.BetaToolResultBlockParamContentUnion, error) {
-					return call(ctx, http.MethodPost, "/v0/apps", map[string]any{"name": in.App, "manifest": in.Manifest, "reason": in.Reason})
-				})
-		},
-	} {
-		t, err := mk()
-		if err != nil {
-			return nil, err
+	paths, _ := doc["paths"].(map[string]any)
+	var ops []operation
+	for path, item := range paths {
+		item, _ := item.(map[string]any)
+		for _, method := range []string{"get", "post", "put", "patch", "delete"} {
+			o, ok := item[method].(map[string]any)
+			if !ok || o["x-agent"] != true {
+				continue
+			}
+			op, err := parseOperation(doc, strings.ToUpper(method), path, item, o)
+			if err != nil {
+				return nil, fmt.Errorf("openapi.yaml: %s %s: %w", method, path, err)
+			}
+			ops = append(ops, op)
 		}
-		tools = append(tools, t)
+	}
+	slices.SortFunc(ops, func(a, b operation) int { return strings.Compare(a.Name, b.Name) })
+	return ops, nil
+}
+
+func parseOperation(doc map[string]any, method, path string, item, o map[string]any) (operation, error) {
+	op := operation{Method: method, Path: path, in: map[string]string{}}
+	op.Name, _ = o["operationId"].(string)
+	op.Description, _ = o["description"].(string)
+	if op.Description = strings.TrimSpace(op.Description); op.Name == "" || op.Description == "" {
+		return op, errors.New("a tool needs an operationId and a description")
+	}
+	props, required := map[string]any{}, []string{}
+	add := func(name, in string, schema any, req bool) error {
+		if _, dup := op.in[name]; dup || name == "" {
+			return fmt.Errorf("argument %q is empty or twice", name)
+		}
+		op.in[name], props[name] = in, schema
+		if req {
+			required = append(required, name)
+		}
+		return nil
+	}
+	params, _ := item["parameters"].([]any)
+	more, _ := o["parameters"].([]any)
+	for _, p := range append(slices.Clone(params), more...) {
+		p, err := inline(doc, p, 0)
+		if err != nil {
+			return op, err
+		}
+		pm, _ := p.(map[string]any)
+		name, _ := pm["name"].(string)
+		in, _ := pm["in"].(string)
+		if in != "path" && in != "query" {
+			return op, fmt.Errorf("parameter %q in %q: only path and query become arguments", name, in)
+		}
+		schema, _ := pm["schema"].(map[string]any)
+		if schema == nil {
+			schema = map[string]any{}
+		}
+		if d, ok := pm["description"].(string); ok {
+			schema["description"] = d
+		}
+		req, _ := pm["required"].(bool)
+		if err := add(name, in, schema, in == "path" || req); err != nil {
+			return op, err
+		}
+	}
+	if rb, ok := o["requestBody"]; ok {
+		rb, err := inline(doc, rb, 0)
+		if err != nil {
+			return op, err
+		}
+		rbm, _ := rb.(map[string]any)
+		content, _ := rbm["content"].(map[string]any)
+		js, _ := content["application/json"].(map[string]any)
+		schema, _ := js["schema"].(map[string]any)
+		if schema == nil {
+			return op, errors.New("a request body other than JSON")
+		}
+		op.body = true
+		bodyProps, _ := schema["properties"].(map[string]any)
+		bodyReq, _ := schema["required"].([]any)
+		for name, s := range bodyProps {
+			if err := add(name, "body", s, slices.Contains(bodyReq, any(name))); err != nil {
+				return op, err
+			}
+		}
+	}
+	slices.Sort(required)
+	op.Params = map[string]any{"type": "object", "properties": props, "additionalProperties": false}
+	if len(required) > 0 {
+		op.Params["required"] = required
+	}
+	return op, nil
+}
+
+// inline resolves every $ref against doc and drops what JSON Schema does
+// not know (nullable, x- extensions): the model gets one schema per tool.
+func inline(doc map[string]any, v any, depth int) (any, error) {
+	if depth > 64 {
+		return nil, errors.New("schema nested too deep (a $ref cycle?)")
+	}
+	switch v := v.(type) {
+	case map[string]any:
+		if ref, ok := v["$ref"].(string); ok {
+			if !strings.HasPrefix(ref, "#/") {
+				return nil, fmt.Errorf("$ref %s: only references inside the document", ref)
+			}
+			var target any = doc
+			for key := range strings.SplitSeq(ref[2:], "/") {
+				m, _ := target.(map[string]any)
+				if target = m[key]; target == nil {
+					return nil, fmt.Errorf("$ref %s not found", ref)
+				}
+			}
+			return inline(doc, target, depth+1)
+		}
+		out := make(map[string]any, len(v))
+		for k, x := range v {
+			if k == "nullable" || strings.HasPrefix(k, "x-") {
+				continue
+			}
+			x, err := inline(doc, x, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			out[k] = x
+		}
+		return out, nil
+	case []any:
+		out := make([]any, len(v))
+		for i, x := range v {
+			x, err := inline(doc, x, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = x
+		}
+		return out, nil
+	}
+	return v, nil
+}
+
+// request turns the arguments of a call into the API's path and body.
+func (op operation) request(args json.RawMessage) (string, any, error) {
+	var in map[string]json.RawMessage
+	if len(bytes.TrimSpace(args)) > 0 { // some models send no arguments at all
+		if err := json.Unmarshal(args, &in); err != nil {
+			return "", nil, fmt.Errorf("arguments: %w", err)
+		}
+	}
+	path, query, body := op.Path, url.Values{}, map[string]json.RawMessage{}
+	for name, raw := range in {
+		switch op.in[name] {
+		case "body":
+			body[name] = raw
+		case "query":
+			if string(raw) == "null" {
+				continue
+			}
+			var s string
+			if json.Unmarshal(raw, &s) != nil {
+				s = string(raw) // a number or a boolean as the model wrote it
+			}
+			query.Set(name, s)
+		case "path":
+		default:
+			return "", nil, fmt.Errorf("unknown argument %q; %s takes %s", name, op.Name, strings.Join(slices.Sorted(maps.Keys(op.in)), ", "))
+		}
+	}
+	for name, where := range op.in {
+		if where != "path" {
+			continue
+		}
+		// An empty name would call another operation (/v0/apps/ lists
+		// apps), and so would . or .., which the router cleans away.
+		var s string
+		if err := json.Unmarshal(in[name], &s); err != nil || s == "" || s == "." || s == ".." {
+			return "", nil, fmt.Errorf("argument %q: a name is required", name)
+		}
+		path = strings.ReplaceAll(path, "{"+name+"}", url.PathEscape(s))
+	}
+	if len(query) > 0 {
+		path += "?" + query.Encode()
+	}
+	if !op.body {
+		return path, nil, nil
+	}
+	return path, body, nil
+}
+
+// tools are the agent's tools in task, the ones its Agent names (* for
+// all, E-97): each is one call of the platform API, which records it as a
+// step of the task and decides whether the agent may make it.
+func (a *Agent) tools(task string, names []string) ([]tool, error) {
+	ops, err := operations()
+	if err != nil {
+		return nil, err
+	}
+	for _, n := range names {
+		if n != "*" && !slices.ContainsFunc(ops, func(op operation) bool { return op.Name == n }) {
+			return nil, fmt.Errorf("the agent's Agent names %s, which is no tool of the API", n)
+		}
+	}
+	var tools []tool
+	for _, op := range ops {
+		if !slices.Contains(names, "*") && !slices.Contains(names, op.Name) {
+			continue
+		}
+		tools = append(tools, tool{Name: op.Name, Description: op.Description, Params: op.Params,
+			Run: func(ctx context.Context, args json.RawMessage) (string, error) {
+				path, body, err := op.request(args)
+				if err != nil {
+					return "", err
+				}
+				return a.call(ctx, op.Method, path, task, body)
+			}})
 	}
 	return tools, nil
+}
+
+// call makes one API call in task and returns its body for the model.
+func (a *Agent) call(ctx context.Context, method, path, task string, in any) (string, error) {
+	code, body, err := a.API.Do(ctx, method, path, task, in)
+	if err != nil {
+		return "", err
+	}
+	text := string(body)
+	if len(text) > maxResult {
+		text = text[len(text)-maxResult:] // the end of logs and lists matters most
+	}
+	if code >= 300 {
+		return "", fmt.Errorf("HTTP %d: %s", code, text)
+	}
+	return text, nil
 }

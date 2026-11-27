@@ -35,7 +35,7 @@ var taskFree = map[string]bool{
 type taskKey struct{}
 
 // taskRef is the task an agent's request works in.
-type taskRef struct{ Name, App string }
+type taskRef struct{ Name, Kind, App string }
 
 // taskOf is the task the request's agent works in (zero for people).
 func taskOf(ctx context.Context) taskRef {
@@ -62,7 +62,7 @@ func (s *Server) inTask(r *http.Request, c *Caller) (context.Context, error) {
 		if err != nil {
 			return err
 		}
-		ref = taskRef{Name: t.Name, App: t.Spec.App}
+		ref = taskRef{Name: t.Name, Kind: t.Spec.Kind, App: t.Spec.App}
 		if t.Status.Phase != cellv1.RunRunning || t.Status.Assignee != c.Username {
 			return errorf(http.StatusConflict, "task %s is not running for you (phase %s, assignee %q)", name, t.Status.Phase, t.Status.Assignee)
 		}
@@ -126,7 +126,14 @@ func viewTask(t *cellv1.Task) taskView {
 	return v
 }
 
-func (s *Server) listTasks(w http.ResponseWriter, r *http.Request, _ *Caller) error {
+// agentSees tells whether the caller may see task: everyone but an agent,
+// and an agent the tasks it takes and the ones it holds.
+func agentSees(ctx context.Context, c *Caller, t *cellv1.Task) bool {
+	a := agentOf(ctx)
+	return a == nil || t.Status.Assignee == c.Username || a.Spec.Takes(t.Spec.Kind, t.Spec.App)
+}
+
+func (s *Server) listTasks(w http.ResponseWriter, r *http.Request, c *Caller) error {
 	var list cellv1.TaskList
 	if err := s.Kube.List(r.Context(), &list); err != nil {
 		return err
@@ -135,7 +142,7 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request, _ *Caller) er
 	out := []taskView{}
 	for i := range list.Items {
 		v := viewTask(&list.Items[i])
-		if (q.Get("app") == "" || v.App == q.Get("app")) && (q.Get("phase") == "" || v.Phase == q.Get("phase")) {
+		if (q.Get("app") == "" || v.App == q.Get("app")) && (q.Get("phase") == "" || v.Phase == q.Get("phase")) && agentSees(r.Context(), c, &list.Items[i]) {
 			out = append(out, v)
 		}
 	}
@@ -144,10 +151,13 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request, _ *Caller) er
 	return nil
 }
 
-func (s *Server) getTask(w http.ResponseWriter, r *http.Request, _ *Caller) error {
+func (s *Server) getTask(w http.ResponseWriter, r *http.Request, c *Caller) error {
 	t, err := s.task(r.Context(), r.PathValue("name"))
 	if err != nil {
 		return err
+	}
+	if !agentSees(r.Context(), c, t) {
+		return mayTake(agentOf(r.Context()), t.Spec.Kind, t.Spec.App)
 	}
 	v := viewTask(t)
 	var changes cellv1.ChangeRequestList
@@ -236,6 +246,9 @@ func (s *Server) claimTask(w http.ResponseWriter, r *http.Request, c *Caller) er
 	}
 	if t.Status.Phase != "" && t.Status.Phase != cellv1.RunPending {
 		return errorf(http.StatusConflict, "task %s is %s", t.Name, t.Status.Phase)
+	}
+	if err := mayTake(agentOf(r.Context()), t.Spec.Kind, t.Spec.App); err != nil {
+		return err
 	}
 	now := metav1.NewTime(s.now())
 	t.Status.Phase, t.Status.Assignee, t.Status.StartedAt = cellv1.RunRunning, c.Username, &now

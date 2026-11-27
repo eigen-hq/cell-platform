@@ -87,7 +87,7 @@
       usageFailed = e instanceof Error ? e.message : String(e);
     }
   }
-  const accountName = (a: string) => (a === "cell-agent" ? "Platform agent" : a.replace(/^app-/, ""));
+  const accountName = (a: string) => (a.startsWith("cell-agent-") ? `${a.slice("cell-agent-".length)} agent` : a.replace(/^app-/, ""));
   const tokens = (n: number) => n.toLocaleString("en");
   let usageMax = $derived(Math.max(1, ...(usage ?? []).map((a) => a.inputTokens + a.outputTokens)));
 

@@ -17,8 +17,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/anthropic-sdk-go/v2"
-	"github.com/anthropics/anthropic-sdk-go/v2/option"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -40,6 +38,9 @@ type cell struct {
 	agent *Agent
 }
 
+// opsAccount is the account of the cell's agent, Agent ops (E-97).
+const opsAccount = "cell-agent-ops.ops-1"
+
 func newCell(t *testing.T, script agenttest.Script, objs ...client.Object) *cell {
 	t.Helper()
 	scheme := runtime.NewScheme()
@@ -51,6 +52,11 @@ func newCell(t *testing.T, script agenttest.Script, objs ...client.Object) *cell
 			pods = append(pods, p)
 		}
 	}
+	// The agent's Agent, unless the test brings its own.
+	if !slices.ContainsFunc(objs, func(o client.Object) bool { _, ok := o.(*cellv1.Agent); return ok }) {
+		objs = append(objs, &cellv1.Agent{ObjectMeta: metav1.ObjectMeta{Name: "ops", UID: "ops-1"},
+			Spec: cellv1.AgentSpec{Kinds: []string{"diagnose", "package", "ask"}, Apps: []string{"*"}, Tools: []string{"*"}}})
+	}
 	// The operator tells that a provider is set.
 	objs = append(objs, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: "cell-system", Name: "cell-models-status"}, Data: map[string]string{"models.json": `{"configured":true}`}})
 	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).
@@ -61,13 +67,13 @@ func newCell(t *testing.T, script agenttest.Script, objs ...client.Object) *cell
 			if token != "agent-token" {
 				return nil, errors.New("bad token")
 			}
-			return &cellapi.Caller{Username: "cell-agent", Role: cellapi.RoleAgent, Groups: []string{"cell-agents"}}, nil
+			return &cellapi.Caller{Username: opsAccount, Role: cellapi.RoleAgent, Groups: []string{"cell-agents"}}, nil
 		},
 	}).Handler())
 	t.Cleanup(api.Close)
 	identity := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.FormValue("grant_type") != "client_credentials" || r.FormValue("client_id") != "cell-api" ||
-			r.FormValue("username") != "cell-agent" || r.FormValue("password") != "app-password" {
+			r.FormValue("username") != opsAccount || r.FormValue("password") != "app-password" {
 			http.Error(w, `{"error":"invalid_grant"}`, http.StatusBadRequest)
 			return
 		}
@@ -81,10 +87,10 @@ func newCell(t *testing.T, script agenttest.Script, objs ...client.Object) *cell
 			t.Errorf("model: %v", err)
 		}
 	})
-	m := anthropic.NewClient(option.WithAPIKey("test"), option.WithBaseURL(model.URL), option.WithMaxRetries(0))
 	return &cell{kube: kube, agent: &Agent{
-		API:   &API{URL: api.URL, TokenURL: identity.URL, ClientID: "cell-api", Username: "cell-agent", Password: "app-password", HTTP: http.DefaultClient},
-		Model: &m, ModelID: "scripted", Log: slog.New(slog.DiscardHandler), Poll: time.Second,
+		API:   &API{URL: api.URL, TokenURL: identity.URL, ClientID: "cell-api", Username: opsAccount, Password: "app-password", HTTP: http.DefaultClient},
+		Model: &Model{URL: model.URL, Key: "test", Name: "scripted", HTTP: http.DefaultClient},
+		Log:   slog.New(slog.DiscardHandler), Poll: time.Second,
 	}}
 }
 
@@ -138,17 +144,17 @@ func TestDiagnose(t *testing.T) {
 			if err := want(strings.Contains(conv.Task, "board-diagnose-1") && strings.Contains(conv.Task, "connection refused"), "brief %q", conv.Task); err != nil {
 				return agenttest.Turn{}, err
 			}
-			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "get_app", Input: map[string]any{"app": "board"}}, {Tool: "get_pods", Input: map[string]any{"app": "board"}}}}, nil
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "getApp", Input: map[string]any{"name": "board"}}, {Tool: "listPods", Input: map[string]any{"name": "board"}}}}, nil
 		case 1:
 			if err := want(len(conv.Results) == 2 && strings.Contains(conv.Results[0], "NeedsAttention") && strings.Contains(conv.Results[1], "board-1"), "results %q", conv.Results); err != nil {
 				return agenttest.Turn{}, err
 			}
-			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "get_logs", Input: map[string]any{"app": "board", "tail": 50}}}}, nil
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "appLogs", Input: map[string]any{"name": "board", "tail": 50}}}}, nil
 		case 2:
 			if err := want(slices.Equal(conv.Results, []string{"fake logs"}), "logs %q", conv.Results); err != nil {
 				return agenttest.Turn{}, err
 			}
-			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "propose_update", Input: map[string]any{"app": "board",
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "updateApp", Input: map[string]any{"name": "board",
 				"patch": map[string]any{"source": map[string]any{"image": map[string]any{"env": nil}}}, "reason": "PORT=8080 moves the app off its port 80"}}}}, nil
 		case 3:
 			var cr struct {
@@ -168,10 +174,13 @@ func TestDiagnose(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, calls := c.task(t, "board-diagnose-1")
-	if got.Status.Phase != cellv1.RunSucceeded || got.Status.Assignee != "cell-agent" || !strings.Contains(got.Status.Result, "Proposed change "+change) {
+	// The two calls of the first turn run side by side.
+	if len(calls) >= 2 {
+		slices.Sort(calls[:2])
+	}
+	if got.Status.Phase != cellv1.RunSucceeded || got.Status.Assignee != opsAccount || !strings.Contains(got.Status.Result, "Proposed change "+change) {
 		t.Errorf("task %+v", got.Status)
 	}
-	slices.Sort(calls[:2]) // the first two ran side by side
 	if want := []string{"GET /v0/apps/board", "GET /v0/apps/board/pods", "GET /v0/apps/board/logs?tail=50", "PATCH /v0/apps/board"}; !slices.Equal(calls, want) {
 		t.Errorf("steps %q, want %q", calls, want)
 	}
@@ -197,7 +206,7 @@ func TestPackage(t *testing.T) {
 			if err := want(strings.Contains(conv.Task, "example/memo:0.25.3"), "brief %q", conv.Task); err != nil {
 				return agenttest.Turn{}, err
 			}
-			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "get_catalog_entry", Input: map[string]any{"name": "whoami"}}}}, nil
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "getCatalogEntry", Input: map[string]any{"name": "whoami"}}}}, nil
 		case 1:
 			if err := want(len(conv.Results) == 1 && strings.Contains(conv.Results[0], "traefik/whoami"), "catalog %q", conv.Results); err != nil {
 				return agenttest.Turn{}, err
@@ -206,12 +215,12 @@ func TestPackage(t *testing.T) {
 			for k, v := range manifest {
 				wrong[k] = v
 			}
-			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "propose_install", Input: map[string]any{"app": "memo", "manifest": wrong, "reason": "from Compose"}}}}, nil
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "installApp", Input: map[string]any{"name": "memo", "manifest": wrong, "reason": "from Compose"}}}}, nil
 		case 2:
 			if err := want(len(conv.Results) == 1 && strings.HasPrefix(conv.Results[0], "ERROR") && strings.Contains(conv.Results[0], "ports"), "refusal %q", conv.Results); err != nil {
 				return agenttest.Turn{}, err
 			}
-			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "propose_install", Input: map[string]any{"app": "memo", "manifest": manifest, "reason": "from Compose"}}}}, nil
+			return agenttest.Turn{Calls: []agenttest.Call{{Tool: "installApp", Input: map[string]any{"name": "memo", "manifest": manifest, "reason": "from Compose"}}}}, nil
 		case 3:
 			return agenttest.Turn{Text: "Packaged memo."}, nil
 		}
@@ -236,12 +245,46 @@ func TestPackage(t *testing.T) {
 	}
 }
 
+// A turn cut at the token limit or by a filter is dropped: none of its calls
+// run, its half answer is not the result, and the model, told so, does it
+// again. A second cut in a row ends the task.
+func TestCutTurn(t *testing.T) {
+	for _, finish := range []string{"length", "content_filter"} {
+		for _, again := range []bool{false, true} {
+			task := &cellv1.Task{ObjectMeta: metav1.ObjectMeta{Name: "board-diagnose-1"},
+				Spec: cellv1.TaskSpec{Kind: "diagnose", App: "board", Requester: cellv1.Requester{Kind: "Operator", Name: "cell-operator"}}}
+			c := newCell(t, func(conv agenttest.Conversation) (agenttest.Turn, error) {
+				if len(conv.Notes) == 0 || again {
+					return agenttest.Turn{Finish: finish, Text: "The cause is", Calls: []agenttest.Call{{Tool: "updateApp",
+						Input: map[string]any{"name": "board", "patch": map[string]any{"version": "2.0"}, "reason": "cut"}}}}, nil
+				}
+				// Turn 0 again: the cut turn did not go back.
+				if err := want(conv.Turn == 0 && len(conv.Notes) == 1 && strings.Contains(conv.Notes[0], "("+finish+")"), "turn %d, notes %q", conv.Turn, conv.Notes); err != nil {
+					return agenttest.Turn{}, err
+				}
+				return agenttest.Turn{Text: "Nothing to change."}, nil
+			}, task)
+			if err := c.agent.Once(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			phase, result := cellv1.RunSucceeded, "Nothing to change."
+			if again {
+				phase, result = cellv1.RunFailed, "stopped before an answer ("+finish+", twice in a row)"
+			}
+			got, calls := c.task(t, "board-diagnose-1")
+			if got.Status.Phase != phase || !strings.HasPrefix(got.Status.Result, result) || len(calls) != 0 || len(c.changes(t)) != 0 {
+				t.Errorf("%s, again %v: task %+v, steps %q", finish, again, got.Status, calls)
+			}
+		}
+	}
+}
+
 // A task the model cannot finish fails with the reason, and a restarted
 // agent ends the tasks it left running.
 func TestFailures(t *testing.T) {
 	stuck := &cellv1.Task{ObjectMeta: metav1.ObjectMeta{Name: "board-diagnose-1"},
 		Spec:   cellv1.TaskSpec{Kind: "diagnose", App: "board", Requester: cellv1.Requester{Kind: "Operator", Name: "cell-operator"}},
-		Status: cellv1.TaskStatus{Phase: cellv1.RunRunning, Assignee: "cell-agent"}}
+		Status: cellv1.TaskStatus{Phase: cellv1.RunRunning, Assignee: opsAccount}}
 	others := stuck.DeepCopy()
 	others.Name, others.Status.Assignee = "board-diagnose-2", "other-agent"
 	pending := stuck.DeepCopy()
@@ -262,7 +305,7 @@ func TestFailures(t *testing.T) {
 	// goes on.
 	// The API fails the first attempt to finish: the agent tries again
 	// instead of leaving the task running.
-	c.agent.Model = ptr(anthropic.NewClient(option.WithAPIKey("test"), option.WithBaseURL("http://127.0.0.1:1"), option.WithMaxRetries(0)))
+	c.agent.Model = &Model{URL: "http://127.0.0.1:1", HTTP: http.DefaultClient}
 	target, err := url.Parse(c.agent.API.URL)
 	if err != nil {
 		t.Fatal(err)
@@ -295,7 +338,7 @@ func TestLargeBacklog(t *testing.T) {
 			Spec: cellv1.TaskSpec{Kind: "package", App: fmt.Sprintf("app%d", i), Input: input, Requester: cellv1.Requester{Kind: "Human", Name: "admin"}}})
 	}
 	c := newCell(t, nil, tasks...)
-	c.agent.Model = ptr(anthropic.NewClient(option.WithAPIKey("test"), option.WithBaseURL("http://127.0.0.1:1"), option.WithMaxRetries(0)))
+	c.agent.Model = &Model{URL: "http://127.0.0.1:1", HTTP: http.DefaultClient}
 	if err := c.agent.Once(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -358,8 +401,6 @@ func TestLostClaim(t *testing.T) {
 	}
 }
 
-func ptr[T any](v T) *T { return &v }
-
 // Without a model provider the agent claims no task: it would only fail.
 func TestNoProvider(t *testing.T) {
 	pending := &cellv1.Task{ObjectMeta: metav1.ObjectMeta{Name: "board-diagnose-1"},
@@ -394,15 +435,14 @@ func TestTokenLimit(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
-		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"rate_limit_error","message":"rate limited"}}`))
+		_, _ = w.Write([]byte(`{"error":{"type":"rate_limit_error","message":"rate limited"}}`))
 	}))
 	t.Cleanup(srv.Close)
-	m := anthropic.NewClient(option.WithAuthToken("test"), option.WithBaseURL(srv.URL), option.WithMiddleware(NoLongRetry))
+	m := &Model{URL: srv.URL, Key: "test", Name: "default", HTTP: http.DefaultClient, Retries: 2}
 	ask := func(h map[string]string) (int32, error) {
 		calls.Store(0)
 		header.Store(h)
-		_, err := m.Messages.New(context.Background(), anthropic.MessageNewParams{Model: "default", MaxTokens: 5,
-			Messages: []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("x"))}})
+		_, _, err := m.complete(context.Background(), []message{{Role: "user", Text: "x"}}, nil)
 		return calls.Load(), err
 	}
 	start := time.Now()

@@ -27,8 +27,15 @@ func TestModelsConfig(t *testing.T) {
 	ctx := context.Background()
 	agentKey := strings.Repeat("a", 64)
 	providerKey := "provider-" + strings.Repeat("x", 8)
-	c := fakeClient(k8s.Scheme(),
-		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: "cell-system", Name: "cell-agent"}, Data: map[string][]byte{"modelKey": []byte(agentKey)}},
+	ops := &cellv1.Agent{ObjectMeta: metav1.ObjectMeta{Name: "ops", UID: "ops-1"}}
+	c := fakeClient(k8s.Scheme(), ops,
+		// Its Secret is still to come: it gets no key yet.
+		&cellv1.Agent{ObjectMeta: metav1.ObjectMeta{Name: "packer"}},
+		// Its Secret is an earlier Agent's of the name: neither gets in.
+		&cellv1.Agent{ObjectMeta: metav1.ObjectMeta{Name: "again", UID: "again-2"}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: "cell-system", Name: "cell-agent-again", OwnerReferences: ownedBy(&cellv1.Agent{ObjectMeta: metav1.ObjectMeta{Name: "again", UID: "again-1"}})},
+			Data: map[string][]byte{"modelKey": []byte(strings.Repeat("o", 64))}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: "cell-system", Name: "cell-agent-ops", OwnerReferences: ownedBy(ops)}, Data: map[string][]byte{"modelKey": []byte(agentKey)}},
 		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: "cell-system", Name: "cell-agent-llm"}, Data: map[string][]byte{"apiKey": []byte(providerKey)}})
 	r := &ModelsReconciler{Client: c}
 	if _, err := r.Reconcile(ctx, ctrl.Request{}); err != nil {
@@ -43,6 +50,7 @@ func TestModelsConfig(t *testing.T) {
 			Models []struct {
 				Name, Provider string
 				Params         map[string]string
+				PromptCaching  *struct{}
 			}
 			Policies struct {
 				APIKey struct {
@@ -66,7 +74,7 @@ func TestModelsConfig(t *testing.T) {
 		t.Error("the agent's key is in the gateway's configuration")
 	}
 	m := conf.LLM.Models
-	if len(m) != 1 || m[0].Name != "*" || m[0].Provider != "anthropic" || m[0].Params["model"] != cell.DefaultModel || m[0].Params["apiKey"] != providerKey {
+	if len(m) != 1 || m[0].Name != "*" || m[0].Provider != "anthropic" || m[0].Params["model"] != cell.DefaultModel || m[0].Params["apiKey"] != providerKey || m[0].PromptCaching == nil {
 		t.Errorf("models %+v", m)
 	}
 	var cm corev1.ConfigMap
@@ -151,7 +159,7 @@ func TestModelsConfig(t *testing.T) {
 	}
 	appSum := sha256.Sum256([]byte(appKey))
 	ks := full.LLM.Policies.APIKey.Keys
-	if len(ks) != 2 || ks[1].KeyHash != "sha256:"+hex.EncodeToString(appSum[:]) || ks[1].Metadata["account"] != "app-wiki" || ks[0].Metadata["account"] != "cell-agent" {
+	if len(ks) != 2 || ks[1].KeyHash != "sha256:"+hex.EncodeToString(appSum[:]) || ks[1].Metadata["account"] != "app-wiki" || ks[0].Metadata["account"] != "cell-agent-ops" {
 		t.Errorf("keys %+v", ks)
 	}
 	rl := full.LLM.Policies.LocalRateLimit
@@ -202,14 +210,20 @@ func TestModelsConfig(t *testing.T) {
 	}
 }
 
+// ownedBy is the owner of what an Agent's reconcile makes.
+func ownedBy(a *cellv1.Agent) []metav1.OwnerReference {
+	return []metav1.OwnerReference{*metav1.NewControllerRef(a, cellv1.GroupVersion.WithKind("Agent"))}
+}
+
 // An app whose namespace has no grant for the operator yet (a held
 // subdomain, say) waits; the other accounts still get their configuration.
 func TestModelsAppWithoutGrant(t *testing.T) {
 	ctx := context.Background()
 	// The operator's real rights answer so (TestRightsStayOutOfOtherNamespaces).
 	forbidden := apierrors.NewForbidden(corev1.Resource("secrets"), "cell-models", nil)
-	base := fakeClient(k8s.Scheme(),
-		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: "cell-system", Name: "cell-agent"}, Data: map[string][]byte{"modelKey": []byte("agent")}},
+	ops := &cellv1.Agent{ObjectMeta: metav1.ObjectMeta{Name: "ops", UID: "ops-1"}}
+	base := fakeClient(k8s.Scheme(), ops,
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: "cell-system", Name: "cell-agent-ops", OwnerReferences: ownedBy(ops)}, Data: map[string][]byte{"modelKey": []byte("agent")}},
 		&cellv1.App{ObjectMeta: metav1.ObjectMeta{Name: "held"}, Spec: cellv1.AppSpec{Needs: cellv1.Needs{Models: true}}},
 		&cellv1.App{ObjectMeta: metav1.ObjectMeta{Name: "wiki"}, Spec: cellv1.AppSpec{Needs: cellv1.Needs{Models: true}}},
 		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: "app-wiki", Name: "cell-models"}, Data: map[string][]byte{"apiKey": []byte("wiki")}})

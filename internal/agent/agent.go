@@ -14,12 +14,9 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
-	"strconv"
 	"strings"
+	"sync"
 	"time"
-
-	"github.com/anthropics/anthropic-sdk-go/v2"
-	"github.com/anthropics/anthropic-sdk-go/v2/option"
 )
 
 //go:embed prompt.md
@@ -30,9 +27,8 @@ type Agent struct {
 	API *API
 	// Model is the model gateway (E-80); nil without a key to it: tasks
 	// then wait for an agent that has one.
-	Model   *anthropic.Client
-	ModelID string
-	Log     *slog.Logger
+	Model *Model
+	Log   *slog.Logger
 	// Poll is how often the agent looks for new tasks.
 	Poll time.Duration
 }
@@ -50,8 +46,11 @@ type task struct {
 
 // Run works on tasks until ctx ends.
 func (a *Agent) Run(ctx context.Context) error {
+	if _, err := operations(); err != nil {
+		return err
+	}
 	if a.Model == nil {
-		a.Log.Warn("no key to the model gateway (Secret cell-agent, key modelKey): tasks wait for an agent that has one")
+		a.Log.Warn("no key to the model gateway (Secret cell-agent-<name>, key modelKey): tasks wait for an agent that has one")
 		<-ctx.Done()
 		return nil
 	}
@@ -176,71 +175,83 @@ func (a *Agent) finish(ctx context.Context, name, result string, failed bool) er
 
 // work lets the model work on a claimed task and returns its answer.
 func (a *Agent) work(ctx context.Context, t task) (string, bool) {
-	tools, err := a.tools(t.Name)
+	// Read for every task: a change to the Agent counts from the next one.
+	var me struct {
+		Agent *struct {
+			Tools        []string `json:"tools"`
+			Instructions string   `json:"instructions"`
+		} `json:"agent"`
+	}
+	if err := a.API.JSON(ctx, http.MethodGet, "/v0/whoami", "", nil, &me); err != nil {
+		return "whoami: " + err.Error(), true
+	}
+	if me.Agent == nil {
+		return "whoami: the API names no Agent for this account", true
+	}
+	tools, err := a.tools(t.Name, me.Agent.Tools)
 	if err != nil {
-		return "agent: " + err.Error(), true
+		return "tools: " + err.Error(), true
 	}
-	runner := a.Model.Beta.Messages.NewToolRunner(tools, anthropic.BetaToolRunnerParams{
-		BetaMessageNewParams: anthropic.BetaMessageNewParams{
-			Model:     a.ModelID,
-			MaxTokens: 16000,
-			System:    []anthropic.BetaTextBlockParam{{Text: systemPrompt}},
-			Messages:  []anthropic.BetaMessageParam{anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(brief(t)))},
-			// Every turn sends the whole conversation; the cache keeps that cheap.
-			CacheControl: anthropic.NewBetaCacheControlEphemeralParam(),
-			OutputConfig: anthropic.BetaOutputConfigParam{Effort: anthropic.BetaOutputConfigEffortHigh},
-		},
-		// ponytail: a fixed turn limit, a token budget per task if costs need a cap
-		MaxIterations: 40,
-		DisableThread: true,
-	})
-	msg, err := runner.RunToCompletion(ctx)
-	if err != nil {
-		return "model: " + modelError(err), true
+	prompt := systemPrompt
+	if me.Agent.Instructions != "" {
+		prompt = strings.TrimRight(prompt, "\n") + "\n\n## Instructions of this cell\n\n" + me.Agent.Instructions + "\n"
 	}
-	var text []string
-	for _, b := range msg.Content {
-		if tb, ok := b.AsAny().(anthropic.BetaTextBlock); ok {
-			text = append(text, tb.Text)
+	msgs := []message{{Role: "system", Text: prompt}, {Role: "user", Text: brief(t)}}
+	cuts := 0
+	// ponytail: a fixed turn limit, a token budget per task if costs need a cap
+	for range 40 {
+		reply, stop, err := a.Model.complete(ctx, msgs, tools)
+		if err != nil {
+			return "model: " + modelError(err), true
 		}
-	}
-	answer := strings.TrimSpace(strings.Join(text, "\n"))
-	if msg.StopReason != anthropic.BetaStopReasonEndTurn {
-		return fmt.Sprintf("stopped before an answer (%s). %s", msg.StopReason, answer), true
-	}
-	return answer, false
-}
-
-// NoLongRetry keeps the model client from sleeping on the cell's token
-// limit: the gateway's 429 asks to wait until the hour refills (E-81), and
-// the SDK would hold the task that long. A short wait, such as one the
-// provider asks for, is still retried.
-func NoLongRetry(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
-	res, err := next(req)
-	if err == nil && res.StatusCode == http.StatusTooManyRequests {
-		if s, perr := strconv.Atoi(res.Header.Get("Retry-After")); perr == nil && s > 60 {
-			res.Header.Set("X-Should-Retry", "false")
-		}
-	}
-	return res, err
-}
-
-// modelError explains the cell's token limit: the gateway's 429 with none
-// of its tokens left. A provider's 429 carries the gateway's headers too,
-// with tokens left; it and any other error stay as the SDK words them.
-func modelError(err error) string {
-	var e *anthropic.Error
-	if errors.As(err, &e) && e.StatusCode == http.StatusTooManyRequests && e.Response != nil {
-		h := e.Response.Header
-		if limit := h.Get("X-Ratelimit-Limit"); limit != "" && h.Get("X-Ratelimit-Remaining") == "0" {
-			wait := "later"
-			if s, perr := strconv.Atoi(h.Get("X-Ratelimit-Reset")); perr == nil {
-				wait = fmt.Sprintf("in %d minutes", (s+59)/60)
+		answer := strings.TrimSpace(reply.Text)
+		// A turn cut at the token limit or by a filter may hold half a call,
+		// half an answer, or reasoning without its signature: it is dropped
+		// and the model, told so, does it again. A second cut in a row would
+		// likely repeat. Calls on a turn that ended as "stop" are whole; some
+		// OpenAI-compatible servers end every turn so.
+		if stop != "stop" && (stop != "tool_calls" || len(reply.Calls) == 0) {
+			if cuts++; cuts == 2 {
+				return fmt.Sprintf("stopped before an answer (%s, twice in a row). %s", stop, answer), true
 			}
-			return fmt.Sprintf("the cell's limit of %s tokens per hour is used up; ask again %s, or raise the limit under Organization, Models", limit, wait)
+			msgs = append(msgs, message{Role: "user", Text: fmt.Sprintf(cutNote, stop)})
+			continue
+		}
+		cuts = 0
+		msgs = append(msgs, reply)
+		if len(reply.Calls) == 0 {
+			return answer, false
+		}
+		// The calls of one turn are independent: the model made them before
+		// it saw any result. Their results go back in the order of the calls.
+		results := make([]string, len(reply.Calls))
+		var wg sync.WaitGroup
+		for i, c := range reply.Calls {
+			wg.Go(func() { results[i] = run(ctx, tools, c) })
+		}
+		wg.Wait()
+		for i, c := range reply.Calls {
+			msgs = append(msgs, message{Role: "tool", CallID: c.ID, Text: results[i]})
 		}
 	}
-	return err.Error()
+	return "stopped before an answer (40 model calls)", true
+}
+
+// cutNote tells the model that its last turn was cut.
+const cutNote = "Your last turn was cut off (%s) and dropped: none of its tool calls ran and its text is lost. Do it again in smaller steps."
+
+// run runs one tool call. A failure goes back to the model as the result,
+// marked "ERROR ", so it can correct itself.
+func run(ctx context.Context, tools []tool, c toolCall) string {
+	i := slices.IndexFunc(tools, func(t tool) bool { return t.Name == c.Name })
+	if i < 0 {
+		return "ERROR no tool " + c.Name
+	}
+	out, err := tools[i].Run(ctx, c.Args)
+	if err != nil {
+		return "ERROR " + err.Error()
+	}
+	return out
 }
 
 // brief is the task as the model reads it.

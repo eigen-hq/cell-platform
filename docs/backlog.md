@@ -33,6 +33,7 @@ What the console shows comes from the API. Without an endpoint there is no UI, n
 | Live events | running (overview) | |
 | Light and dark tone | running | |
 | First setup of a new cell | open | |
+| Platform database: one Postgres (`cell-db`) for records that are not desired state (task conversations, model usage, later memory and the context index); only the API reaches it, except own apps writing to the context index; backed up like an app's database, restored by `make dr-test`; after a restore, conversations whose header is gone come back read-only and no run resumes, and the test proves that no finished change runs again; today's tasks move in once | open | |
 
 ### Approvals
 
@@ -43,7 +44,9 @@ What the console shows comes from the API. Without an endpoint there is no UI, n
 | See before approval which data and permissions an app gets | open | Data access per app |
 | Improve changes, preview, undo with one call | open | |
 | Four-eyes principle | open | O-12 |
-| Approval policy (what may run automatically) | open | |
+| Checks on a change: a change names the checks that prove it worked (from a fixed catalog with parameters, each with its data source: healthy, processor or memory below or above a value and no restarts first, response time with the probes, a log line gone once logs are kept), editable before approval; a result is passed, failed or inconclusive, and inconclusive never counts as passed; each kind of change says which rollback it has, and data a rollback would lose is shown before approval; the operator runs the checks in a verify window (rollback where the kind has one) and a watch window (task reopens, IT is warned; a change without a task gets a diagnosis task), keeps their state across restarts, and writes a receipt with before and after | open | Metrics, availability and response times per app |
+| Try on a copy: before it proposes a risky change, an agent applies it to a restored copy of the app and runs the checks there | open | Restore as a copy, checks on a change |
+| Approval policy: what the platform can undo applies itself, a person decides the rest (E-95) | decided, open | Autonomy levels |
 | Update policy | open | O-09 |
 | Roles in the console: managers approve for their department, auditors read only | open | |
 
@@ -83,7 +86,10 @@ What is wanted and tried out happens in the office UI; the platform builds, oper
 | Diagnosis of an app: pods, logs, events | running | |
 | Diagnosis by the ops agent | running | |
 | Metrics: CPU, RAM, disk per app and cell, history | CPU and memory per container and machine, now and over 1 h, 24 h or 7 d, running (E-87); disk history open | Metrics component |
-| Availability and response times per app | open | |
+| Availability and response times per app: two probes per app (blackbox_exporter, read by the collector), one through the public address for what people reach, the login included, and one inside the cell straight to the app's service for the app itself; requests, errors and durations per app from the ingress | open | Metrics |
+| Action record: every action in the cell (changes, restores, restarts, rollbacks, machines joining or leaving, cell settings), by people, agents or the operator, with actor, start and end, targets, what it affected, outcome and task; in the platform database | open | Platform database |
+| Impact of every change: every action record (by people, agents or the operator) is a marker on every chart it touches; each shows the key figures of what it affected 1 hour, 1 day and 1 week before and after, with the other actions in the same window; computed by the API, no model | open | Action record, metrics, availability and response times per app |
+| Trends: what shifted in the cell over a period, next to the changes around it | open | Impact of every change |
 | Map: wiring, traffic, outbound connections, agents | open | Metrics |
 | Findings with an agent action (e.g. unused or duplicate apps) | open | Usage numbers |
 | Warnings and notifications to IT | built: a mail to the admins when an app needs attention (E-82); other events and channels open | System mail |
@@ -146,15 +152,50 @@ What is wanted and tried out happens in the office UI; the platform builds, oper
 
 ### Agents
 
+How people work with agents is in `agents.md`, the design in `architecture.md` (Agent harness), the reasons in E-88 to E-90. The tables are in dependency order. Each feature counts as running only with its check: the scripted-model tests (a fake of the model API) for everything around the model, `make e2e` for the flow through the API, Playwright for the console.
+
+#### Harness and conversation
+
 | Feature | Status | Depends on |
 |---|---|---|
 | Agent tasks with all steps | running | |
 | Free-form tasks for the ops agent from the console (ask box on Home and per app, E-85), acting through the API, with approval | running (asks about the cell verified on the test cell); credentials and cell-level changes open (O-32) | |
-| Agents as accounts with permissions per app | open | |
-| Autonomy levels | open | |
+| Neutral model API: the agent's own lean loop and a thin client for one open, stateless model API through the model gateway; no provider SDK in agent code (anthropic-sdk-go goes). Same behaviour as today: scenarios A and B and the agent tests pass against a scripted fake of the new API. Wire API Chat Completions (E-94). First check on the test cell: the gateway's Chat Completions route with tool calls and reasoning against an Anthropic and an OpenAI-compatible provider | built, fake-tested; check on the test cell open | Model gateway |
+| Conversations: a task holds turns of typed items; follow-ups on any task, also a finished one; the agent asks back and the task waits for you; several tasks at once, up to a limit per agent; resume after a restart without acting twice (one owner per run, an idempotency key on every tool call, catch-up before events; checked by scripted crash tests); a token budget per model, with *limit reached* when a task outgrows it; stop, also of child tasks; every step keeps an excerpt of its response, without the cap of 200 | open | Neutral model API, platform database |
+| Live progress: run, step, tool call, text, stage and waiting-for-input on the event stream; the console and the agent stop polling; task content only on the task's own stream, `GET /v0/events` says only that a task changed; the model client streams | open | Conversations |
+| Task thread in the console: reply box, *Waiting for you* with the agent's question, stop | open | Conversations, live progress |
+| Memory across tasks: what agents learned per app and about the cell, shown to admins, who can correct or delete it | open | Conversations |
+
+#### Answers
+
+| Feature | Status | Depends on |
+|---|---|---|
+| Structured answers: a turn ends in `answer` or `ask`; Understood, Causes (confirmed, ruled out, suspected, each with its evidence steps), Options (change, risk and reversibility from the API, effort, checks that define done, a recommendation with its reason), Receipt; the options of one answer exclude each other and an approval names the revision it saw; the figures a claim rests on are kept with the answer; the API rejects evidence that is not a step of the task and marks claims without evidence | open | Conversations |
+| Credentials and cell-level asks: the agent asks for a credential through a question the API issues and binds to its Secret; the value goes straight there, never into the transcript, events or logs; cell-level proposals (backup target, mail, models) as changes | open | Structured answers, O-32 |
+| Task page with stages (Understood, Causes, Options, Approval, Apply, Verify, Watch, Done) and depth (Summary, Reasoning, Evidence, Raw) | open | Structured answers |
+| Answer blocks: an answer shows the console's own components (state, chart with change markers, log excerpt, diff, checks); a block names an allowed reading operation of the API with checked parameters, and the console loads the numbers with the viewer's rights; a block behind a claim has a fixed window, others are marked live | open | Structured answers, impact of every change |
+| Act on an answer: *Correct me* on what the agent understood, *Ask about this* on any block, step or chart | open | Task thread in the console, task page with stages and depth, answer blocks |
+| The agent follows its change: a verify or watch result wakes the task; the agent writes the receipt or proposes the next step | open | Structured answers, checks on a change |
+
+#### Tools and agents
+
+| Feature | Status | Depends on |
+|---|---|---|
 | Tool gateway for all apps | API running | O-18, O-19, O-20 |
-| Tools per agent: each agent gets the MCP tools of the apps it may use, changing with apps and permissions | open | Tool gateway |
-| Context index: documents, tickets, people and their references across all apps, in the platform's database and storage; own apps write directly, third-party apps are indexed | open | Data access per app |
+| Tools from the API contract: every operation in `api/openapi.yaml` marked for agents is a tool with its description and schema; one catalog for the loop and for MCP; replaces the 12 hand-written tools | running for the loop (E-96); MCP with Interop | Neutral model API |
+| Agents as accounts with permissions per app: an `Agent` resource with its own account, instructions, tools, apps, model and budget; Ops and Packer become two of them; an agent can hand part of a task to another (a child task, with at most the rights and the remaining budget of its parent, nested to a fixed depth); every call in a task has only the rights that both the agent and the requester have | API running for accounts, kinds, apps, tools and instructions (E-97); open: model and budget per agent, child tasks, requester rights, console screen | Tools from the API contract |
+| Tools per agent: each agent gets the MCP tools of the apps it may use, changing with apps and permissions; calls go through the API, which records them | open | Tool gateway, agents as accounts |
+| Autonomy levels: agents apply changes the operator can undo themselves, with snapshot, checks and automatic rollback; a person decides deleting data or backups, uninstalling, restoring over the current state, unreviewed manifests, patches to source, needs or subdomain, spend, anything outside the cell and every widening of rights (E-95, replaces A-10); admins tighten per agent and kind of change | open | Checks on a change, agents as accounts |
+| Context index: documents, tickets, people and their references across all apps, in the platform's database and storage; own apps write directly, third-party apps are indexed | open | Data access per app, platform database |
+| Evals with real models: scenarios with a score per model and prompt | deliberately not now (E-89) | |
+
+#### Other assistants and agents
+
+| Feature | Status | Depends on |
+|---|---|---|
+| Your own assistant over MCP: platform tools and task tools (open, reply, read the answer) at `mcp.<domain>/mcp`; Claude and other MCP clients sign in through the cell's login (OAuth with refresh tokens); the person's token reaches the API, which accepts it only on the routes for assistants, records person and assistant, and refuses approving; checked with a real connector that registers, signs in and refreshes its token | open | Tools from the API contract, conversations |
+| Agent to agent (A2A): an agent card per agent of the cell; an adapter in the API maps a task of the cell to an A2A context and each run of the agent to an A2A task; a follow-up is a new A2A task in the same context, later results go out as push notifications; agents call outside agents an admin registered | open | Agents as accounts, conversations |
+| Outside MCP servers for agents: an admin registers an MCP server outside the cell, its credential in a Secret; agents allowed to use it get its tools through the API; a tool an admin has not marked read-only is a proposal that needs approval and that the cell cannot undo | open | Tools per agent |
 
 ### Models
 
@@ -162,11 +203,14 @@ A core part of the platform, not an add-on (E-78): agents and apps reach models 
 
 | Feature | Status | Depends on |
 |---|---|---|
-| Model gateway: one open model API in the cell, any provider or own model behind it; no agent code bound to one provider's SDK | built (E-80); the agent still uses the Anthropic SDK against the gateway | O-30 |
+| Model gateway: one open model API in the cell, any provider or own model behind it; no agent code bound to one provider's SDK | built (E-80); the agent speaks Chat Completions to it (E-94) | |
 | Providers and keys in the console and the API (the customer's own keys), not only at install (`CELL_LLM_API_KEY`) | built (E-80) | Model gateway |
-| Model per task: which model an agent uses, fallback to another provider | open | Model gateway |
-| Usage and costs, budget and limits per agent, app or department | built: tokens per account and one hourly token limit for each (E-81); budgets in money, per department and durable usage open (O-31) | Model gateway |
+| Model per task: several providers in the gateway at once (today one entry for all models), which model an agent uses, fallback to another provider | open | Neutral model API, providers and keys |
+| Usage and costs, budget and limits per agent, app or department | built: tokens per account and one hourly token limit for each (E-81); budgets in money, per department and durable usage open (O-31) | Model gateway, platform database |
 | Run open models in the cell | open | Model gateway |
+| Images and files in a task: attachments as parts of a message, shown in the thread and sent to models that read them | open | Conversations |
+| Speech in and out: a spoken request becomes text, an answer can be read aloud; through the gateway's audio routes or a speech model in the cell | open | Images and files in a task |
+| Live voice: speech to speech on its own realtime connection; the transcript lands in the task | open | Speech in and out |
 
 ### Cell
 
@@ -232,7 +276,7 @@ Only what the platform provides for it is listed here.
 | Try out a requested feature for yourself first | Personal trial version |
 | Give agents jobs in your own words | Tasks through the API |
 | Guided flows: someone joins, someone leaves, a team needs a tool, create a team, give a department an app, something is broken, get something back | Requests API; execution and approval in the platform |
-| Connect your own assistant | Tool gateway, tokens |
+| Connect your own assistant | Tool gateway, tokens; later "Your own assistant over MCP" (platform and task tools, sign-in through the cell's login) |
 | Appearance per customer | - |
 | Mail, mailboxes, central launcher for all tools | - |
 

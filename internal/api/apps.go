@@ -234,12 +234,19 @@ func viewChangeFor(c *Caller, cr *cellv1.ChangeRequest) (changeView, error) {
 }
 
 func (s *Server) listApps(w http.ResponseWriter, r *http.Request, c *Caller) error {
+	only := ""
+	if err := agentApp(r.Context(), c, &only); err != nil {
+		return err
+	}
 	var list cellv1.AppList
 	if err := s.Kube.List(r.Context(), &list); err != nil {
 		return err
 	}
 	out := []appView{}
 	for i := range list.Items {
+		if only != "" && list.Items[i].Name != only {
+			continue
+		}
 		v, err := viewAppFor(c, &list.Items[i])
 		if err != nil {
 			return err
@@ -276,7 +283,8 @@ func (s *Server) record(ctx context.Context, c *Caller, w http.ResponseWriter, s
 		if spec.App != task.App {
 			return errorf(http.StatusForbidden, "task %s is about app %s, not %s", task.Name, task.App, spec.App)
 		}
-		spec.Requester.Kind = "Agent"
+		// Under its Agent's name; the task names the account.
+		spec.Requester = cellv1.Requester{Kind: "Agent", Name: agentOf(ctx).Name}
 		spec.Task = task.Name
 	}
 	spec.Approval = cellv1.Approval{Required: true}
@@ -383,6 +391,9 @@ func (s *Server) installApp(w http.ResponseWriter, r *http.Request, c *Caller) e
 		}
 	default:
 		return errorf(http.StatusBadRequest, "give catalog (an entry of GET /v0/catalog) or manifest")
+	}
+	if err := agentApp(r.Context(), c, &name); err != nil {
+		return err
 	}
 	if !appName.MatchString(name) || strings.HasPrefix(name, "cell-") {
 		return errorf(http.StatusBadRequest, "app name %q: lowercase letters, digits and dashes, at most 40, starting with a letter, not with cell- (the platform's)", name)
@@ -782,6 +793,9 @@ func (s *Server) listChanges(w http.ResponseWriter, r *http.Request, c *Caller) 
 		return err
 	}
 	app := r.URL.Query().Get("app")
+	if err := agentApp(r.Context(), c, &app); err != nil {
+		return err
+	}
 	out := []changeView{}
 	for i := range list.Items {
 		if app != "" && list.Items[i].Spec.App != app {
@@ -795,6 +809,24 @@ func (s *Server) listChanges(w http.ResponseWriter, r *http.Request, c *Caller) 
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	writeJSON(w, http.StatusOK, out)
+	return nil
+}
+
+// agentApp keeps an agent in an app's task to that app: a change's reason
+// and message can quote what the app's logs say. An empty app becomes the
+// task's; another app is refused. A cell's task reads the whole log.
+//
+// Collections (apps, changes) and installs go through it too, not only the
+// routes under /v0/apps/{name}.
+func agentApp(ctx context.Context, c *Caller, app *string) error {
+	task := taskOf(ctx)
+	if c.Role != RoleAgent || task.App == "" {
+		return nil
+	}
+	if *app != "" && *app != task.App {
+		return errorf(http.StatusForbidden, "task %s is about app %s, not %s", task.Name, task.App, *app)
+	}
+	*app = task.App
 	return nil
 }
 
@@ -812,6 +844,10 @@ func (s *Server) change(ctx context.Context, name string) (*cellv1.ChangeRequest
 func (s *Server) getChange(w http.ResponseWriter, r *http.Request, c *Caller) error {
 	cr, err := s.change(r.Context(), r.PathValue("name"))
 	if err != nil {
+		return err
+	}
+	app := cr.Spec.App
+	if err := agentApp(r.Context(), c, &app); err != nil {
 		return err
 	}
 	v, err := viewChangeFor(c, cr)
