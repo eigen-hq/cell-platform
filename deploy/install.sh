@@ -136,6 +136,14 @@ if [ "$build" = 1 ]; then
   docker build -q -t "$OPERATOR_IMAGE" "$repo"
   progress "saving the image"
   docker save "$OPERATOR_IMAGE" -o "$OPERATOR_IMAGE_TAR"
+  # Every build leaves the image of the release before and an untagged
+  # image per build stage (about 2 GB); without this the disk fills.
+  # The next build then starts without cache (about 4 min on 4 cores);
+  # BuildKit (docker-buildx) with a cache limit once that is too slow.
+  progress "removing older builds"
+  docker images --format '{{.Repository}}:{{.Tag}}' "${OPERATOR_IMAGE%:*}" |
+    awk -v keep="$OPERATOR_IMAGE" '$0 != keep' | xargs -r docker rmi >/dev/null
+  docker image prune -f >/dev/null
 fi
 : "${OPERATOR_IMAGE:?OPERATOR_IMAGE must be set with OPERATOR_IMAGE_TAR}"
 
