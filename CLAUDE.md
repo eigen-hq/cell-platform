@@ -21,7 +21,7 @@ A platform that runs any self-hostable software per customer in a "cell" of its 
 - When something new runs: update `docs/status.md` with the evidence.
 - A new architecture decision or a new dependency: an entry in `docs/decisions.md`.
 - Assumptions (A-xx) may be used. If one turns out wrong or expensive: stop, state the finding and the alternative, do not rebuild silently.
-- Do not decide open points (O-xx) yourself; ask as soon as they block the current work.
+- Decide open points (O-xx) whose answer follows from the guardrails and earlier decisions; record them as E-xx and list them in your report. Ask only for real product or business choices (what customers pay, which customers, what comes first), as soon as they block the current work.
 
 ## Architecture guardrails
 
@@ -33,6 +33,7 @@ A platform that runs any self-hostable software per customer in a "cell" of its 
 6. Compose building blocks instead of building new ones. Own code only for the operator, API, agents and console.
 7. Name-neutral. No product name in identifiers, API groups, namespaces, image paths or CLI names; the technical prefix is `cell`.
 8. No secrets in the repo. Credentials are created in the cell and live there as Secrets.
+9. Swappable building blocks. Our code reaches each building block through an interface that stays: an open protocol or API (model API, MCP, A2A, OIDC, S3, Kubernetes) or one adapter of ours in one place. Replacing a building block changes that adapter, never its callers. This is why agents are provider-agnostic.
 
 ## Conventions
 
